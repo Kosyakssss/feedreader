@@ -4,6 +4,43 @@ import type { Entry, Feed } from './types.ts';
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
 const UA = 'Feedreader/1.0';
 
+const namedEntities: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+};
+
+function decodeHtmlEntities(input: string): string {
+  if (!input.includes('&')) return input;
+  return input.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]+);/g, (match, entity) => {
+    if (entity[0] === '#') {
+      const hex = entity[1]?.toLowerCase() === 'x';
+      const raw = hex ? entity.slice(2) : entity.slice(1);
+      const codepoint = Number.parseInt(raw, hex ? 16 : 10);
+      if (!Number.isFinite(codepoint) || codepoint < 0 || codepoint > 0x10ffff) return match;
+      try {
+        return String.fromCodePoint(codepoint);
+      } catch {
+        return match;
+      }
+    }
+    return namedEntities[entity.toLowerCase()] ?? match;
+  });
+}
+
+function pickText(value: any): string {
+  if (typeof value === 'string') return decodeHtmlEntities(value);
+  if (value && typeof value === 'object') {
+    if (typeof value['#text'] === 'string') return decodeHtmlEntities(value['#text']);
+    if (typeof value.__cdata === 'string') return decodeHtmlEntities(value.__cdata);
+  }
+  if (value === undefined || value === null) return '';
+  return decodeHtmlEntities(String(value));
+}
+
 function toArray<T>(v: T | T[] | undefined): T[] {
   if (!v) return [];
   return Array.isArray(v) ? v : [v];
@@ -36,10 +73,10 @@ export function parseFeed(xml: string, feedId: string): Entry[] {
   for (const item of rssItems) {
     const url = pickLink(item.link);
     entries.push({
-      id: item.guid?.['#text'] || item.guid || url || '',
+      id: pickText(item.guid?.['#text'] || item.guid || url),
       feedId,
       url,
-      title: item.title || 'Untitled',
+      title: pickText(item.title) || 'Untitled',
       published: pickDate(item.pubDate, item['dc:date']),
     });
   }
@@ -48,10 +85,10 @@ export function parseFeed(xml: string, feedId: string): Entry[] {
   for (const entry of atomEntries) {
     const url = pickLink(entry.link);
     entries.push({
-      id: entry.id || url || '',
+      id: pickText(entry.id || url),
       feedId,
       url,
-      title: entry.title?.['#text'] || entry.title || 'Untitled',
+      title: pickText(entry.title?.['#text'] || entry.title) || 'Untitled',
       published: pickDate(entry.published, entry.updated),
     });
   }
@@ -61,10 +98,10 @@ export function parseFeed(xml: string, feedId: string): Entry[] {
   for (const item of rdfItems) {
     const url = pickLink(item.link);
     entries.push({
-      id: item['@_rdf:about'] || url || '',
+      id: pickText(item['@_rdf:about'] || url),
       feedId,
       url,
-      title: item.title || 'Untitled',
+      title: pickText(item.title) || 'Untitled',
       published: pickDate(item['dc:date'], item.pubDate),
     });
   }
@@ -104,7 +141,7 @@ export function parseOPML(xml: string): { url: string; label: string }[] {
   function walk(outlines: any) {
     for (const o of toArray(outlines)) {
       if (o['@_xmlUrl']) {
-        feeds.push({ url: o['@_xmlUrl'], label: o['@_title'] || o['@_text'] || o['@_xmlUrl'] });
+        feeds.push({ url: o['@_xmlUrl'], label: pickText(o['@_title'] || o['@_text'] || o['@_xmlUrl']) });
       }
       if (o.outline) walk(o.outline);
     }

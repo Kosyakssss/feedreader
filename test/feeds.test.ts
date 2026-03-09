@@ -37,6 +37,22 @@ describe('parseFeed', () => {
     expect(entries[0].id).toBe('atom-1');
     expect(entries[0].url).toBe('https://example.com/atom-1');
   });
+
+  test('decodes HTML entities in titles', () => {
+    const xml = `<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <guid>post-2</guid>
+      <title>A Visit To ACMI&#039;s Game Worlds &amp; More</title>
+      <link>https://example.com/post-2</link>
+    </item>
+  </channel>
+</rss>`;
+    const entries = parseFeed(xml, 'feed-3');
+    expect(entries.length).toBe(1);
+    expect(entries[0].title).toBe("A Visit To ACMI's Game Worlds & More");
+  });
 });
 
 describe('parseOPML', () => {
@@ -54,5 +70,17 @@ describe('parseOPML', () => {
     expect(feeds.length).toBe(2);
     expect(feeds[0].url).toBe('https://one.example/rss');
     expect(feeds[1].url).toBe('https://two.example/atom.xml');
+  });
+
+  test('decodes HTML entities in feed labels', () => {
+    const xml = `<?xml version="1.0"?>
+<opml version="2.0">
+  <body>
+    <outline text="Dev &amp; Design" xmlUrl="https://example.com/feed.xml" />
+  </body>
+</opml>`;
+    const feeds = parseOPML(xml);
+    expect(feeds.length).toBe(1);
+    expect(feeds[0].label).toBe('Dev & Design');
   });
 });
