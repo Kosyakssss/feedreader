@@ -30,6 +30,7 @@ export function renderApp(config: Config, themes: ThemeMeta[]): string {
     display: flex; align-items: center; gap: var(--spacing-sm);
     cursor: default;
   }
+  .entry-leading-space { width: 2px; flex-shrink: 0; }
   .entry-checkbox { display: flex; align-items: center; flex-shrink: 0; }
   .entry-content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .entry-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -117,6 +118,69 @@ let searchQuery = '';
 let currentFilter = 'all';
 let currentPage = '';
 let loadLimit = 50;
+let selectionAnchorId = null;
+
+const htmlEntities = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+};
+
+function decodeEntities(value) {
+  const input = String(value || '');
+  if (!input.includes('&')) return input;
+  return input.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]+);/g, (match, entity) => {
+    if (entity[0] === '#') {
+      const hex = entity[1]?.toLowerCase() === 'x';
+      const raw = hex ? entity.slice(2) : entity.slice(1);
+      const codepoint = Number.parseInt(raw, hex ? 16 : 10);
+      if (!Number.isFinite(codepoint) || codepoint < 0 || codepoint > 0x10ffff) return match;
+      try {
+        return String.fromCodePoint(codepoint);
+      } catch {
+        return match;
+      }
+    }
+    return htmlEntities[entity.toLowerCase()] || match;
+  });
+}
+
+function titleText(entry) {
+  if (!entry._titleText) entry._titleText = decodeEntities(entry.title || '');
+  return entry._titleText;
+}
+
+function feedText(entry) {
+  if (!entry._feedText) entry._feedText = decodeEntities(entry.feedLabel || '');
+  return entry._feedText;
+}
+
+function searchText(entry) {
+  if (!entry._searchText) {
+    const title = titleText(entry);
+    const feed = feedText(entry);
+    const url = String(entry.url || '');
+    entry._searchText = (title + ' ' + feed + ' ' + url).toLowerCase();
+  }
+  return entry._searchText;
+}
+
+function searchRank(entry, tokens) {
+  const title = titleText(entry).toLowerCase();
+  const feed = feedText(entry).toLowerCase();
+  const url = String(entry.url || '').toLowerCase();
+  let score = 0;
+  for (const t of tokens) {
+    if (title.startsWith(t)) score += 40;
+    else if (title.includes(t)) score += 20;
+    else if (feed.includes(t)) score += 8;
+    else if (url.includes(t)) score += 5;
+  }
+  return score;
+}
 
 function esc(s) {
   const d = document.createElement('div');
@@ -163,8 +227,18 @@ function getFiltered(source) {
   if (currentFilter === 'unread') list = list.filter(e => !e.state?.read);
   if (currentFilter === 'read') list = list.filter(e => e.state?.read);
   if (searchQuery) {
-    const q = searchQuery.toLowerCase();
-    list = list.filter(e => e.title.toLowerCase().includes(q) || e.feedLabel.toLowerCase().includes(q));
+    const tokens = searchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    if (tokens.length > 0) {
+      list = list
+        .map(e => {
+          const hay = searchText(e);
+          if (!tokens.every(t => hay.includes(t))) return null;
+          return { e, rank: searchRank(e, tokens) };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.rank - a.rank || new Date(b.e.published).getTime() - new Date(a.e.published).getTime())
+        .map(x => x.e);
+    }
   }
   return list;
 }
@@ -174,10 +248,99 @@ function counts(source) {
   return { all: s.length, unread: s.filter(e => !e.state?.read).length, read: s.filter(e => e.state?.read).length };
 }
 
+function getCurrentSource() {
+  return currentPage === '/starred' ? entries.filter(e => e.state?.starred)
+    : currentPage.startsWith('/feed/') ? entries.filter(e => e.feedId === currentPage.slice(6))
+    : entries;
+}
+
+function getVisibleEntries() {
+  return getFiltered(getCurrentSource()).slice(0, loadLimit);
+}
+
+function openWindowUrl(url) {
+  const opened = window.open('about:blank', '_blank');
+  if (!opened) return false;
+  try {
+    opened.opener = null;
+    opened.location.replace(url);
+    return true;
+  } catch {
+    try { opened.close(); } catch {}
+    return false;
+  }
+}
+
 function openUrl(entry, alt) {
+  const url = resolveEntryOpenUrl(entry, resolveOpenMode(alt));
+  return openWindowUrl(url);
+}
+
+function resolveOpenMode(alt) {
   const defuddled = alt ? CONFIG.defaultOpenAction !== 'defuddled' : CONFIG.defaultOpenAction === 'defuddled';
-  const url = defuddled ? '/read?url=' + encodeURIComponent(entry.url) : entry.url;
-  window.open(url, '_blank', 'noopener');
+  return defuddled ? 'defuddled' : 'original';
+}
+
+function resolveEntryOpenUrl(entry, mode) {
+  return mode === 'defuddled' ? '/read?url=' + encodeURIComponent(entry.url) : entry.url;
+}
+
+function makeBulkQueueKey() {
+  return 'bulk-open:' + Date.now() + ':' + Math.random().toString(36).slice(2);
+}
+
+function openBulkQueuePage(entries, mode) {
+  const items = entries.map(entry => ({
+    id: entry.id,
+    title: titleText(entry),
+    feedLabel: feedText(entry),
+    targetUrl: resolveEntryOpenUrl(entry, mode),
+    modeLabel: mode === 'defuddled' ? 'Defuddled view' : 'Original page',
+  }));
+  const payload = JSON.stringify({ key: makeBulkQueueKey(), items });
+  const opened = window.open('about:blank', '_blank');
+  try {
+    if (!opened) return false;
+    opened.opener = null;
+    opened.name = payload;
+    opened.location.replace('/open-queue');
+  } catch {
+    try { opened && opened.close(); } catch {}
+    return false;
+  }
+  return true;
+}
+
+function bulkOpenEntries(entriesToOpen, alt) {
+  const mode = resolveOpenMode(alt);
+  const directIds = [];
+
+  for (let i = 0; i < entriesToOpen.length; i++) {
+    const entry = entriesToOpen[i];
+    if (openUrl(entry, alt)) {
+      directIds.push(entry.id);
+      continue;
+    }
+
+    const remaining = entriesToOpen.slice(i);
+    const queued = openBulkQueuePage(remaining, mode);
+    const queuedIds = queued ? remaining.map(entry2 => entry2.id) : [];
+    return {
+      blocked: true,
+      queued,
+      directIds,
+      queuedIds,
+      handledIds: directIds.concat(queuedIds),
+    };
+  }
+
+  return {
+    blocked: false,
+    queued: false,
+    directIds,
+    queuedIds: [],
+    handledIds: [...directIds],
+  };
 }
 
 function entryHtml(entry, i) {
@@ -185,12 +348,14 @@ function entryHtml(entry, i) {
   const starred = entry.state?.starred;
   const sel = selectedIds.has(entry.id);
   const foc = i === focusedIndex;
+  const displayTitle = titleText(entry);
+  const displayFeed = feedText(entry);
   return '<div class="entry-card ' + (read ? 'entry-read' : 'entry-unread') + (foc ? ' entry-focused' : '') + '" data-idx="' + i + '" data-id="' + esc(entry.id) + '">'
     + '<label class="entry-checkbox"><input type="checkbox" data-select="' + esc(entry.id) + '"' + (sel ? ' checked' : '') + '></label>'
-    + (read ? '<span class="unread-dot-spacer"></span>' : '<span class="unread-dot"></span>')
+    + '<span class="entry-leading-space" aria-hidden="true"></span>'
     + '<div class="entry-content">'
-    + '<a href="' + esc(entry.url) + '" target="_blank" rel="noopener" class="entry-title" data-entry-link="' + esc(entry.id) + '">' + esc(entry.title) + '</a>'
-    + '<span class="entry-meta">' + esc(entry.feedLabel) + ' · ' + timeAgo(entry.published) + '</span>'
+    + '<a href="' + esc(entry.url) + '" target="_blank" rel="noopener" class="entry-title" data-entry-link="' + esc(entry.id) + '">' + esc(displayTitle) + '</a>'
+    + '<span class="entry-meta">' + esc(displayFeed) + ' · ' + timeAgo(entry.published) + '</span>'
     + '</div>'
     + '<div class="entry-actions">'
     + '<button class="btn-icon btn-star' + (starred ? ' starred' : '') + '" data-star="' + esc(entry.id) + '" title="Star">★</button>'
@@ -306,6 +471,7 @@ function navigate(path, push) {
     searchQuery = '';
     currentFilter = 'all';
     selectedIds.clear();
+    selectionAnchorId = null;
     focusedIndex = -1;
     updateBulkBar();
     document.getElementById('app').innerHTML = route(path);
@@ -334,10 +500,7 @@ function updateBulkBar() {
 function reRenderList() {
   const el = document.getElementById('entry-list');
   if (!el) return;
-  const source = currentPage === '/starred' ? entries.filter(e => e.state?.starred)
-    : currentPage.startsWith('/feed/') ? entries.filter(e => e.feedId === currentPage.slice(6))
-    : entries;
-  el.innerHTML = entryListHtml(source);
+  el.innerHTML = entryListHtml(getCurrentSource());
 }
 
 async function markEntries(ids, updates) {
@@ -359,7 +522,7 @@ function bindPage() {
 
   const searchInput = app.querySelector('.search-input:not([name])') || app.querySelector('.search-input[placeholder*="Search"]');
   if (searchInput && !searchInput.getAttribute('name')) {
-    const onSearch = debounce(() => { searchQuery = searchInput.value; reRenderList(); }, 50);
+    const onSearch = debounce(() => { searchQuery = searchInput.value.trim(); reRenderList(); }, 120);
     searchInput.addEventListener('input', onSearch);
   }
 
@@ -374,8 +537,11 @@ function bindPage() {
       const id = entryLink.dataset.entryLink;
       const entry = entries.find(x => x.id === id);
       if (entry) {
-        await markEntries([id], { read: true });
-        openUrl(entry, false);
+        if (openUrl(entry, false)) {
+          void markEntries([id], { read: true });
+        } else {
+          toast('Browser blocked opening the article');
+        }
       }
       return;
     }
@@ -384,7 +550,33 @@ function bindPage() {
     if (filterBtn) { currentFilter = filterBtn.dataset.filter; loadLimit = 50; reRenderList(); app.querySelectorAll('[data-filter]').forEach(b => b.classList.toggle('active', b.dataset.filter === currentFilter)); return; }
 
     const selectBox = target.closest('[data-select]');
-    if (selectBox) { const id = selectBox.dataset.select; if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id); updateBulkBar(); return; }
+    if (selectBox) {
+      const id = selectBox.dataset.select;
+      const visible = getVisibleEntries();
+      const card = selectBox.closest('.entry-card');
+      const idx = card ? parseInt(card.dataset.idx, 10) : -1;
+      const shouldSelect = !selectedIds.has(id);
+
+      if (e.shiftKey) {
+        const anchorIdx = selectionAnchorId ? visible.findIndex(v => v.id === selectionAnchorId) : 0;
+        if (anchorIdx !== -1 && idx !== -1 && visible.length > 0) {
+          const [start, end] = anchorIdx < idx ? [anchorIdx, idx] : [idx, anchorIdx];
+          for (let i = start; i <= end; i++) {
+            if (shouldSelect) selectedIds.add(visible[i].id);
+            else selectedIds.delete(visible[i].id);
+          }
+          selectionAnchorId = id;
+          reRenderList();
+          updateBulkBar();
+          return;
+        }
+      }
+
+      if (shouldSelect) selectedIds.add(id); else selectedIds.delete(id);
+      selectionAnchorId = id;
+      updateBulkBar();
+      return;
+    }
 
     const starBtn = target.closest('[data-star]');
     if (starBtn) { const id = starBtn.dataset.star; const e2 = entries.find(x => x.id === id); await markEntries([id], { starred: !e2?.state?.starred }); return; }
@@ -403,9 +595,10 @@ function bindPage() {
         if (!confirm('Open ' + unread.length + ' tabs? Limit is ' + CONFIG.maxBulkOpen + '.\\nOpen first ' + CONFIG.maxBulkOpen + '?')) return;
         unread.splice(CONFIG.maxBulkOpen);
       }
-      const ids = unread.map(x => x.id);
-      for (const entry of unread) openUrl(entry, false);
-      await markEntries(ids, { read: true });
+      const result = bulkOpenEntries(unread, false);
+      if (result.handledIds.length > 0) await markEntries(result.handledIds, { read: true });
+      if (result.queued) toast('Queued ' + result.queuedIds.length + ' articles after popup blocking');
+      else if (result.blocked) toast('Browser blocked bulk opening');
       return;
     }
 
@@ -498,26 +691,89 @@ function bindPage() {
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
-  const tag = document.activeElement?.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
-    if (e.key === 'Escape') document.activeElement.blur();
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  const active = document.activeElement;
+  const typingContext = !!active && (
+    active.matches?.('input,textarea,select,[contenteditable="true"]')
+  );
+  if (typingContext) {
+    if (e.key === 'Escape') {
+      active.blur();
+      e.preventDefault();
+    }
     return;
   }
 
   const filtered = getFiltered();
+  const hasFocused = focusedIndex >= 0 && focusedIndex < filtered.length;
+  const key = e.key.toLowerCase();
 
-  if (e.key === 'j') { focusedIndex = Math.min(focusedIndex + 1, Math.min(filtered.length, loadLimit) - 1); reRenderList(); const el = document.querySelector('.entry-focused'); if (el) el.scrollIntoView({ block: 'nearest' }); }
-  else if (e.key === 'k') { focusedIndex = Math.max(focusedIndex - 1, 0); reRenderList(); const el = document.querySelector('.entry-focused'); if (el) el.scrollIntoView({ block: 'nearest' }); }
-  else if (e.key === 'o' && !e.shiftKey && focusedIndex >= 0 && focusedIndex < filtered.length) { const entry = filtered[focusedIndex]; markEntries([entry.id], { read: true }); openUrl(entry, false); }
-  else if (e.key === 'O' && focusedIndex >= 0 && focusedIndex < filtered.length) { const entry = filtered[focusedIndex]; markEntries([entry.id], { read: true }); openUrl(entry, true); }
-  else if (e.key === 'm' && focusedIndex >= 0 && focusedIndex < filtered.length) { const entry = filtered[focusedIndex]; markEntries([entry.id], { read: !entry.state?.read }); }
-  else if (e.key === 's' && focusedIndex >= 0 && focusedIndex < filtered.length) { const entry = filtered[focusedIndex]; markEntries([entry.id], { starred: !entry.state?.starred }); }
-  else if (e.key === 'x' && focusedIndex >= 0 && focusedIndex < filtered.length) { const entry = filtered[focusedIndex]; if (selectedIds.has(entry.id)) selectedIds.delete(entry.id); else selectedIds.add(entry.id); updateBulkBar(); reRenderList(); }
-  else if (e.key === 'a') { const unread = filtered.filter(x => !x.state?.read); if (unread.length > 0) markEntries(unread.map(x => x.id), { read: true }); }
-  else if (e.key === 'r') { document.querySelector('[data-refresh]')?.click(); }
-  else if (e.key === '/') { e.preventDefault(); document.querySelector('.search-input')?.focus(); }
-  else if (e.key === '?') { document.getElementById('shortcuts-overlay').hidden = !document.getElementById('shortcuts-overlay').hidden; }
-  else if (e.key === 'Escape') { selectedIds.clear(); updateBulkBar(); document.getElementById('shortcuts-overlay').hidden = true; focusedIndex = -1; reRenderList(); }
+  if (key === 'j') {
+    focusedIndex = Math.min(focusedIndex + 1, Math.min(filtered.length, loadLimit) - 1);
+    if (e.shiftKey && focusedIndex >= 0 && focusedIndex < filtered.length) {
+      selectedIds.add(filtered[focusedIndex].id);
+      selectionAnchorId = filtered[focusedIndex].id;
+      updateBulkBar();
+    }
+    reRenderList();
+    const el = document.querySelector('.entry-focused');
+    if (el) el.scrollIntoView({ block: 'nearest' });
+    e.preventDefault();
+  } else if (key === 'k') {
+    focusedIndex = Math.max(focusedIndex - 1, 0);
+    if (e.shiftKey && focusedIndex >= 0 && focusedIndex < filtered.length) {
+      selectedIds.add(filtered[focusedIndex].id);
+      selectionAnchorId = filtered[focusedIndex].id;
+      updateBulkBar();
+    }
+    reRenderList();
+    const el = document.querySelector('.entry-focused');
+    if (el) el.scrollIntoView({ block: 'nearest' });
+    e.preventDefault();
+  } else if (key === 'o' && hasFocused) {
+    const entry = filtered[focusedIndex];
+    if (openUrl(entry, !!e.shiftKey)) {
+      void markEntries([entry.id], { read: true });
+    } else {
+      toast('Browser blocked opening the article');
+    }
+    e.preventDefault();
+  } else if (key === 'm' && hasFocused) {
+    const entry = filtered[focusedIndex];
+    markEntries([entry.id], { read: !entry.state?.read });
+    e.preventDefault();
+  } else if (key === 's' && hasFocused) {
+    const entry = filtered[focusedIndex];
+    markEntries([entry.id], { starred: !entry.state?.starred });
+    e.preventDefault();
+  } else if (key === 'x' && hasFocused) {
+    const entry = filtered[focusedIndex];
+    if (selectedIds.has(entry.id)) selectedIds.delete(entry.id); else selectedIds.add(entry.id);
+    updateBulkBar();
+    reRenderList();
+    e.preventDefault();
+  } else if (key === 'a') {
+    const unread = filtered.filter(x => !x.state?.read);
+    if (unread.length > 0) markEntries(unread.map(x => x.id), { read: true });
+    e.preventDefault();
+  } else if (key === 'r') {
+    document.querySelector('[data-refresh]')?.click();
+    e.preventDefault();
+  } else if (e.key === '/') {
+    document.querySelector('.search-input')?.focus();
+    e.preventDefault();
+  } else if (e.key === '?') {
+    document.getElementById('shortcuts-overlay').hidden = !document.getElementById('shortcuts-overlay').hidden;
+    e.preventDefault();
+  } else if (e.key === 'Escape') {
+    selectedIds.clear();
+    updateBulkBar();
+    document.getElementById('shortcuts-overlay').hidden = true;
+    focusedIndex = -1;
+    reRenderList();
+    e.preventDefault();
+  }
 });
 
 // Bulk bar
@@ -527,8 +783,10 @@ document.getElementById('bulk-star').onclick = () => { markEntries([...selectedI
 document.getElementById('bulk-open').onclick = () => {
   const toOpen = entries.filter(e => selectedIds.has(e.id));
   if (toOpen.length > CONFIG.maxBulkOpen && !confirm('Open ' + toOpen.length + ' tabs?')) return;
-  for (const e of toOpen) openUrl(e, false);
-  markEntries([...selectedIds], { read: true });
+  const result = bulkOpenEntries(toOpen, false);
+  if (result.handledIds.length > 0) void markEntries(result.handledIds, { read: true });
+  if (result.queued) toast('Queued ' + result.queuedIds.length + ' articles after popup blocking');
+  else if (result.blocked) toast('Browser blocked bulk opening');
   selectedIds.clear(); updateBulkBar();
 };
 document.getElementById('bulk-cancel').onclick = () => { selectedIds.clear(); updateBulkBar(); reRenderList(); };

@@ -44,6 +44,14 @@ afterAll(async () => {
 });
 
 describe('server hardening', () => {
+  test('serves the queued bulk-open fallback page', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/open-queue`);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('Queued articles');
+    expect(body).toContain('window.name');
+  });
+
   test('rejects malformed JSON in /api/state with 400', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/state`, {
       method: 'POST',

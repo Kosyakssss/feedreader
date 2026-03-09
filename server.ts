@@ -121,7 +121,7 @@ function renderReadPage(targetUrl: string): string {
 <style>
   :root { color-scheme: light dark; }
   body { margin: 0; font: 16px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; background: Canvas; color: CanvasText; }
-  .bar { position: sticky; top: 0; z-index: 10; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent); background: color-mix(in srgb, Canvas 92%, CanvasText 8%); }
+  .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 8px 14px; border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent); background: color-mix(in srgb, Canvas 92%, CanvasText 8%); }
   .bar a { color: inherit; text-decoration: none; border: 1px solid color-mix(in srgb, CanvasText 20%, transparent); border-radius: 8px; padding: 6px 10px; }
   .bar .url { opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: min(70vw, 900px); }
   .wrap { max-width: 820px; margin: 0 auto; padding: 24px 16px 40px; }
@@ -196,6 +196,99 @@ function renderReadPage(targetUrl: string): string {
 </html>`;
 }
 
+function renderOpenQueuePage(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Queued Articles</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font: 16px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; background: Canvas; color: CanvasText; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 32px 18px 56px; }
+  .hero { margin-bottom: 24px; }
+  .hero h1 { margin: 0 0 10px; font-size: clamp(1.8rem, 4vw, 2.4rem); }
+  .hero p { margin: 0; max-width: 60ch; opacity: 0.82; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 18px 0 28px; }
+  .btn, .item-link {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 8px; border-radius: 10px; padding: 10px 14px;
+    border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+    background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
+    color: inherit; text-decoration: none;
+  }
+  .list { display: grid; gap: 12px; }
+  .item {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+    border-radius: 14px; padding: 16px;
+    background: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+  }
+  .item-meta { min-width: 0; }
+  .item-title { font-weight: 700; margin-bottom: 4px; }
+  .item-subtitle { opacity: 0.72; font-size: 0.95rem; }
+  #empty { opacity: 0.8; }
+  @media (max-width: 700px) {
+    .item { flex-direction: column; align-items: stretch; }
+    .item-link { width: 100%; }
+  }
+</style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <h1>Queued articles</h1>
+      <p>Feedreader queued these articles because your browser blocked opening all tabs at once. Open them from here without losing the batch.</p>
+    </section>
+    <div class="actions">
+      <a class="btn" href="/" target="_self">Back to timeline</a>
+    </div>
+    <div id="empty" hidden>No queued articles were found for this batch.</div>
+    <div id="list" class="list" hidden></div>
+  </main>
+  <script>
+    const listEl = document.getElementById('list');
+    const emptyEl = document.getElementById('empty');
+
+    function escapeHtml(value) {
+      const div = document.createElement('div');
+      div.textContent = value || '';
+      return div.innerHTML;
+    }
+
+    try {
+      const payload = window.name || '';
+      window.name = '';
+      if (!payload) {
+        emptyEl.hidden = false;
+      } else {
+        const parsed = JSON.parse(payload);
+        const items = Array.isArray(parsed?.items) ? parsed.items : [];
+        if (!Array.isArray(items) || items.length === 0) {
+          emptyEl.hidden = false;
+        } else {
+          listEl.innerHTML = items.map(item =>
+            '<article class="item">'
+              + '<div class="item-meta">'
+              + '<div class="item-title">' + escapeHtml(item.title || 'Untitled article') + '</div>'
+              + '<div class="item-subtitle">' + escapeHtml(item.feedLabel || 'Unknown feed') + ' · ' + escapeHtml(item.modeLabel || 'Open') + '</div>'
+              + '</div>'
+              + '<a class="item-link" href="' + escapeHtml(item.targetUrl || '#') + '" target="_blank" rel="noopener">Open article ↗</a>'
+            + '</article>'
+          ).join('');
+          listEl.hidden = false;
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      emptyEl.hidden = false;
+    }
+  </script>
+</body>
+</html>`;
+}
+
 async function serveDefuddleBundle(res: import('node:http').ServerResponse) {
   try {
     const bundlePath = join(getDataDir(), '..', 'node_modules', 'defuddle', 'dist', 'index.js');
@@ -223,6 +316,11 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       parseExternalUrlOrThrow(targetUrl);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(renderReadPage(targetUrl));
+    }
+
+    if (path === '/open-queue' && method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(renderOpenQueuePage());
     }
 
     if (path === '/api/entries' && method === 'GET') {
