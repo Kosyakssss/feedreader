@@ -1,0 +1,170 @@
+/**
+ * @name Neo Print
+ * @author Codex
+ * @description Editorial high-contrast theme with serif headlines and card-heavy layout
+ */
+
+:root {
+  --bg: #f4efe6;
+  --bg-card: #fffdf9;
+  --bg-hover: #fff7e8;
+  --bg-nav: rgba(244, 239, 230, 0.92);
+  --text: #1f1a17;
+  --text-muted: #75695d;
+  --text-link: #1f1a17;
+  --accent: #b04f2f;
+  --accent-hover: #963f24;
+  --border: #decdb8;
+  --star: #c98218;
+  --unread-dot: #b04f2f;
+  --radius: 14px;
+  --font: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+  --font-mono: "SF Mono", "Cascadia Code", ui-monospace, monospace;
+  --font-size: 16px;
+  --spacing-xs: 6px;
+  --spacing-sm: 10px;
+  --spacing-md: 18px;
+  --spacing-lg: 28px;
+  --spacing-xl: 42px;
+  --shadow: 0 8px 22px rgba(52, 36, 23, 0.09);
+  --transition: 130ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #181411;
+    --bg-card: #241d18;
+    --bg-hover: #2c231d;
+    --bg-nav: rgba(24, 20, 17, 0.92);
+    --text: #f1e8dd;
+    --text-muted: #b29f8d;
+    --text-link: #f1e8dd;
+    --accent: #e07748;
+    --accent-hover: #f09061;
+    --border: #3d3128;
+    --star: #f2bf4d;
+    --unread-dot: #e07748;
+    --shadow: 0 10px 26px rgba(0, 0, 0, 0.33);
+  }
+}
+
+body {
+  background:
+    radial-gradient(circle at 85% -10%, rgba(224, 119, 72, 0.14), transparent 35%),
+    radial-gradient(circle at 0% 30%, rgba(128, 82, 45, 0.1), transparent 32%),
+    var(--bg);
+}
+
+.nav-bar {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-nav);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.nav-logo {
+  letter-spacing: 0.02em;
+  font-size: 1.02rem;
+  text-transform: uppercase;
+}
+
+.nav-link {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.nav-link.active {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+}
+
+.toolbar,
+.page-header {
+  border-bottom: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+  padding-bottom: 12px;
+}
+
+.search-input {
+  border-radius: 999px;
+  padding-inline: 14px;
+}
+
+.entry-card {
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, var(--accent) 20%);
+  box-shadow: var(--shadow);
+}
+
+.entry-read {
+  filter: grayscale(0.2);
+  opacity: 0.58;
+}
+
+.entry-unread .entry-title {
+  font-size: 1rem;
+}
+
+.entry-meta {
+  letter-spacing: 0.02em;
+}
+
+.btn,
+.filter-tabs button {
+  border-radius: 999px;
+}
+
+.btn-primary {
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.bulk-bar {
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-card) 88%, var(--accent) 12%);
+  box-shadow: 0 -8px 26px rgba(0, 0, 0, 0.15);
+}
+
+.shortcuts-panel {
+  width: min(680px, calc(100vw - 24px));
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 6px);
+  background: var(--bg-card);
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+
+kbd {
+  font-family: var(--font-mono);
+  background: color-mix(in srgb, var(--accent) 15%, var(--bg-card));
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 8px;
+  padding: 2px 7px;
+}
+
+.feed-unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 88%, #000 12%);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.toast {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 10px 12px;
+  margin-top: 8px;
+}

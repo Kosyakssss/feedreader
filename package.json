@@ -2,7 +2,8 @@
   "name": "feedreader",
   "type": "module",
   "scripts": {
-    "start": "bun server.ts"
+    "start": "bun server.ts",
+    "test": "bun test"
   },
   "dependencies": {
     "defuddle": "^0.11",

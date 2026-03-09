@@ -9,6 +9,17 @@ import {
 import { fetchAllFeeds, parseOPML, discoverFeedUrl } from './lib/feeds.ts';
 import { renderApp } from './lib/render.ts';
 import type { EnrichedEntry, StateFile } from './lib/types.ts';
+import { isSafeExternalUrl, sanitizeThemeName } from './lib/security.ts';
+
+const MAX_BODY_BYTES = 2 * 1024 * 1024;
+
+class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
 
 async function getEntries(feedFilter?: string): Promise<EnrichedEntry[]> {
   const [cache, state, feedsFile] = await Promise.all([readCache(), readState(), readFeeds()]);
@@ -44,11 +55,40 @@ async function refreshFeeds(): Promise<number> {
 
 function parseBody(req: import('node:http').IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
+    const contentLength = Number(req.headers['content-length'] || 0);
+    if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+      reject(new HttpError(413, 'Request body too large'));
+      return;
+    }
+
     const chunks: Buffer[] = [];
+    let total = 0;
     req.on('data', c => chunks.push(c));
+    req.on('data', c => {
+      total += c.length;
+      if (total > MAX_BODY_BYTES) {
+        reject(new HttpError(413, 'Request body too large'));
+        req.destroy();
+      }
+    });
     req.on('end', () => resolve(Buffer.concat(chunks).toString()));
     req.on('error', reject);
   });
+}
+
+async function parseJSONBody(req: import('node:http').IncomingMessage): Promise<any> {
+  const raw = await parseBody(req);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new HttpError(400, 'Malformed JSON body');
+  }
+}
+
+function parseExternalUrlOrThrow(rawUrl: string): URL {
+  const safe = isSafeExternalUrl(rawUrl);
+  if (!safe.ok) throw new HttpError(400, safe.reason);
+  return safe.url;
 }
 
 function json(res: import('node:http').ServerResponse, data: unknown, status = 200) {
@@ -180,6 +220,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
         return res.end('Missing url query param');
       }
+      parseExternalUrlOrThrow(targetUrl);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(renderReadPage(targetUrl));
     }
@@ -201,13 +242,17 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
 
     if (path === '/api/state' && method === 'POST') {
-      const body = JSON.parse(await parseBody(req));
+      const body = await parseJSONBody(req);
+      if (!body || typeof body !== 'object' || typeof body.entries !== 'object' || Array.isArray(body.entries)) {
+        throw new HttpError(400, 'Invalid state payload');
+      }
       const state = await readState();
       const now = Date.now();
       for (const [id, updates] of Object.entries(body.entries as Record<string, any>)) {
+        if (!updates || typeof updates !== 'object') continue;
         if (!state[id]) state[id] = {};
-        if ('read' in updates) { state[id].read = updates.read; state[id].readAt = now; }
-        if ('starred' in updates) { state[id].starred = updates.starred; state[id].starredAt = now; }
+        if ('read' in updates && typeof updates.read === 'boolean') { state[id].read = updates.read; state[id].readAt = now; }
+        if ('starred' in updates && typeof updates.starred === 'boolean') { state[id].starred = updates.starred; state[id].starredAt = now; }
       }
       await writeState(state);
       return json(res, { ok: true });
@@ -218,17 +263,28 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
 
     if (path === '/api/feeds' && method === 'POST') {
-      const body = JSON.parse(await parseBody(req));
-      let feedUrl: string = body.url;
+      const body = await parseJSONBody(req);
+      if (!body || typeof body !== 'object' || typeof body.url !== 'string') {
+        throw new HttpError(400, 'Invalid feed payload');
+      }
+      let feedUrl: string = body.url.trim();
+      if (!feedUrl) throw new HttpError(400, 'Feed URL is required');
+      parseExternalUrlOrThrow(feedUrl);
       if (!feedUrl.match(/\.(xml|rss|atom)$/i) && !feedUrl.match(/\/(feed|rss|atom)\/?$/i)) {
         const discovered = await discoverFeedUrl(feedUrl);
         if (discovered) feedUrl = discovered;
       }
+      parseExternalUrlOrThrow(feedUrl);
       const feedsFile = await readFeeds();
       if (feedsFile.feeds.some(f => f.url === feedUrl)) {
         return err(res, 'Feed already exists', 409);
       }
-      const newFeed = { id: generateId(), url: feedUrl, label: body.label || new URL(feedUrl).hostname, folderId: null };
+      const newFeed = {
+        id: generateId(),
+        url: feedUrl,
+        label: typeof body.label === 'string' && body.label.trim() ? body.label.trim() : new URL(feedUrl).hostname,
+        folderId: null,
+      };
       feedsFile.feeds.push(newFeed);
       await writeFeeds(feedsFile);
       return json(res, newFeed, 201);
@@ -282,8 +338,57 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
 
     if (path === '/api/config' && method === 'PUT') {
-      const body = JSON.parse(await parseBody(req));
-      const updated = await writeConfig(body);
+      const body = await parseJSONBody(req);
+      if (!body || typeof body !== 'object') throw new HttpError(400, 'Invalid config payload');
+
+      const patch: any = {};
+      if ('defaultOpenAction' in body) {
+        if (body.defaultOpenAction !== 'original' && body.defaultOpenAction !== 'defuddled') {
+          throw new HttpError(400, 'Invalid defaultOpenAction');
+        }
+        patch.defaultOpenAction = body.defaultOpenAction;
+      }
+      if ('maxBulkOpen' in body) {
+        if (!Number.isInteger(body.maxBulkOpen) || body.maxBulkOpen < 1 || body.maxBulkOpen > 500) {
+          throw new HttpError(400, 'Invalid maxBulkOpen');
+        }
+        patch.maxBulkOpen = body.maxBulkOpen;
+      }
+      if ('port' in body) {
+        if (!Number.isInteger(body.port) || body.port < 1 || body.port > 65535) {
+          throw new HttpError(400, 'Invalid port');
+        }
+        patch.port = body.port;
+      }
+      if ('theme' in body) {
+        if (body.theme === null || body.theme === '') {
+          patch.theme = null;
+        } else {
+          const safeTheme = sanitizeThemeName(body.theme);
+          if (!safeTheme) throw new HttpError(400, 'Invalid theme name');
+          patch.theme = safeTheme;
+        }
+      }
+      if ('retention' in body) {
+        const r = body.retention;
+        if (!r || typeof r !== 'object') throw new HttpError(400, 'Invalid retention config');
+        const retentionPatch: any = {};
+        if ('maxEntries' in r) {
+          if (!Number.isInteger(r.maxEntries) || r.maxEntries < 100 || r.maxEntries > 100000) {
+            throw new HttpError(400, 'Invalid retention.maxEntries');
+          }
+          retentionPatch.maxEntries = r.maxEntries;
+        }
+        if ('maxDays' in r) {
+          if (r.maxDays !== null && (!Number.isInteger(r.maxDays) || r.maxDays < 1 || r.maxDays > 36500)) {
+            throw new HttpError(400, 'Invalid retention.maxDays');
+          }
+          retentionPatch.maxDays = r.maxDays;
+        }
+        patch.retention = retentionPatch;
+      }
+
+      const updated = await writeConfig(patch);
       return json(res, updated);
     }
 
@@ -302,12 +407,14 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     if (path === '/api/proxy' && method === 'GET') {
       const targetUrl = url.searchParams.get('url');
       if (!targetUrl) return err(res, 'Missing url param', 400);
-      const pRes = await fetch(targetUrl, {
+      const safeTarget = parseExternalUrlOrThrow(targetUrl);
+      const pRes = await fetch(safeTarget, {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Feedreader/1.0)' },
         signal: AbortSignal.timeout(15000),
       });
       const html = await pRes.text();
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      const contentType = pRes.headers.get('content-type') || 'text/plain; charset=utf-8';
+      res.writeHead(pRes.status, { 'Content-Type': contentType });
       return res.end(html);
     }
 
@@ -322,6 +429,9 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     res.end(html);
 
   } catch (e) {
+    if (e instanceof HttpError) {
+      return err(res, e.message, e.status);
+    }
     console.error('Request error:', e);
     err(res, (e as Error).message);
   }

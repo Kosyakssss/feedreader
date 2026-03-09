@@ -1,13 +1,14 @@
 import { readdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { CacheFile, Config, FeedsFile, StateFile, ThemeMeta } from './types.ts';
+import { sanitizeThemeName } from './security.ts';
 
 const DEFAULT_CONFIG: Config = {
   maxBulkOpen: 20,
   retention: { maxEntries: 3000, maxDays: null },
   defaultOpenAction: 'original',
   theme: null,
-  port: 8080,
+  port: 8787,
 };
 
 let dataDir: string;
@@ -52,6 +53,7 @@ export async function readConfig(): Promise<Config> {
 export async function writeConfig(partial: Partial<Config>): Promise<Config> {
   const current = await readConfig();
   const updated = { ...current, ...partial, retention: { ...current.retention, ...partial.retention } };
+  updated.theme = updated.theme ? sanitizeThemeName(updated.theme) : null;
   await writeJSON('config.json', updated);
   return updated;
 }
@@ -145,8 +147,10 @@ export async function listThemes(): Promise<ThemeMeta[]> {
 }
 
 export async function readThemeCSS(name: string): Promise<string> {
+  const safeName = sanitizeThemeName(name);
+  if (!safeName) return '';
   try {
-    return await readFile(join(getDataDir(), 'themes', `${name}.css`), 'utf-8');
+    return await readFile(join(getDataDir(), 'themes', `${safeName}.css`), 'utf-8');
   } catch {
     return '';
   }
