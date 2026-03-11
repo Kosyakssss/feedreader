@@ -6,6 +6,7 @@ export function renderApp(config: Config, themes: ThemeMeta[]): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔖</text></svg>">
 <title>Feedreader</title>
 <link rel="stylesheet" href="/api/theme" id="theme-link">
 <style>
@@ -120,68 +121,6 @@ let currentPage = '';
 let loadLimit = 50;
 let selectionAnchorId = null;
 
-const htmlEntities = {
-  amp: '&',
-  lt: '<',
-  gt: '>',
-  quot: '"',
-  apos: "'",
-  nbsp: ' ',
-};
-
-function decodeEntities(value) {
-  const input = String(value || '');
-  if (!input.includes('&')) return input;
-  return input.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]+);/g, (match, entity) => {
-    if (entity[0] === '#') {
-      const hex = entity[1]?.toLowerCase() === 'x';
-      const raw = hex ? entity.slice(2) : entity.slice(1);
-      const codepoint = Number.parseInt(raw, hex ? 16 : 10);
-      if (!Number.isFinite(codepoint) || codepoint < 0 || codepoint > 0x10ffff) return match;
-      try {
-        return String.fromCodePoint(codepoint);
-      } catch {
-        return match;
-      }
-    }
-    return htmlEntities[entity.toLowerCase()] || match;
-  });
-}
-
-function titleText(entry) {
-  if (!entry._titleText) entry._titleText = decodeEntities(entry.title || '');
-  return entry._titleText;
-}
-
-function feedText(entry) {
-  if (!entry._feedText) entry._feedText = decodeEntities(entry.feedLabel || '');
-  return entry._feedText;
-}
-
-function searchText(entry) {
-  if (!entry._searchText) {
-    const title = titleText(entry);
-    const feed = feedText(entry);
-    const url = String(entry.url || '');
-    entry._searchText = (title + ' ' + feed + ' ' + url).toLowerCase();
-  }
-  return entry._searchText;
-}
-
-function searchRank(entry, tokens) {
-  const title = titleText(entry).toLowerCase();
-  const feed = feedText(entry).toLowerCase();
-  const url = String(entry.url || '').toLowerCase();
-  let score = 0;
-  for (const t of tokens) {
-    if (title.startsWith(t)) score += 40;
-    else if (title.includes(t)) score += 20;
-    else if (feed.includes(t)) score += 8;
-    else if (url.includes(t)) score += 5;
-  }
-  return score;
-}
-
 function esc(s) {
   const d = document.createElement('div');
   d.textContent = s || '';
@@ -227,17 +166,12 @@ function getFiltered(source) {
   if (currentFilter === 'unread') list = list.filter(e => !e.state?.read);
   if (currentFilter === 'read') list = list.filter(e => e.state?.read);
   if (searchQuery) {
-    const tokens = searchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const tokens = searchQuery.toLowerCase().trim().split(/\\s+/).filter(Boolean);
     if (tokens.length > 0) {
-      list = list
-        .map(e => {
-          const hay = searchText(e);
-          if (!tokens.every(t => hay.includes(t))) return null;
-          return { e, rank: searchRank(e, tokens) };
-        })
-        .filter(Boolean)
-        .sort((a, b) => b.rank - a.rank || new Date(b.e.published).getTime() - new Date(a.e.published).getTime())
-        .map(x => x.e);
+      list = list.filter(e => {
+        const hay = (e.title + ' ' + e.feedLabel + ' ' + e.url).toLowerCase();
+        return tokens.every(t => hay.includes(t));
+      });
     }
   }
   return list;
@@ -258,89 +192,10 @@ function getVisibleEntries() {
   return getFiltered(getCurrentSource()).slice(0, loadLimit);
 }
 
-function openWindowUrl(url) {
-  const opened = window.open('about:blank', '_blank');
-  if (!opened) return false;
-  try {
-    opened.opener = null;
-    opened.location.replace(url);
-    return true;
-  } catch {
-    try { opened.close(); } catch {}
-    return false;
-  }
-}
-
 function openUrl(entry, alt) {
-  const url = resolveEntryOpenUrl(entry, resolveOpenMode(alt));
-  return openWindowUrl(url);
-}
-
-function resolveOpenMode(alt) {
   const defuddled = alt ? CONFIG.defaultOpenAction !== 'defuddled' : CONFIG.defaultOpenAction === 'defuddled';
-  return defuddled ? 'defuddled' : 'original';
-}
-
-function resolveEntryOpenUrl(entry, mode) {
-  return mode === 'defuddled' ? '/read?url=' + encodeURIComponent(entry.url) : entry.url;
-}
-
-function makeBulkQueueKey() {
-  return 'bulk-open:' + Date.now() + ':' + Math.random().toString(36).slice(2);
-}
-
-function openBulkQueuePage(entries, mode) {
-  const items = entries.map(entry => ({
-    id: entry.id,
-    title: titleText(entry),
-    feedLabel: feedText(entry),
-    targetUrl: resolveEntryOpenUrl(entry, mode),
-    modeLabel: mode === 'defuddled' ? 'Defuddled view' : 'Original page',
-  }));
-  const payload = JSON.stringify({ key: makeBulkQueueKey(), items });
-  const opened = window.open('about:blank', '_blank');
-  try {
-    if (!opened) return false;
-    opened.opener = null;
-    opened.name = payload;
-    opened.location.replace('/open-queue');
-  } catch {
-    try { opened && opened.close(); } catch {}
-    return false;
-  }
-  return true;
-}
-
-function bulkOpenEntries(entriesToOpen, alt) {
-  const mode = resolveOpenMode(alt);
-  const directIds = [];
-
-  for (let i = 0; i < entriesToOpen.length; i++) {
-    const entry = entriesToOpen[i];
-    if (openUrl(entry, alt)) {
-      directIds.push(entry.id);
-      continue;
-    }
-
-    const remaining = entriesToOpen.slice(i);
-    const queued = openBulkQueuePage(remaining, mode);
-    const queuedIds = queued ? remaining.map(entry2 => entry2.id) : [];
-    return {
-      blocked: true,
-      queued,
-      directIds,
-      queuedIds,
-      handledIds: directIds.concat(queuedIds),
-    };
-  }
-
-  return {
-    blocked: false,
-    queued: false,
-    directIds,
-    queuedIds: [],
-    handledIds: [...directIds],
-  };
+  const url = defuddled ? '/read?url=' + encodeURIComponent(entry.url) : entry.url;
+  window.open(url, '_blank', 'noopener');
 }
 
 function entryHtml(entry, i) {
@@ -348,8 +203,8 @@ function entryHtml(entry, i) {
   const starred = entry.state?.starred;
   const sel = selectedIds.has(entry.id);
   const foc = i === focusedIndex;
-  const displayTitle = titleText(entry);
-  const displayFeed = feedText(entry);
+  const displayTitle = entry.title || '';
+  const displayFeed = entry.feedLabel || '';
   return '<div class="entry-card ' + (read ? 'entry-read' : 'entry-unread') + (foc ? ' entry-focused' : '') + '" data-idx="' + i + '" data-id="' + esc(entry.id) + '">'
     + '<label class="entry-checkbox"><input type="checkbox" data-select="' + esc(entry.id) + '"' + (sel ? ' checked' : '') + '></label>'
     + '<span class="entry-leading-space" aria-hidden="true"></span>'
@@ -500,7 +355,27 @@ function updateBulkBar() {
 function reRenderList() {
   const el = document.getElementById('entry-list');
   if (!el) return;
-  el.innerHTML = entryListHtml(getCurrentSource());
+  const listEl = el.querySelector('.entry-list');
+  const visible = getVisibleEntries();
+  if (!listEl || listEl.children.length !== visible.length) {
+    el.innerHTML = entryListHtml(getCurrentSource());
+    return;
+  }
+  for (let i = 0; i < visible.length; i++) {
+    const entry = visible[i];
+    const card = listEl.children[i];
+    const read = entry.state?.read;
+    const starred = entry.state?.starred;
+    const sel = selectedIds.has(entry.id);
+    const foc = i === focusedIndex;
+    card.className = 'entry-card ' + (read ? 'entry-read' : 'entry-unread') + (foc ? ' entry-focused' : '');
+    const cb = card.querySelector('input[type="checkbox"]');
+    if (cb) cb.checked = sel;
+    const starBtn = card.querySelector('.btn-star');
+    if (starBtn) starBtn.classList.toggle('starred', !!starred);
+    const markBtn = card.querySelector('.btn-mark');
+    if (markBtn) { markBtn.textContent = read ? '○' : '●'; markBtn.title = read ? 'Mark unread' : 'Mark read'; }
+  }
 }
 
 async function markEntries(ids, updates) {
@@ -514,6 +389,17 @@ async function markEntries(ids, updates) {
     }
   }
   reRenderList();
+  const toolbar = document.querySelector('.toolbar');
+  if (toolbar) {
+    const source = getCurrentSource();
+    const c = counts(source);
+    toolbar.querySelectorAll('[data-filter]').forEach(b => {
+      const f = b.dataset.filter;
+      const n = f === 'all' ? c.all : f === 'unread' ? c.unread : c.read;
+      b.textContent = f.charAt(0).toUpperCase() + f.slice(1) + ' (' + n + ')';
+      b.classList.toggle('active', f === currentFilter);
+    });
+  }
   await api('POST', '/api/state', { entries: map });
 }
 
@@ -537,11 +423,8 @@ function bindPage() {
       const id = entryLink.dataset.entryLink;
       const entry = entries.find(x => x.id === id);
       if (entry) {
-        if (openUrl(entry, false)) {
-          void markEntries([id], { read: true });
-        } else {
-          toast('Browser blocked opening the article');
-        }
+        openUrl(entry, false);
+        void markEntries([id], { read: true });
       }
       return;
     }
@@ -595,10 +478,8 @@ function bindPage() {
         if (!confirm('Open ' + unread.length + ' tabs? Limit is ' + CONFIG.maxBulkOpen + '.\\nOpen first ' + CONFIG.maxBulkOpen + '?')) return;
         unread.splice(CONFIG.maxBulkOpen);
       }
-      const result = bulkOpenEntries(unread, false);
-      if (result.handledIds.length > 0) await markEntries(result.handledIds, { read: true });
-      if (result.queued) toast('Queued ' + result.queuedIds.length + ' articles after popup blocking');
-      else if (result.blocked) toast('Browser blocked bulk opening');
+      for (const entry of unread) openUrl(entry, false);
+      await markEntries(unread.map(x => x.id), { read: true });
       return;
     }
 
@@ -615,6 +496,7 @@ function bindPage() {
     if (refreshBtn) {
       refreshBtn.disabled = true;
       refreshBtn.textContent = 'Refreshing…';
+      toast('Refreshing feeds…');
       const r = await api('POST', '/api/refresh');
       entries = await api('GET', '/api/entries');
       feeds = await api('GET', '/api/feeds');
@@ -705,11 +587,16 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  if (active && active !== document.body && !active.closest('.entry-card')) active.blur();
+
   const filtered = getFiltered();
   const hasFocused = focusedIndex >= 0 && focusedIndex < filtered.length;
   const key = e.key.toLowerCase();
 
   if (key === 'j') {
+    if (e.shiftKey && focusedIndex >= 0 && focusedIndex < filtered.length) {
+      selectedIds.add(filtered[focusedIndex].id);
+    }
     focusedIndex = Math.min(focusedIndex + 1, Math.min(filtered.length, loadLimit) - 1);
     if (e.shiftKey && focusedIndex >= 0 && focusedIndex < filtered.length) {
       selectedIds.add(filtered[focusedIndex].id);
@@ -721,6 +608,9 @@ document.addEventListener('keydown', (e) => {
     if (el) el.scrollIntoView({ block: 'nearest' });
     e.preventDefault();
   } else if (key === 'k') {
+    if (e.shiftKey && focusedIndex >= 0 && focusedIndex < filtered.length) {
+      selectedIds.add(filtered[focusedIndex].id);
+    }
     focusedIndex = Math.max(focusedIndex - 1, 0);
     if (e.shiftKey && focusedIndex >= 0 && focusedIndex < filtered.length) {
       selectedIds.add(filtered[focusedIndex].id);
@@ -733,11 +623,8 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
   } else if (key === 'o' && hasFocused) {
     const entry = filtered[focusedIndex];
-    if (openUrl(entry, !!e.shiftKey)) {
-      void markEntries([entry.id], { read: true });
-    } else {
-      toast('Browser blocked opening the article');
-    }
+    openUrl(entry, !!e.shiftKey);
+    void markEntries([entry.id], { read: true });
     e.preventDefault();
   } else if (key === 'm' && hasFocused) {
     const entry = filtered[focusedIndex];
@@ -783,11 +670,8 @@ document.getElementById('bulk-star').onclick = () => { markEntries([...selectedI
 document.getElementById('bulk-open').onclick = () => {
   const toOpen = entries.filter(e => selectedIds.has(e.id));
   if (toOpen.length > CONFIG.maxBulkOpen && !confirm('Open ' + toOpen.length + ' tabs?')) return;
-  const result = bulkOpenEntries(toOpen, false);
-  if (result.handledIds.length > 0) void markEntries(result.handledIds, { read: true });
-  if (result.queued) toast('Queued ' + result.queuedIds.length + ' articles after popup blocking');
-  else if (result.blocked) toast('Browser blocked bulk opening');
-  selectedIds.clear(); updateBulkBar();
+  for (const e of toOpen) openUrl(e, false);
+  void markEntries([...selectedIds], { read: true });
 };
 document.getElementById('bulk-cancel').onclick = () => { selectedIds.clear(); updateBulkBar(); reRenderList(); };
 
@@ -804,6 +688,27 @@ window.addEventListener('popstate', () => navigate(location.pathname, false));
 (async () => {
   [feeds, entries] = await Promise.all([api('GET', '/api/feeds'), api('GET', '/api/entries')]);
   navigate(location.pathname, false);
+
+  // Auto-refresh feeds after initial load
+  try {
+    toast('Refreshing feeds…');
+    const r = await api('POST', '/api/refresh');
+    entries = await api('GET', '/api/entries');
+    feeds = await api('GET', '/api/feeds');
+    if (r.count > 0) toast(r.count + ' new entries');
+    reRenderList();
+    const toolbar = document.querySelector('.toolbar');
+    if (toolbar) {
+      const source = getCurrentSource();
+      const c = counts(source);
+      toolbar.querySelectorAll('[data-filter]').forEach(b => {
+        const f = b.dataset.filter;
+        const n = f === 'all' ? c.all : f === 'unread' ? c.unread : c.read;
+        b.textContent = f.charAt(0).toUpperCase() + f.slice(1) + ' (' + n + ')';
+        b.classList.toggle('active', f === currentFilter);
+      });
+    }
+  } catch {}
 })();
 </script>
 </body>
