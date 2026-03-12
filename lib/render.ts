@@ -276,12 +276,15 @@ function renderFeeds() {
   html += '<form class="add-form" id="add-feed-form"><input class="search-input" name="url" placeholder="Feed or site URL…" required style="margin-bottom:0">';
   html += '<input class="search-input" name="label" placeholder="Label (optional)" style="margin-bottom:0;max-width:160px">';
   html += '<button class="btn btn-primary" type="submit">Add</button></form>';
-  html += '<div style="margin-bottom:var(--spacing-md)"><label class="btn" style="cursor:pointer"><input type="file" accept=".opml,.xml" id="opml-input" hidden>Import OPML</label></div>';
+  html += '<div style="margin-bottom:var(--spacing-md);display:flex;gap:var(--spacing-sm)"><label class="btn" style="cursor:pointer"><input type="file" accept=".opml,.xml" id="opml-input" hidden>Import OPML</label><a href="/api/feeds/export" class="btn" download="feedreader.opml">Export OPML</a></div>';
   html += '<div class="feed-list">';
   for (const f of feeds.feeds) {
     const unread = entries.filter(e => e.feedId === f.id && !e.state?.read).length;
+    const h = feeds.health?.[f.id];
+    const lastFetch = h?.lastFetched ? timeAgo(new Date(h.lastFetched).toISOString()) : 'never';
+    const healthStatus = h?.error ? '<span class="feed-error" title="' + esc(h.error) + '">⚠ Error</span>' : '<span class="feed-ok">✓ ' + lastFetch + '</span>';
     html += '<div class="feed-item"><div class="feed-info">'
-      + '<div class="feed-label">' + esc(f.label) + '</div>'
+      + '<div class="feed-label">' + esc(f.label) + ' ' + healthStatus + '</div>'
       + '<div class="feed-meta">' + esc(f.url) + '</div></div>'
       + '<div class="feed-actions">'
       + (unread > 0 ? '<span class="feed-unread-badge">' + unread + '</span>' : '')

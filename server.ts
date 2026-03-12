@@ -38,7 +38,7 @@ async function refreshFeeds(): Promise<number> {
     readFeeds(), readCache(), readState(), readConfig(),
   ]);
   const countBefore = cache.entries.length;
-  const fresh = await fetchAllFeeds(feedsFile.feeds);
+  const { entries: fresh, errors } = await fetchAllFeeds(feedsFile.feeds);
   const existing = new Set(cache.entries.map(e => e.id));
   for (const entry of fresh) {
     if (!existing.has(entry.id)) {
@@ -48,6 +48,11 @@ async function refreshFeeds(): Promise<number> {
   }
   const now = Date.now();
   for (const f of feedsFile.feeds) cache.lastFetched[f.id] = now;
+  if (!cache.feedErrors) cache.feedErrors = {};
+  for (const f of feedsFile.feeds) {
+    if (errors[f.id]) cache.feedErrors[f.id] = errors[f.id];
+    else delete cache.feedErrors[f.id];
+  }
   const pruned = pruneEntries(cache, state, config);
   await Promise.all([writeCache(pruned.cache), writeState(pruned.state)]);
   return Math.max(0, pruned.cache.entries.length - countBefore);
@@ -264,7 +269,15 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
 
     if (path === '/api/feeds' && method === 'GET') {
-      return json(res, await readFeeds());
+      const [feedsFile, cache] = await Promise.all([readFeeds(), readCache()]);
+      const health: Record<string, { lastFetched: number | null; error: string | null }> = {};
+      for (const f of feedsFile.feeds) {
+        health[f.id] = {
+          lastFetched: cache.lastFetched[f.id] || null,
+          error: cache.feedErrors?.[f.id] || null,
+        };
+      }
+      return json(res, { ...feedsFile, health });
     }
 
     if (path === '/api/feeds' && method === 'POST') {
@@ -339,6 +352,20 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       }
       await writeFeeds(feedsFile);
       return json(res, { added, skipped: imported.length - added });
+    }
+
+    if (path === '/api/feeds/export' && method === 'GET') {
+      const feedsFile = await readFeeds();
+      let opml = '<?xml version="1.0" encoding="UTF-8"?>\n<opml version="2.0">\n<head><title>Feedreader Export</title></head>\n<body>\n';
+      for (const f of feedsFile.feeds) {
+        opml += `  <outline type="rss" text="${escapeHtml(f.label)}" title="${escapeHtml(f.label)}" xmlUrl="${escapeHtml(f.url)}" />\n`;
+      }
+      opml += '</body>\n</opml>';
+      res.writeHead(200, {
+        'Content-Type': 'text/xml; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="feedreader.opml"',
+      });
+      return res.end(opml);
     }
 
     if (path === '/api/config' && method === 'GET') {

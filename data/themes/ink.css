@@ -1,22 +1,22 @@
 /**
- * @name Default
+ * @name Ink
  * @author Feedreader
- * @description Clean minimal theme with warm neutrals
+ * @description Sumi ink on washi — Japanese calligraphy-inspired warm tones
  */
 
 :root {
-  --bg: #faf9f7;
-  --bg-card: #ffffff;
-  --bg-hover: #f3f2ef;
-  --bg-nav: rgba(250, 249, 247, 0.85);
-  --text: #2c2c2c;
-  --text-muted: #8a8a8a;
-  --text-link: #2c2c2c;
-  --accent: #4a7c6f;
-  --accent-hover: #3d6b5f;
-  --border: #e8e6e1;
-  --star: #d4a843;
-  --radius: 8px;
+  --bg: #f5f0e8;
+  --bg-card: #faf6ef;
+  --bg-hover: #ede8df;
+  --bg-nav: rgba(245, 240, 232, 0.85);
+  --text: #1a1510;
+  --text-muted: #7a7060;
+  --text-link: #1a1510;
+  --accent: #2b4562;
+  --accent-hover: #1f3349;
+  --border: #ddd5c8;
+  --star: #c8963e;
+  --radius: 10px;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: "SF Mono", "Fira Code", "Cascadia Code", monospace;
   --font-size: 15px;
@@ -25,24 +25,24 @@
   --spacing-md: 16px;
   --spacing-lg: 24px;
   --spacing-xl: 32px;
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow: 0 1px 3px rgba(26, 21, 16, 0.06);
   --transition: 150ms;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #161514;
-    --bg-card: #1e1d1b;
-    --bg-hover: #282725;
-    --bg-nav: rgba(22, 21, 20, 0.85);
-    --text: #e0ddd8;
-    --text-muted: #7a7770;
-    --text-link: #e0ddd8;
-    --accent: #6db89e;
-    --accent-hover: #85ccb3;
-    --border: #2e2d2a;
-    --star: #e0b94d;
-    --shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    --bg: #0f0e0c;
+    --bg-card: #181714;
+    --bg-hover: #24221e;
+    --bg-nav: rgba(15, 14, 12, 0.85);
+    --text: #e8e0d0;
+    --text-muted: #80776a;
+    --text-link: #e8e0d0;
+    --accent: #7ba1c7;
+    --accent-hover: #9ab8d6;
+    --border: #2a2722;
+    --star: #d4a843;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   }
 }
 
@@ -239,6 +239,7 @@ body {
   font-weight: 500;
   font-size: 0.95em;
   line-height: 1.4;
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
 }
 
 .entry-title:hover {
@@ -263,7 +264,7 @@ body {
 .bulk-bar {
   background: var(--bg-card);
   border-top: 1px solid var(--border);
-  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 -2px 8px rgba(26, 21, 16, 0.06);
 }
 
 .bulk-count {
@@ -317,16 +318,17 @@ body {
   font-weight: 600;
 }
 
+/* Feed health */
 .feed-error {
-  color: #d44;
-  font-size: 0.75em;
+  color: #b34040;
+  font-size: 0.8em;
   font-weight: 500;
 }
 
 .feed-ok {
-  color: var(--text-muted);
-  font-size: 0.75em;
-  font-weight: 400;
+  color: #5a8a5a;
+  font-size: 0.8em;
+  font-weight: 500;
 }
 
 /* Settings */

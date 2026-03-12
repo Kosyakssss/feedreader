@@ -48,6 +48,7 @@ export interface Config {
 export interface CacheFile {
   entries: Entry[];
   lastFetched: Record<string, number>;
+  feedErrors: Record<string, string>;
 }
 
 export interface EnrichedEntry extends Entry {

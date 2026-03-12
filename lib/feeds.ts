@@ -109,29 +109,37 @@ export function parseFeed(xml: string, feedId: string): Entry[] {
   return entries;
 }
 
-export async function fetchFeed(feed: Feed): Promise<Entry[]> {
+export async function fetchFeed(feed: Feed): Promise<{ entries: Entry[]; error?: string }> {
   try {
     const res = await fetch(feed.url, {
       headers: { 'User-Agent': UA, Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml' },
       signal: AbortSignal.timeout(15000),
     });
-    if (!res.ok) return [];
+    if (!res.ok) return { entries: [], error: `HTTP ${res.status}` };
     const xml = await res.text();
-    return parseFeed(xml, feed.id);
+    return { entries: parseFeed(xml, feed.id) };
   } catch (e) {
-    console.error(`Failed to fetch ${feed.label} (${feed.url}):`, (e as Error).message);
-    return [];
+    const msg = (e as Error).message || 'Unknown error';
+    console.error(`Failed to fetch ${feed.label} (${feed.url}):`, msg);
+    return { entries: [], error: msg };
   }
 }
 
-export async function fetchAllFeeds(feeds: Feed[]): Promise<Entry[]> {
+export async function fetchAllFeeds(feeds: Feed[]): Promise<{ entries: Entry[]; errors: Record<string, string> }> {
   const results = await Promise.allSettled(feeds.map(f => fetchFeed(f)));
   const all: Entry[] = [];
-  for (const r of results) {
-    if (r.status === 'fulfilled') all.push(...r.value);
+  const errors: Record<string, string> = {};
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    if (r.status === 'fulfilled') {
+      all.push(...r.value.entries);
+      if (r.value.error) errors[feeds[i].id] = r.value.error;
+    } else {
+      errors[feeds[i].id] = r.reason?.message || 'Unknown error';
+    }
   }
   all.sort((a, b) => new Date(b.published).getTime() - new Date(a.published).getTime());
-  return all;
+  return { entries: all, errors };
 }
 
 export function parseOPML(xml: string): { url: string; label: string }[] {

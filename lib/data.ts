@@ -46,7 +46,7 @@ export const writeFeeds = (d: FeedsFile) => writeJSON('feeds.json', d);
 export const readState = () => readJSON<StateFile>('state.json', {});
 export const writeState = (d: StateFile) => writeJSON('state.json', d);
 
-export const readCache = () => readJSON<CacheFile>('cache.json', { entries: [], lastFetched: {} });
+export const readCache = () => readJSON<CacheFile>('cache.json', { entries: [], lastFetched: {}, feedErrors: {} });
 export const writeCache = (d: CacheFile) => writeJSON('cache.json', d);
 
 export async function readConfig(): Promise<Config> {
