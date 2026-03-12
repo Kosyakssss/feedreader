@@ -1,7 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import type { Entry, Feed } from './types.ts';
 
-const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', htmlEntities: true });
 const UA = 'Feedreader/1.0';
 
 const namedEntities: Record<string, string> = {
@@ -13,7 +13,7 @@ const namedEntities: Record<string, string> = {
   nbsp: ' ',
 };
 
-function decodeHtmlEntities(input: string): string {
+export function decodeHtmlEntities(input: string): string {
   if (!input.includes('&')) return input;
   return input.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]+);/g, (match, entity) => {
     if (entity[0] === '#') {

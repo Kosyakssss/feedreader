@@ -1,4 +1,5 @@
-import { readdir, readFile, writeFile, unlink } from 'node:fs/promises';
+import { readdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import type { CacheFile, Config, FeedsFile, StateFile, ThemeMeta } from './types.ts';
 import { sanitizeThemeName } from './security.ts';
@@ -33,7 +34,10 @@ async function readJSON<T>(filename: string, fallback: T): Promise<T> {
 }
 
 async function writeJSON(filename: string, data: unknown): Promise<void> {
-  await writeFile(join(getDataDir(), filename), JSON.stringify(data, null, 2) + '\n');
+  const target = join(getDataDir(), filename);
+  const tmp = target + '.tmp.' + process.pid;
+  await writeFile(tmp, JSON.stringify(data, null, 2) + '\n');
+  await rename(tmp, target);
 }
 
 export const readFeeds = () => readJSON<FeedsFile>('feeds.json', { folders: [], feeds: [] });
@@ -93,23 +97,32 @@ export async function mergeSyncConflicts(): Promise<void> {
 }
 
 export function pruneEntries(cache: CacheFile, state: StateFile, config: Config): { cache: CacheFile; state: StateFile } {
-  let entries = cache.entries.slice().sort((a, b) =>
+  const sorted = cache.entries.slice().sort((a, b) =>
     new Date(b.published).getTime() - new Date(a.published).getTime()
   );
 
+  const starredIds = new Set(
+    Object.entries(state).filter(([, s]) => s.starred).map(([id]) => id),
+  );
+
+  let entries = sorted;
+
   if (config.retention.maxDays) {
     const cutoff = Date.now() - config.retention.maxDays * 86400000;
-    entries = entries.filter(e => new Date(e.published).getTime() >= cutoff);
+    entries = entries.filter(e => starredIds.has(e.id) || new Date(e.published).getTime() >= cutoff);
   }
 
   if (entries.length > config.retention.maxEntries) {
-    entries = entries.slice(0, config.retention.maxEntries);
+    const kept = entries.slice(0, config.retention.maxEntries);
+    const keptIds = new Set(kept.map(e => e.id));
+    const starredOverflow = entries.slice(config.retention.maxEntries).filter(e => starredIds.has(e.id) && !keptIds.has(e.id));
+    entries = [...kept, ...starredOverflow];
   }
 
-  const kept = new Set(entries.map(e => e.id));
+  const keptIds = new Set(entries.map(e => e.id));
   const prunedState: StateFile = {};
   for (const [id, s] of Object.entries(state)) {
-    if (kept.has(id)) prunedState[id] = s;
+    if (keptIds.has(id)) prunedState[id] = s;
   }
 
   return { cache: { ...cache, entries }, state: prunedState };
@@ -157,5 +170,5 @@ export async function readThemeCSS(name: string): Promise<string> {
 }
 
 export function generateId(): string {
-  return Math.random().toString(36).slice(2, 10);
+  return randomUUID();
 }

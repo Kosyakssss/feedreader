@@ -6,7 +6,7 @@ import {
   readCache, writeCache, mergeSyncConflicts, pruneEntries, listThemes,
   readThemeCSS, generateId, getDataDir,
 } from './lib/data.ts';
-import { fetchAllFeeds, parseOPML, discoverFeedUrl } from './lib/feeds.ts';
+import { fetchAllFeeds, parseOPML, discoverFeedUrl, decodeHtmlEntities } from './lib/feeds.ts';
 import { renderApp } from './lib/render.ts';
 import type { EnrichedEntry, StateFile } from './lib/types.ts';
 import { isSafeExternalUrl, sanitizeThemeName } from './lib/security.ts';
@@ -29,7 +29,7 @@ async function getEntries(feedFilter?: string): Promise<EnrichedEntry[]> {
   if (feedFilter) entries = entries.filter(e => e.feedId === feedFilter);
   return entries
     .sort((a, b) => new Date(b.published).getTime() - new Date(a.published).getTime())
-    .map(e => ({ ...e, feedLabel: feedMap[e.feedId] || 'Unknown', state: state[e.id] || {} }));
+    .map(e => ({ ...e, title: decodeHtmlEntities(e.title), feedLabel: feedMap[e.feedId] || 'Unknown', state: state[e.id] || {} }));
 }
 
 async function refreshFeeds(): Promise<number> {
@@ -63,15 +63,18 @@ function parseBody(req: import('node:http').IncomingMessage): Promise<string> {
 
     const chunks: Buffer[] = [];
     let total = 0;
+    let aborted = false;
     req.on('data', c => {
+      if (aborted) return;
       chunks.push(c);
       total += c.length;
       if (total > MAX_BODY_BYTES) {
+        aborted = true;
         reject(new HttpError(413, 'Request body too large'));
         req.destroy();
       }
     });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString()));
+    req.on('end', () => { if (!aborted) resolve(Buffer.concat(chunks).toString()); });
     req.on('error', reject);
   });
 }
@@ -196,9 +199,11 @@ function renderReadPage(targetUrl: string): string {
 </html>`;
 }
 
+const PROJECT_ROOT = new URL('.', import.meta.url).pathname;
+
 async function serveDefuddleBundle(res: import('node:http').ServerResponse) {
   try {
-    const bundlePath = join(getDataDir(), '..', 'node_modules', 'defuddle', 'dist', 'index.js');
+    const bundlePath = join(PROJECT_ROOT, 'node_modules', 'defuddle', 'dist', 'index.js');
     const code = await readFile(bundlePath, 'utf-8');
     res.writeHead(200, { 'Content-Type': 'application/javascript' });
     res.end(code);
@@ -295,9 +300,12 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       const feedsFile = await readFeeds();
       feedsFile.feeds = feedsFile.feeds.filter(f => f.id !== id);
       const cache = await readCache();
+      const removedIds = new Set(cache.entries.filter(e => e.feedId === id).map(e => e.id));
       cache.entries = cache.entries.filter(e => e.feedId !== id);
       delete cache.lastFetched[id];
-      await Promise.all([writeFeeds(feedsFile), writeCache(cache)]);
+      const state = await readState();
+      for (const rid of removedIds) delete state[rid];
+      await Promise.all([writeFeeds(feedsFile), writeCache(cache), writeState(state)]);
       return json(res, { ok: true });
     }
 
@@ -414,7 +422,10 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       });
       const html = await pRes.text();
       const contentType = pRes.headers.get('content-type') || 'text/plain; charset=utf-8';
-      res.writeHead(pRes.status, { 'Content-Type': contentType });
+      res.writeHead(pRes.status, {
+        'Content-Type': contentType,
+        'Content-Security-Policy': "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'",
+      });
       return res.end(html);
     }
 

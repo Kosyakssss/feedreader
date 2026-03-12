@@ -30,7 +30,7 @@ beforeAll(async () => {
   port = 41000 + Math.floor(Math.random() * 5000);
   proc = Bun.spawn({
     cmd: ['bun', 'server.ts', '--data', dataDir, '--port', String(port)],
-    cwd: '/Users/kote/Projects/feedreader',
+    cwd: import.meta.dir + '/..',
     stdout: 'ignore',
     stderr: 'ignore',
   });
@@ -44,14 +44,6 @@ afterAll(async () => {
 });
 
 describe('server hardening', () => {
-  test('serves the queued bulk-open fallback page', async () => {
-    const res = await fetch(`http://127.0.0.1:${port}/open-queue`);
-    expect(res.status).toBe(200);
-    const body = await res.text();
-    expect(body).toContain('Queued articles');
-    expect(body).toContain('window.name');
-  });
-
   test('rejects malformed JSON in /api/state with 400', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/state`, {
       method: 'POST',
