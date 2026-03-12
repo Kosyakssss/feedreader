@@ -201,21 +201,36 @@ body {
   transition: background var(--transition), opacity var(--transition);
 }
 
+.entry-card + .entry-card {
+  margin-top: -1px;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.entry-list .entry-card:not(:last-child) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
 .entry-card:hover {
   background: var(--bg-hover);
+  z-index: 1;
+  position: relative;
 }
 
 .entry-read {
-  opacity: 0.55;
+  opacity: 0.6;
 }
 
 .entry-read:hover {
-  opacity: 0.8;
+  opacity: 0.85;
 }
 
 .entry-focused {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+  z-index: 2;
+  position: relative;
 }
 
 .entry-title {
@@ -266,8 +281,21 @@ body {
   transition: background var(--transition);
 }
 
+.feed-item + .feed-item {
+  margin-top: -1px;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.feed-list .feed-item:not(:last-child) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
 .feed-item:hover {
   background: var(--bg-hover);
+  z-index: 1;
+  position: relative;
 }
 
 .feed-label {
@@ -405,9 +433,18 @@ body {
     font-size: 1em;
   }
 
+  .nav-links {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .nav-links::-webkit-scrollbar { display: none; }
+
   .nav-link {
     font-size: 0.8em;
-    padding: var(--spacing-xs);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    white-space: nowrap;
   }
 
   .page {
@@ -415,7 +452,7 @@ body {
   }
 
   .entry-card {
-    padding: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-sm);
   }
 
   .entry-actions {
@@ -423,7 +460,17 @@ body {
   }
 
   .btn-icon {
-    padding: 2px;
+    min-width: 36px;
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .entry-checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
   }
 
   .toolbar {
@@ -432,17 +479,24 @@ body {
 
   .timeline-actions {
     flex-wrap: wrap;
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .timeline-actions .btn {
+    flex: 1;
+    text-align: center;
   }
 
   .btn {
     font-size: 0.8em;
-    padding: var(--spacing-xs) var(--spacing-sm);
+    padding: 6px var(--spacing-sm);
   }
 
   .bulk-bar {
     flex-wrap: wrap;
     gap: var(--spacing-xs);
-    padding: var(--spacing-xs) var(--spacing-sm);
+    padding: var(--spacing-sm);
   }
 
   .feed-item {
@@ -451,7 +505,13 @@ body {
   }
 
   .feed-meta {
-    word-break: break-all;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .feed-info {
+    width: 100%;
   }
 
   .add-form {
