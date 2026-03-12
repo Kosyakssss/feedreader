@@ -1,5 +1,9 @@
 import type { Config, ThemeMeta } from './types.ts';
 
+function safeJsonForScript(data: unknown): string {
+  return JSON.stringify(data).replace(/</g, '\\u003c');
+}
+
 export function renderApp(config: Config, themes: ThemeMeta[]): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -23,15 +27,15 @@ export function renderApp(config: Config, themes: ThemeMeta[]): string {
   .nav-links { display: flex; gap: var(--spacing-xs); }
   .page { max-width: 720px; margin: 0 auto; padding: var(--spacing-md); }
   .search-input { display: block; width: 100%; margin-bottom: var(--spacing-sm); }
-  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-sm); margin-bottom: var(--spacing-sm); }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-sm); margin-bottom: var(--spacing-sm); row-gap: var(--spacing-xs); }
   .filter-tabs { display: flex; gap: var(--spacing-xs); }
   .timeline-actions { display: flex; gap: var(--spacing-xs); margin-left: auto; }
-  .entry-list { display: flex; flex-direction: column; gap: var(--spacing-xs); }
+  .entry-list { display: flex; flex-direction: column; }
   .entry-card {
     display: flex; align-items: center; gap: var(--spacing-sm);
     cursor: default;
   }
-  .entry-leading-space { width: 2px; flex-shrink: 0; }
+  .entry-leading-space { width: 2px; flex-shrink: 0; display: none; }
   .entry-checkbox { display: flex; align-items: center; flex-shrink: 0; }
   .entry-content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .entry-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -51,7 +55,7 @@ export function renderApp(config: Config, themes: ThemeMeta[]): string {
     align-items: center;
     margin-bottom: var(--spacing-md);
   }
-  .feed-list { display: flex; flex-direction: column; gap: var(--spacing-sm); }
+  .feed-list { display: flex; flex-direction: column; }
   .feed-item { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-sm); }
   .feed-info { flex: 1; min-width: 0; }
   .feed-actions { display: flex; gap: var(--spacing-xs); align-items: center; }
@@ -108,8 +112,8 @@ export function renderApp(config: Config, themes: ThemeMeta[]): string {
 <div class="toast-container" id="toast-container"></div>
 
 <script>
-const CONFIG = ${JSON.stringify(config)};
-const THEMES = ${JSON.stringify(themes)};
+const CONFIG = ${safeJsonForScript(config)};
+const THEMES = ${safeJsonForScript(themes)};
 
 let entries = [];
 let feeds = { folders: [], feeds: [] };
