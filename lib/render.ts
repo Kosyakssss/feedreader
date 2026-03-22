@@ -12,6 +12,10 @@ export function renderApp(config: Config, themes: ThemeMeta[]): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔖</text></svg>">
 <title>Feedreader</title>
+<meta name="description" content="A personal feed reader">
+<meta name="application-name" content="Feedreader">
+<meta property="og:title" content="Feedreader">
+<meta property="og:site_name" content="Feedreader">
 <link rel="stylesheet" href="/api/theme" id="theme-link">
 <style>
 @layer structural {

@@ -1,6 +1,5 @@
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+
 import {
   readFeeds, writeFeeds, readState, writeState, readConfig, writeConfig,
   readCache, writeCache, mergeSyncConflicts, pruneEntries, listThemes,
@@ -10,6 +9,7 @@ import { fetchAllFeeds, parseOPML, discoverFeedUrl, decodeHtmlEntities } from '.
 import { renderApp } from './lib/render.ts';
 import type { EnrichedEntry, StateFile } from './lib/types.ts';
 import { isSafeExternalUrl, sanitizeThemeName } from './lib/security.ts';
+import { Defuddle } from 'defuddle/node';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 let refreshing = false;
@@ -117,15 +117,27 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
-function renderReadPage(targetUrl: string): string {
-  const safeUrl = JSON.stringify(targetUrl);
+interface DefuddleResult {
+  title?: string;
+  author?: string;
+  published?: string;
+  site?: string;
+  content?: string;
+}
+
+function renderReadPage(targetUrl: string, result: DefuddleResult): string {
   const safeUrlForText = escapeHtml(targetUrl);
+  const title = result.title || '';
+  const pageTitle = title ? escapeHtml(title) + ' · Feedreader' : 'Feedreader';
+  const metaBits = [result.author, result.published, result.site].filter(Boolean);
+  const content = result.content || '<p>No readable content found.</p>';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Defuddled Reader</title>
+<title>${pageTitle}</title>
+${title ? `<meta property="og:title" content="${escapeHtml(title)}">\n` : ''}<meta property="og:site_name" content="Feedreader">
 <style>
   :root { color-scheme: light dark; }
   body { margin: 0; font: 16px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; background: Canvas; color: CanvasText; }
@@ -134,89 +146,36 @@ function renderReadPage(targetUrl: string): string {
   .bar .url { opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: min(70vw, 900px); }
   .wrap { max-width: 640px; margin: 0 auto; padding: 24px 16px 40px; line-height: 1.7; font-size: 1.05rem; }
   .meta { margin-bottom: 18px; opacity: .8; font-size: .95rem; }
-  #status { margin: 24px 0; opacity: .8; }
   article img, article video, article iframe { max-width: 100%; height: auto; }
-  article pre { overflow: auto; }
+  article pre { overflow: auto; padding: 14px 16px; border-radius: 8px; background: color-mix(in srgb, CanvasText 8%, Canvas); font-size: .9rem; line-height: 1.5; }
+  article :not(pre) > code { padding: 2px 5px; border-radius: 4px; background: color-mix(in srgb, CanvasText 8%, Canvas); font-size: .9em; }
+  article blockquote { margin: 1em 0; padding: 0 1em; border-left: 3px solid color-mix(in srgb, CanvasText 20%, transparent); }
+  article table { border-collapse: collapse; width: 100%; }
+  article th, article td { border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); padding: 6px 10px; text-align: left; }
+  article figure { margin: 1.5em 0; }
+  article figcaption { font-size: .9rem; opacity: .7; margin-top: 6px; }
 </style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark-dimmed.min.css" media="(prefers-color-scheme:dark)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css" media="(prefers-color-scheme:light)">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" defer></script>
 </head>
 <body>
   <div class="bar">
     <a href="/" target="_self">Timeline</a>
-    <a id="open-original" href="${safeUrlForText}" target="_blank" rel="noopener">Open original ↗</a>
+    <a href="${safeUrlForText}" target="_blank" rel="noopener">Open original ↗</a>
     <div class="url" title="${safeUrlForText}">${safeUrlForText}</div>
   </div>
   <main class="wrap">
-    <div id="status">Loading clean article view…</div>
-    <h1 id="title" hidden></h1>
-    <div id="meta" class="meta" hidden></div>
-    <article id="content"></article>
+    ${title ? `<h1>${escapeHtml(title)}</h1>` : ''}
+    ${metaBits.length ? `<div class="meta">${escapeHtml(metaBits.join(' · '))}</div>` : ''}
+    <article>${content}</article>
   </main>
-  <script src="/vendor/defuddle.js"></script>
-  <script>
-    const targetUrl = ${safeUrl};
-    const statusEl = document.getElementById('status');
-    const titleEl = document.getElementById('title');
-    const metaEl = document.getElementById('meta');
-    const contentEl = document.getElementById('content');
-
-    (async () => {
-      try {
-        const response = await fetch('/api/proxy?url=' + encodeURIComponent(targetUrl));
-        if (!response.ok) throw new Error('Proxy failed: ' + response.status);
-        const html = await response.text();
-
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        iframe.sandbox = 'allow-same-origin';
-        iframe.srcdoc = html;
-        document.body.appendChild(iframe);
-        await new Promise((resolve, reject) => {
-          iframe.onload = () => resolve();
-          iframe.onerror = () => reject(new Error('Failed to parse article document'));
-        });
-
-        const DefuddleCtor = window.Defuddle?.default || window.Defuddle;
-        if (!DefuddleCtor) throw new Error('Defuddle bundle not available');
-        const parser = new DefuddleCtor(iframe.contentDocument, { url: targetUrl });
-        const result = parser.parseAsync ? await parser.parseAsync() : parser.parse();
-        iframe.remove();
-
-        const title = result?.title || '';
-        const bits = [result?.author, result?.published, result?.site].filter(Boolean);
-        if (title) {
-          titleEl.textContent = title;
-          titleEl.hidden = false;
-          document.title = title + ' · Defuddled Reader';
-        }
-        if (bits.length) {
-          metaEl.textContent = bits.join(' · ');
-          metaEl.hidden = false;
-        }
-        contentEl.innerHTML = result?.content || '<p>No readable content found.</p>';
-        statusEl.remove();
-      } catch (error) {
-        statusEl.textContent = 'Could not create defuddled view. Open the original article instead.';
-        console.error(error);
-      }
-    })();
-  </script>
+  <script>document.addEventListener('DOMContentLoaded', () => { if (window.hljs) hljs.highlightAll(); });</script>
 </body>
 </html>`;
 }
 
-const PROJECT_ROOT = new URL('.', import.meta.url).pathname;
 
-async function serveDefuddleBundle(res: import('node:http').ServerResponse) {
-  try {
-    const bundlePath = join(PROJECT_ROOT, 'node_modules', 'defuddle', 'dist', 'index.js');
-    const code = await readFile(bundlePath, 'utf-8');
-    res.writeHead(200, { 'Content-Type': 'application/javascript' });
-    res.end(code);
-  } catch {
-    res.writeHead(404);
-    res.end('Not found');
-  }
-}
 
 async function handleRequest(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
@@ -230,9 +189,16 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
         return res.end('Missing url query param');
       }
-      parseExternalUrlOrThrow(targetUrl);
+      const safeTarget = parseExternalUrlOrThrow(targetUrl);
+      const pRes = await fetch(safeTarget, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Feedreader/1.0)' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!pRes.ok) throw new HttpError(502, `Upstream returned ${pRes.status}`);
+      const html = await pRes.text();
+      const result = await Defuddle(html, safeTarget.href);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      return res.end(renderReadPage(targetUrl));
+      return res.end(renderReadPage(targetUrl, result));
     }
 
     if (path === '/api/entries' && method === 'GET') {
@@ -439,7 +405,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       return res.end(css);
     }
 
-    if (path === '/api/proxy' && method === 'GET') {
+    if (path === '/api/defuddle' && method === 'GET') {
       const targetUrl = url.searchParams.get('url');
       if (!targetUrl) return err(res, 'Missing url param', 400);
       const safeTarget = parseExternalUrlOrThrow(targetUrl);
@@ -447,17 +413,16 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Feedreader/1.0)' },
         signal: AbortSignal.timeout(15000),
       });
+      if (!pRes.ok) throw new HttpError(502, `Upstream returned ${pRes.status}`);
       const html = await pRes.text();
-      const contentType = pRes.headers.get('content-type') || 'text/plain; charset=utf-8';
-      res.writeHead(pRes.status, {
-        'Content-Type': contentType,
-        'Content-Security-Policy': "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'",
+      const result = await Defuddle(html, safeTarget.href);
+      return json(res, {
+        title: result.title,
+        author: result.author,
+        published: result.published,
+        site: result.site,
+        content: result.content,
       });
-      return res.end(html);
-    }
-
-    if (path === '/vendor/defuddle.js') {
-      return await serveDefuddleBundle(res);
     }
 
     // SPA: serve the app for all non-API routes
