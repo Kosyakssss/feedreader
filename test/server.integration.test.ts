@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -53,9 +53,63 @@ describe('server hardening', () => {
     expect(res.status).toBe(400);
   });
 
-  test('blocks localhost SSRF in /api/proxy', async () => {
-    const res = await fetch(`http://127.0.0.1:${port}/api/proxy?url=http%3A%2F%2F127.0.0.1%3A${port}%2Fapi%2Ffeeds`);
+  test('blocks localhost SSRF in /read', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/read?url=http%3A%2F%2F127.0.0.1%3A${port}%2Fapi%2Ffeeds`);
     expect(res.status).toBe(400);
+  });
+
+  test('returns 404 JSON for unknown API routes', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/proxy?url=https%3A%2F%2Fexample.com`);
+    expect(res.status).toBe(404);
+    expect(res.headers.get('content-type')).toContain('application/json');
+  });
+
+  test('skips unsafe feed URLs during OPML import', async () => {
+    const form = new FormData();
+    form.append('file', new File([
+      `<?xml version="1.0"?>
+<opml version="2.0">
+  <body>
+    <outline text="Safe Feed" xmlUrl="https://example.com/feed.xml" />
+    <outline text="Local Feed" xmlUrl="http://127.0.0.1:9/rss.xml" />
+  </body>
+</opml>`,
+    ], 'feeds.opml', { type: 'text/xml' }));
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/feeds/import`, {
+      method: 'POST',
+      body: form,
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { added: number; skipped: number };
+    expect(body).toEqual({ added: 1, skipped: 1 });
+
+    const feedsRes = await fetch(`http://127.0.0.1:${port}/api/feeds`);
+    const feeds = await feedsRes.json() as { feeds: Array<{ url: string }> };
+    expect(feeds.feeds.map(feed => feed.url)).toEqual(['https://example.com/feed.xml']);
+  });
+
+  test('preserves concurrent state updates', async () => {
+    const requests: Promise<Response>[] = [];
+    for (let i = 0; i < 20; i++) {
+      requests.push(fetch(`http://127.0.0.1:${port}/api/state`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ entries: { a: { read: true } } }),
+      }));
+      requests.push(fetch(`http://127.0.0.1:${port}/api/state`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ entries: { b: { starred: true } } }),
+      }));
+    }
+
+    await Promise.all(requests);
+
+    const state = JSON.parse(await readFile(join(dataDir, 'state.json'), 'utf-8')) as Record<string, { read?: boolean; starred?: boolean }>;
+    expect(state.a?.read).toBeTrue();
+    expect(state.b?.starred).toBeTrue();
   });
 
   test('rejects invalid theme name in /api/config', async () => {

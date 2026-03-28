@@ -13,6 +13,10 @@ const namedEntities: Record<string, string> = {
   nbsp: ' ',
 };
 
+export function createEntryId(feedId: string, sourceId: string): string {
+  return `${feedId}:${encodeURIComponent(sourceId)}`;
+}
+
 export function decodeHtmlEntities(input: string): string {
   if (!input.includes('&')) return input;
   return input.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]+);/g, (match, entity) => {
@@ -65,6 +69,18 @@ function pickLink(link: any): string {
   return link?.['@_href'] || '';
 }
 
+function buildEntry(feedId: string, rawSourceId: string, url: string, title: string, published: string): Entry {
+  const sourceId = rawSourceId || url || `${title}:${published}`;
+  return {
+    id: createEntryId(feedId, sourceId),
+    sourceId,
+    feedId,
+    url,
+    title,
+    published,
+  };
+}
+
 export function parseFeed(xml: string, feedId: string): Entry[] {
   const doc = parser.parse(xml);
   const entries: Entry[] = [];
@@ -72,38 +88,26 @@ export function parseFeed(xml: string, feedId: string): Entry[] {
   const rssItems = toArray(doc?.rss?.channel?.item);
   for (const item of rssItems) {
     const url = pickLink(item.link);
-    entries.push({
-      id: pickText(item.guid?.['#text'] || item.guid || url),
-      feedId,
-      url,
-      title: pickText(item.title) || 'Untitled',
-      published: pickDate(item.pubDate, item['dc:date']),
-    });
+    const title = pickText(item.title) || 'Untitled';
+    const published = pickDate(item.pubDate, item['dc:date']);
+    entries.push(buildEntry(feedId, pickText(item.guid?.['#text'] || item.guid || url), url, title, published));
   }
 
   const atomEntries = toArray(doc?.feed?.entry);
   for (const entry of atomEntries) {
     const url = pickLink(entry.link);
-    entries.push({
-      id: pickText(entry.id || url),
-      feedId,
-      url,
-      title: pickText(entry.title?.['#text'] || entry.title) || 'Untitled',
-      published: pickDate(entry.published, entry.updated),
-    });
+    const title = pickText(entry.title?.['#text'] || entry.title) || 'Untitled';
+    const published = pickDate(entry.published, entry.updated);
+    entries.push(buildEntry(feedId, pickText(entry.id || url), url, title, published));
   }
 
   // RDF/RSS 1.0
   const rdfItems = toArray(doc?.['rdf:RDF']?.item);
   for (const item of rdfItems) {
     const url = pickLink(item.link);
-    entries.push({
-      id: pickText(item['@_rdf:about'] || url),
-      feedId,
-      url,
-      title: pickText(item.title) || 'Untitled',
-      published: pickDate(item['dc:date'], item.pubDate),
-    });
+    const title = pickText(item.title) || 'Untitled';
+    const published = pickDate(item['dc:date'], item.pubDate);
+    entries.push(buildEntry(feedId, pickText(item['@_rdf:about'] || url), url, title, published));
   }
 
   return entries;

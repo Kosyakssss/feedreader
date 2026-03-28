@@ -483,20 +483,20 @@ function bindPage() {
 
     const openAll = target.closest('[data-openall]');
     if (openAll) {
-      const unread = getFiltered().filter(x => !x.state?.read);
+      const unread = getFiltered(getCurrentSource()).filter(x => !x.state?.read);
       if (unread.length === 0) { toast('No unread entries'); return; }
+      const toOpen = unread.slice(0, CONFIG.maxBulkOpen);
       if (unread.length > CONFIG.maxBulkOpen) {
-        if (!confirm('Open ' + unread.length + ' tabs? Limit is ' + CONFIG.maxBulkOpen + '.\\nOpen first ' + CONFIG.maxBulkOpen + '?')) return;
-        unread.splice(CONFIG.maxBulkOpen);
+        if (!confirm(unread.length + ' unread entries. Open first ' + CONFIG.maxBulkOpen + '?')) return;
       }
-      for (const entry of unread) openUrl(entry, false);
-      await markEntries(unread.map(x => x.id), { read: true });
+      for (const entry of toOpen) openUrl(entry, false);
+      await markEntries(toOpen.map(x => x.id), { read: true });
       return;
     }
 
     const markAll = target.closest('[data-markall]');
     if (markAll) {
-      const unread = getFiltered().filter(x => !x.state?.read);
+      const unread = getFiltered(getCurrentSource()).filter(x => !x.state?.read);
       if (unread.length === 0) return;
       await markEntries(unread.map(x => x.id), { read: true });
       toast(unread.length + ' marked as read');
@@ -600,16 +600,17 @@ document.addEventListener('keydown', (e) => {
 
   if (active && active !== document.body && !active.closest('.entry-card')) active.blur();
 
-  const filtered = getFiltered();
+  const filtered = getFiltered(getCurrentSource());
   const hasFocused = focusedIndex >= 0 && focusedIndex < filtered.length;
   const key = e.key.toLowerCase();
+  const visibleMax = Math.min(filtered.length, loadLimit);
 
   if (key === 'j') {
-    if (e.shiftKey && focusedIndex >= 0 && focusedIndex < filtered.length) {
+    if (e.shiftKey && focusedIndex >= 0 && focusedIndex < visibleMax) {
       selectedIds.add(filtered[focusedIndex].id);
     }
-    focusedIndex = Math.min(focusedIndex + 1, Math.min(filtered.length, loadLimit) - 1);
-    if (e.shiftKey && focusedIndex >= 0 && focusedIndex < filtered.length) {
+    focusedIndex = Math.min(focusedIndex + 1, visibleMax - 1);
+    if (e.shiftKey && focusedIndex >= 0 && focusedIndex < visibleMax) {
       selectedIds.add(filtered[focusedIndex].id);
       selectionAnchorId = filtered[focusedIndex].id;
       updateBulkBar();
@@ -619,11 +620,11 @@ document.addEventListener('keydown', (e) => {
     if (el) el.scrollIntoView({ block: 'nearest' });
     e.preventDefault();
   } else if (key === 'k') {
-    if (e.shiftKey && focusedIndex >= 0 && focusedIndex < filtered.length) {
+    if (e.shiftKey && focusedIndex >= 0 && focusedIndex < visibleMax) {
       selectedIds.add(filtered[focusedIndex].id);
     }
     focusedIndex = Math.max(focusedIndex - 1, 0);
-    if (e.shiftKey && focusedIndex >= 0 && focusedIndex < filtered.length) {
+    if (e.shiftKey && focusedIndex >= 0 && focusedIndex < visibleMax) {
       selectedIds.add(filtered[focusedIndex].id);
       selectionAnchorId = filtered[focusedIndex].id;
       updateBulkBar();
@@ -653,7 +654,7 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
   } else if (key === 'a') {
     const unread = filtered.filter(x => !x.state?.read);
-    if (unread.length > 0) markEntries(unread.map(x => x.id), { read: true });
+    if (unread.length > 0) { markEntries(unread.map(x => x.id), { read: true }); toast(unread.length + ' marked as read'); }
     e.preventDefault();
   } else if (key === 'r') {
     document.querySelector('[data-refresh]')?.click();
@@ -679,10 +680,14 @@ document.getElementById('bulk-read').onclick = () => { markEntries([...selectedI
 document.getElementById('bulk-unread').onclick = () => { markEntries([...selectedIds], { read: false }); selectedIds.clear(); updateBulkBar(); };
 document.getElementById('bulk-star').onclick = () => { markEntries([...selectedIds], { starred: true }); selectedIds.clear(); updateBulkBar(); };
 document.getElementById('bulk-open').onclick = () => {
-  const toOpen = entries.filter(e => selectedIds.has(e.id));
-  if (toOpen.length > CONFIG.maxBulkOpen && !confirm('Open ' + toOpen.length + ' tabs?')) return;
+  let toOpen = entries.filter(e => selectedIds.has(e.id));
+  if (toOpen.length > CONFIG.maxBulkOpen) {
+    if (!confirm(toOpen.length + ' selected. Open first ' + CONFIG.maxBulkOpen + '?')) return;
+    toOpen = toOpen.slice(0, CONFIG.maxBulkOpen);
+  }
   for (const e of toOpen) openUrl(e, false);
-  void markEntries([...selectedIds], { read: true });
+  void markEntries(toOpen.map(e => e.id), { read: true });
+  selectedIds.clear(); updateBulkBar(); reRenderList();
 };
 document.getElementById('bulk-cancel').onclick = () => { selectedIds.clear(); updateBulkBar(); reRenderList(); };
 
@@ -707,18 +712,7 @@ window.addEventListener('popstate', () => navigate(location.pathname, false));
     entries = await api('GET', '/api/entries');
     feeds = await api('GET', '/api/feeds');
     if (r.count > 0) toast(r.count + ' new entries');
-    reRenderList();
-    const toolbar = document.querySelector('.toolbar');
-    if (toolbar) {
-      const source = getCurrentSource();
-      const c = counts(source);
-      toolbar.querySelectorAll('[data-filter]').forEach(b => {
-        const f = b.dataset.filter;
-        const n = f === 'all' ? c.all : f === 'unread' ? c.unread : c.read;
-        b.textContent = f.charAt(0).toUpperCase() + f.slice(1) + ' (' + n + ')';
-        b.classList.toggle('active', f === currentFilter);
-      });
-    }
+    navigate(currentPage, false);
   } catch {}
 })();
 </script>

@@ -7,9 +7,9 @@ describe('pruneEntries', () => {
     const now = Date.now();
     const cache: CacheFile = {
       entries: [
-        { id: 'a', feedId: 'f', url: 'https://a', title: 'a', published: new Date(now - 1000).toISOString() },
-        { id: 'b', feedId: 'f', url: 'https://b', title: 'b', published: new Date(now - 2000).toISOString() },
-        { id: 'c', feedId: 'f', url: 'https://c', title: 'c', published: new Date(now - 3000).toISOString() },
+        { id: 'a', sourceId: 'a', feedId: 'f', url: 'https://a', title: 'a', published: new Date(now - 1000).toISOString() },
+        { id: 'b', sourceId: 'b', feedId: 'f', url: 'https://b', title: 'b', published: new Date(now - 2000).toISOString() },
+        { id: 'c', sourceId: 'c', feedId: 'f', url: 'https://c', title: 'c', published: new Date(now - 3000).toISOString() },
       ],
       lastFetched: { f: now },
     };
@@ -31,9 +31,9 @@ describe('pruneEntries', () => {
     const now = Date.now();
     const cache: CacheFile = {
       entries: [
-        { id: 'a', feedId: 'f', url: 'https://a', title: 'a', published: new Date(now - 1000).toISOString() },
-        { id: 'b', feedId: 'f', url: 'https://b', title: 'b', published: new Date(now - 2000).toISOString() },
-        { id: 'c', feedId: 'f', url: 'https://c', title: 'c', published: new Date(now - 3000).toISOString() },
+        { id: 'a', sourceId: 'a', feedId: 'f', url: 'https://a', title: 'a', published: new Date(now - 1000).toISOString() },
+        { id: 'b', sourceId: 'b', feedId: 'f', url: 'https://b', title: 'b', published: new Date(now - 2000).toISOString() },
+        { id: 'c', sourceId: 'c', feedId: 'f', url: 'https://c', title: 'c', published: new Date(now - 3000).toISOString() },
       ],
       lastFetched: { f: now },
     };

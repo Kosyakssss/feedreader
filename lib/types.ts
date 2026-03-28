@@ -17,6 +17,7 @@ export interface Folder {
 
 export interface Entry {
   id: string;
+  sourceId?: string;
   feedId: string;
   url: string;
   title: string;

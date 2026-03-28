@@ -16,7 +16,8 @@ describe('parseFeed', () => {
 </rss>`;
     const entries = parseFeed(xml, 'feed-1');
     expect(entries.length).toBe(1);
-    expect(entries[0].id).toBe('post-1');
+    expect(entries[0].id).toBe('feed-1:post-1');
+    expect(entries[0].sourceId).toBe('post-1');
     expect(entries[0].url).toBe('https://example.com/post-1');
     expect(entries[0].title).toBe('Hello RSS');
     expect(entries[0].feedId).toBe('feed-1');
@@ -34,7 +35,8 @@ describe('parseFeed', () => {
 </feed>`;
     const entries = parseFeed(xml, 'feed-2');
     expect(entries.length).toBe(1);
-    expect(entries[0].id).toBe('atom-1');
+    expect(entries[0].id).toBe('feed-2:atom-1');
+    expect(entries[0].sourceId).toBe('atom-1');
     expect(entries[0].url).toBe('https://example.com/atom-1');
   });
 
@@ -52,6 +54,24 @@ describe('parseFeed', () => {
     const entries = parseFeed(xml, 'feed-3');
     expect(entries.length).toBe(1);
     expect(entries[0].title).toBe("A Visit To ACMI's Game Worlds & More");
+  });
+
+  test('scopes entry ids by feed', () => {
+    const xml = `<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <guid>shared-guid</guid>
+      <title>Shared</title>
+      <link>https://example.com/shared</link>
+    </item>
+  </channel>
+</rss>`;
+    const left = parseFeed(xml, 'feed-left')[0];
+    const right = parseFeed(xml, 'feed-right')[0];
+    expect(left.sourceId).toBe('shared-guid');
+    expect(right.sourceId).toBe('shared-guid');
+    expect(left.id).not.toBe(right.id);
   });
 });
 

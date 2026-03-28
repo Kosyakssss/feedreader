@@ -6,11 +6,12 @@ A local-first RSS/Atom reader that runs in the browser. Portable, pretty, lightw
 
 - **Local-first** — everything lives on disk (`data/` folder). Sync via Syncthing, iCloud, or just copy the folder. No accounts, no cloud.
 - **Minimal reading in-app** — entries open links: original page or a cleaned-up "defuddled" view. The app is a *launcher*, not a reader.
-- **Defuddle runs client-side** — the server just proxies HTML via `/api/proxy?url=...`, and the browser runs [defuddle](https://github.com/nichochar/defuddle) on it. Server stays at ~40MB idle.
+- **Defuddle runs server-side** — `/read?url=...` fetches the article, runs [defuddle](https://github.com/nichochar/defuddle) on the server, and renders the result inside an isolated sandboxed document.
 - **Runs everywhere** — uses Node.js standard APIs. Works with Bun on Mac and Node/tsx on Android via Termux. No Bun-specific APIs.
 - **Three dependencies** — `defuddle`, `fast-xml-parser`, `tsx`. That's it.
 - **Theming** — drop CSS files in `data/themes/`. The base UI is itself a theme (`default.css`). Themes use CSS custom properties and can override anything. Theme metadata lives in CSS comment headers (`@name`, `@author`, `@description`).
 - **File-synced state** — Syncthing conflict files (`state.sync-conflict-*.json`) are auto-merged using latest-timestamp-wins per entry.
+- **Safer imports/state** — feed URLs are validated on both manual add and OPML import, and entry IDs are scoped per feed so state cannot bleed across subscriptions.
 
 ## Running
 
@@ -61,9 +62,15 @@ All runtime data lives in `data/` (gitignored):
 - **Search**: instant, client-side, case-insensitive substring match on title + feed label
 - **Bulk actions**: open all unread (tab cap configurable, default 20), mark read/starred, select multiple with `x` or shift-click
 - **Feed auto-discovery**: fetches HTML, looks for `<link rel="alternate">`, tries common paths
-- **OPML import**: paste or upload OPML to add feeds in bulk
+- **OPML import**: paste or upload OPML to add feeds in bulk; unsafe/local URLs are skipped
 - **View transitions**: uses the View Transition API for page navigation — browsers that don't support it just skip the animation
 - **Retention**: default 3000 entries, configurable by count and/or max days (whichever hits first)
+
+## API Notes
+
+- Unknown `/api/*` routes return `404` JSON instead of the SPA shell.
+- `/api/defuddle?url=...` returns extracted article metadata/content as JSON.
+- `/read?url=...` is the browser-facing reading view.
 
 ## Config
 

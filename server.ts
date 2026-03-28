@@ -1,13 +1,13 @@
 import { createServer } from 'node:http';
 
 import {
-  readFeeds, writeFeeds, readState, writeState, readConfig, writeConfig,
+  readFeeds, writeFeeds, readState, updateState, readConfig, writeConfig,
   readCache, writeCache, mergeSyncConflicts, pruneEntries, listThemes,
-  readThemeCSS, generateId, getDataDir,
+  readThemeCSS, generateId,
 } from './lib/data.ts';
 import { fetchAllFeeds, parseOPML, discoverFeedUrl, decodeHtmlEntities } from './lib/feeds.ts';
 import { renderApp } from './lib/render.ts';
-import type { EnrichedEntry, StateFile } from './lib/types.ts';
+import type { EnrichedEntry } from './lib/types.ts';
 import { isSafeExternalUrl, sanitizeThemeName } from './lib/security.ts';
 import { Defuddle } from 'defuddle/node';
 
@@ -23,7 +23,8 @@ class HttpError extends Error {
 }
 
 async function getEntries(feedFilter?: string): Promise<EnrichedEntry[]> {
-  const [cache, state, feedsFile] = await Promise.all([readCache(), readState(), readFeeds()]);
+  const cache = await readCache();
+  const [state, feedsFile] = await Promise.all([readState(cache), readFeeds()]);
   const feedMap = Object.fromEntries(feedsFile.feeds.map(f => [f.id, f.label]));
   let entries = cache.entries;
   if (feedFilter) entries = entries.filter(e => e.feedId === feedFilter);
@@ -34,8 +35,8 @@ async function getEntries(feedFilter?: string): Promise<EnrichedEntry[]> {
 
 async function refreshFeeds(): Promise<number> {
   await mergeSyncConflicts();
-  const [feedsFile, cache, state, config] = await Promise.all([
-    readFeeds(), readCache(), readState(), readConfig(),
+  const [feedsFile, cache, config] = await Promise.all([
+    readFeeds(), readCache(), readConfig(),
   ]);
   const countBefore = cache.entries.length;
   const { entries: fresh, errors } = await fetchAllFeeds(feedsFile.feeds);
@@ -53,9 +54,14 @@ async function refreshFeeds(): Promise<number> {
     if (errors[f.id]) cache.feedErrors[f.id] = errors[f.id];
     else delete cache.feedErrors[f.id];
   }
-  const pruned = pruneEntries(cache, state, config);
-  await Promise.all([writeCache(pruned.cache), writeState(pruned.state)]);
-  return Math.max(0, pruned.cache.entries.length - countBefore);
+  let nextCache = cache;
+  await updateState((state) => {
+    const pruned = pruneEntries(cache, state, config);
+    nextCache = pruned.cache;
+    return pruned.state;
+  }, cache);
+  await writeCache(nextCache);
+  return Math.max(0, nextCache.entries.length - countBefore);
 }
 
 function parseBody(req: import('node:http').IncomingMessage): Promise<string> {
@@ -125,12 +131,41 @@ interface DefuddleResult {
   content?: string;
 }
 
+function renderReadDocument(targetUrl: string, content: string): string {
+  const safeUrl = escapeHtml(targetUrl);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: http: https:; media-src data: http: https:; style-src 'unsafe-inline'; font-src data: http: https:; frame-src http: https:; form-action 'none'; connect-src 'none'; script-src 'none'">
+<base href="${safeUrl}" target="_blank">
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font: 16px/1.7 system-ui, -apple-system, Segoe UI, sans-serif; background: transparent; color: CanvasText; }
+  article img, article video, article iframe { max-width: 100%; height: auto; }
+  article pre { overflow: auto; padding: 14px 16px; border-radius: 8px; background: color-mix(in srgb, CanvasText 8%, Canvas); font-size: .9rem; line-height: 1.5; }
+  article :not(pre) > code { padding: 2px 5px; border-radius: 4px; background: color-mix(in srgb, CanvasText 8%, Canvas); font-size: .9em; }
+  article blockquote { margin: 1em 0; padding: 0 1em; border-left: 3px solid color-mix(in srgb, CanvasText 20%, transparent); }
+  article table { border-collapse: collapse; width: 100%; }
+  article th, article td { border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); padding: 6px 10px; text-align: left; }
+  article figure { margin: 1.5em 0; }
+  article figcaption { font-size: .9rem; opacity: .7; margin-top: 6px; }
+  article a { color: LinkText; }
+</style>
+</head>
+<body>
+  <article>${content || '<p>No readable content found.</p>'}</article>
+</body>
+</html>`;
+}
+
 function renderReadPage(targetUrl: string, result: DefuddleResult): string {
   const safeUrlForText = escapeHtml(targetUrl);
   const title = result.title || '';
   const pageTitle = title ? escapeHtml(title) + ' · Feedreader' : 'Feedreader';
   const metaBits = [result.author, result.published, result.site].filter(Boolean);
-  const content = result.content || '<p>No readable content found.</p>';
+  const isolatedDocument = escapeHtml(renderReadDocument(targetUrl, result.content || '<p>No readable content found.</p>'));
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -146,18 +181,8 @@ ${title ? `<meta property="og:title" content="${escapeHtml(title)}">\n` : ''}<me
   .bar .url { opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: min(70vw, 900px); }
   .wrap { max-width: 640px; margin: 0 auto; padding: 24px 16px 40px; line-height: 1.7; font-size: 1.05rem; }
   .meta { margin-bottom: 18px; opacity: .8; font-size: .95rem; }
-  article img, article video, article iframe { max-width: 100%; height: auto; }
-  article pre { overflow: auto; padding: 14px 16px; border-radius: 8px; background: color-mix(in srgb, CanvasText 8%, Canvas); font-size: .9rem; line-height: 1.5; }
-  article :not(pre) > code { padding: 2px 5px; border-radius: 4px; background: color-mix(in srgb, CanvasText 8%, Canvas); font-size: .9em; }
-  article blockquote { margin: 1em 0; padding: 0 1em; border-left: 3px solid color-mix(in srgb, CanvasText 20%, transparent); }
-  article table { border-collapse: collapse; width: 100%; }
-  article th, article td { border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); padding: 6px 10px; text-align: left; }
-  article figure { margin: 1.5em 0; }
-  article figcaption { font-size: .9rem; opacity: .7; margin-top: 6px; }
+  .reader-frame { width: 100%; min-height: 70vh; border: 0; border-radius: 12px; background: transparent; }
 </style>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark-dimmed.min.css" media="(prefers-color-scheme:dark)">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css" media="(prefers-color-scheme:light)">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" defer></script>
 </head>
 <body>
   <div class="bar">
@@ -168,9 +193,24 @@ ${title ? `<meta property="og:title" content="${escapeHtml(title)}">\n` : ''}<me
   <main class="wrap">
     ${title ? `<h1>${escapeHtml(title)}</h1>` : ''}
     ${metaBits.length ? `<div class="meta">${escapeHtml(metaBits.join(' · '))}</div>` : ''}
-    <article>${content}</article>
+    <iframe id="reader-frame" class="reader-frame" sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin" referrerpolicy="no-referrer" srcdoc="${isolatedDocument}"></iframe>
   </main>
-  <script>document.addEventListener('DOMContentLoaded', () => { if (window.hljs) hljs.highlightAll(); });</script>
+  <script>
+    const frame = document.getElementById('reader-frame');
+    const resizeFrame = () => {
+      try {
+        const doc = frame.contentDocument;
+        if (!doc) return;
+        const height = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight || 0, 720);
+        frame.style.height = height + 'px';
+      } catch {}
+    };
+    frame.addEventListener('load', () => {
+      resizeFrame();
+      setTimeout(resizeFrame, 50);
+    });
+    window.addEventListener('resize', resizeFrame);
+  </script>
 </body>
 </html>`;
 }
@@ -222,15 +262,16 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       if (!body || typeof body !== 'object' || typeof body.entries !== 'object' || Array.isArray(body.entries)) {
         throw new HttpError(400, 'Invalid state payload');
       }
-      const state = await readState();
       const now = Date.now();
-      for (const [id, updates] of Object.entries(body.entries as Record<string, any>)) {
-        if (!updates || typeof updates !== 'object') continue;
-        if (!state[id]) state[id] = {};
-        if ('read' in updates && typeof updates.read === 'boolean') { state[id].read = updates.read; state[id].readAt = now; }
-        if ('starred' in updates && typeof updates.starred === 'boolean') { state[id].starred = updates.starred; state[id].starredAt = now; }
-      }
-      await writeState(state);
+      await updateState((state) => {
+        for (const [id, updates] of Object.entries(body.entries as Record<string, any>)) {
+          if (!updates || typeof updates !== 'object') continue;
+          if (!state[id]) state[id] = {};
+          if ('read' in updates && typeof updates.read === 'boolean') { state[id].read = updates.read; state[id].readAt = now; }
+          if ('starred' in updates && typeof updates.starred === 'boolean') { state[id].starred = updates.starred; state[id].starredAt = now; }
+        }
+        return state;
+      });
       return json(res, { ok: true });
     }
 
@@ -282,9 +323,11 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       const removedIds = new Set(cache.entries.filter(e => e.feedId === id).map(e => e.id));
       cache.entries = cache.entries.filter(e => e.feedId !== id);
       delete cache.lastFetched[id];
-      const state = await readState();
-      for (const rid of removedIds) delete state[rid];
-      await Promise.all([writeFeeds(feedsFile), writeCache(cache), writeState(state)]);
+      const stateUpdate = updateState((state) => {
+        for (const rid of removedIds) delete state[rid];
+        return state;
+      }, cache);
+      await Promise.all([writeFeeds(feedsFile), writeCache(cache), stateUpdate]);
       return json(res, { ok: true });
     }
 
@@ -310,11 +353,21 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       const existingUrls = new Set(feedsFile.feeds.map(f => f.url));
       let added = 0;
       for (const f of imported) {
-        if (!existingUrls.has(f.url)) {
-          feedsFile.feeds.push({ id: generateId(), url: f.url, label: f.label, folderId: null });
-          existingUrls.add(f.url);
-          added++;
+        let feedUrl: string;
+        try {
+          feedUrl = parseExternalUrlOrThrow(f.url).href;
+        } catch {
+          continue;
         }
+        if (existingUrls.has(feedUrl)) continue;
+        feedsFile.feeds.push({
+          id: generateId(),
+          url: feedUrl,
+          label: f.label || new URL(feedUrl).hostname,
+          folderId: null,
+        });
+        existingUrls.add(feedUrl);
+        added++;
       }
       await writeFeeds(feedsFile);
       return json(res, { added, skipped: imported.length - added });
@@ -423,6 +476,10 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         site: result.site,
         content: result.content,
       });
+    }
+
+    if (path.startsWith('/api/')) {
+      return err(res, 'Not found', 404);
     }
 
     // SPA: serve the app for all non-API routes
