@@ -6,7 +6,6 @@
     "test": "bun test"
   },
   "dependencies": {
-    "defuddle": "^0.11",
     "fast-xml-parser": "^5",
     "tsx": "^4"
   }

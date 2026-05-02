@@ -5,10 +5,9 @@ A local-first RSS/Atom reader that runs in the browser. Portable, pretty, lightw
 ## Philosophy
 
 - **Local-first** — everything lives on disk (`data/` folder). Sync via Syncthing, iCloud, or just copy the folder. No accounts, no cloud.
-- **Minimal reading in-app** — entries open links: original page or a cleaned-up "defuddled" view. The app is a *launcher*, not a reader.
-- **Defuddle runs server-side** — `/read?url=...` fetches the article, runs [defuddle](https://github.com/nichochar/defuddle) on the server, and renders the result inside an isolated sandboxed document.
+- **Minimal reading in-app** — entries open original links. The app is a *launcher*, not a reader.
 - **Runs everywhere** — uses Node.js standard APIs. Works with Bun on Mac and Node/tsx on Android via Termux. No Bun-specific APIs.
-- **Three dependencies** — `defuddle`, `fast-xml-parser`, `tsx`. That's it.
+- **Two dependencies** — `fast-xml-parser`, `tsx`. That's it.
 - **Theming** — drop CSS files in `data/themes/`. The base UI is itself a theme (`default.css`). Themes use CSS custom properties and can override anything. Theme metadata lives in CSS comment headers (`@name`, `@author`, `@description`).
 - **File-synced state** — Syncthing conflict files (`state.sync-conflict-*.json`) are auto-merged using latest-timestamp-wins per entry.
 - **Safer imports/state** — feed URLs are validated on both manual add and OPML import, and entry IDs are scoped per feed so state cannot bleed across subscriptions.
@@ -54,11 +53,10 @@ All runtime data lives in `data/` (gitignored):
 | `/feeds` | Feed management, add/remove/OPML import |
 | `/feed/:id` | Per-feed view |
 | `/settings` | Config (also editable by hand in `config.json`) |
-| `/read?url=...` | Defuddled reading view |
 
 ## Features
 
-- **Keyboard-driven**: `j`/`k` navigate, `o`/`O` open (default/alt), `m` toggle read, `s` toggle star, `x` select, `a` mark all read, `r` refresh, `/` search, `?` shortcuts overlay
+- **Keyboard-driven**: `j`/`k` navigate, `o` open, `m` toggle read, `s` toggle star, `x` select, `a` mark all read, `r` refresh, `/` search, `?` shortcuts overlay
 - **Search**: instant, client-side, case-insensitive substring match on title + feed label
 - **Bulk actions**: open all unread (tab cap configurable, default 20), mark read/starred, select multiple with `x` or shift-click
 - **Feed auto-discovery**: fetches HTML, looks for `<link rel="alternate">`, tries common paths
@@ -69,8 +67,6 @@ All runtime data lives in `data/` (gitignored):
 ## API Notes
 
 - Unknown `/api/*` routes return `404` JSON instead of the SPA shell.
-- `/api/defuddle?url=...` returns extracted article metadata/content as JSON.
-- `/read?url=...` is the browser-facing reading view.
 
 ## Config
 
@@ -78,7 +74,6 @@ All runtime data lives in `data/` (gitignored):
 
 ```json
 {
-  "defaultOpenAction": "original",
   "maxBulkOpen": 20,
   "retention": { "maxEntries": 3000, "maxDays": null },
   "theme": null,

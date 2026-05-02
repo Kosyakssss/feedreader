@@ -5,11 +5,10 @@ import {
   readCache, writeCache, mergeSyncConflicts, pruneEntries, listThemes,
   readThemeCSS, generateId,
 } from './lib/data.ts';
-import { fetchAllFeeds, parseOPML, discoverFeedUrl, decodeHtmlEntities } from './lib/feeds.ts';
+import { fetchAllFeeds, parseOPML, discoverFeedUrl, decodeHtmlEntities, publishedTime } from './lib/feeds.ts';
 import { renderApp } from './lib/render.ts';
 import type { EnrichedEntry } from './lib/types.ts';
 import { isSafeExternalUrl, sanitizeThemeName } from './lib/security.ts';
-import { Defuddle } from 'defuddle/node';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 let refreshing = false;
@@ -29,8 +28,21 @@ async function getEntries(feedFilter?: string): Promise<EnrichedEntry[]> {
   let entries = cache.entries;
   if (feedFilter) entries = entries.filter(e => e.feedId === feedFilter);
   return entries
-    .sort((a, b) => new Date(b.published).getTime() - new Date(a.published).getTime())
+    .slice()
+    .sort((a, b) => publishedTime(b) - publishedTime(a))
     .map(e => ({ ...e, title: decodeHtmlEntities(e.title), feedLabel: feedMap[e.feedId] || 'Unknown', state: state[e.id] || {} }));
+}
+
+async function getFeedsWithHealth() {
+  const [feedsFile, cache] = await Promise.all([readFeeds(), readCache()]);
+  const health: Record<string, { lastFetched: number | null; error: string | null }> = {};
+  for (const f of feedsFile.feeds) {
+    health[f.id] = {
+      lastFetched: cache.lastFetched[f.id] || null,
+      error: cache.feedErrors?.[f.id] || null,
+    };
+  }
+  return { ...feedsFile, health };
 }
 
 async function refreshFeeds(): Promise<number> {
@@ -123,135 +135,24 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
-interface DefuddleResult {
-  title?: string;
-  author?: string;
-  published?: string;
-  site?: string;
-  content?: string;
-}
-
-function renderReadDocument(targetUrl: string, content: string): string {
-  const safeUrl = escapeHtml(targetUrl);
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: http: https:; media-src data: http: https:; style-src 'unsafe-inline'; font-src data: http: https:; frame-src http: https:; form-action 'none'; connect-src 'none'; script-src 'none'">
-<base href="${safeUrl}" target="_blank">
-<style>
-  :root { color-scheme: light dark; }
-  body { margin: 0; font: 16px/1.7 system-ui, -apple-system, Segoe UI, sans-serif; background: transparent; color: CanvasText; }
-  article img, article video, article iframe { max-width: 100%; height: auto; }
-  article pre { overflow: auto; padding: 14px 16px; border-radius: 8px; background: color-mix(in srgb, CanvasText 8%, Canvas); font-size: .9rem; line-height: 1.5; }
-  article :not(pre) > code { padding: 2px 5px; border-radius: 4px; background: color-mix(in srgb, CanvasText 8%, Canvas); font-size: .9em; }
-  article blockquote { margin: 1em 0; padding: 0 1em; border-left: 3px solid color-mix(in srgb, CanvasText 20%, transparent); }
-  article table { border-collapse: collapse; width: 100%; }
-  article th, article td { border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); padding: 6px 10px; text-align: left; }
-  article figure { margin: 1.5em 0; }
-  article figcaption { font-size: .9rem; opacity: .7; margin-top: 6px; }
-  article a { color: LinkText; }
-</style>
-</head>
-<body>
-  <article>${content || '<p>No readable content found.</p>'}</article>
-</body>
-</html>`;
-}
-
-function renderReadPage(targetUrl: string, result: DefuddleResult): string {
-  const safeUrlForText = escapeHtml(targetUrl);
-  const title = result.title || '';
-  const pageTitle = title ? escapeHtml(title) + ' · Feedreader' : 'Feedreader';
-  const metaBits = [result.author, result.published, result.site].filter(Boolean);
-  const isolatedDocument = escapeHtml(renderReadDocument(targetUrl, result.content || '<p>No readable content found.</p>'));
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${pageTitle}</title>
-${title ? `<meta property="og:title" content="${escapeHtml(title)}">\n` : ''}<meta property="og:site_name" content="Feedreader">
-<style>
-  :root { color-scheme: light dark; }
-  body { margin: 0; font: 16px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; background: Canvas; color: CanvasText; }
-  .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 8px 14px; border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent); background: color-mix(in srgb, Canvas 92%, CanvasText 8%); }
-  .bar a { color: inherit; text-decoration: none; border: 1px solid color-mix(in srgb, CanvasText 20%, transparent); border-radius: 8px; padding: 6px 10px; }
-  .bar .url { opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: min(70vw, 900px); }
-  .wrap { max-width: 640px; margin: 0 auto; padding: 24px 16px 40px; line-height: 1.7; font-size: 1.05rem; }
-  .meta { margin-bottom: 18px; opacity: .8; font-size: .95rem; }
-  .reader-frame { width: 100%; min-height: 70vh; border: 0; border-radius: 12px; background: transparent; }
-</style>
-</head>
-<body>
-  <div class="bar">
-    <a href="/" target="_self">Timeline</a>
-    <a href="${safeUrlForText}" target="_blank" rel="noopener">Open original ↗</a>
-    <div class="url" title="${safeUrlForText}">${safeUrlForText}</div>
-  </div>
-  <main class="wrap">
-    ${title ? `<h1>${escapeHtml(title)}</h1>` : ''}
-    ${metaBits.length ? `<div class="meta">${escapeHtml(metaBits.join(' · '))}</div>` : ''}
-    <iframe id="reader-frame" class="reader-frame" sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin" referrerpolicy="no-referrer" srcdoc="${isolatedDocument}"></iframe>
-  </main>
-  <script>
-    const frame = document.getElementById('reader-frame');
-    const resizeFrame = () => {
-      try {
-        const doc = frame.contentDocument;
-        if (!doc) return;
-        const height = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight || 0, 720);
-        frame.style.height = height + 'px';
-      } catch {}
-    };
-    frame.addEventListener('load', () => {
-      resizeFrame();
-      setTimeout(resizeFrame, 50);
-    });
-    window.addEventListener('resize', resizeFrame);
-  </script>
-</body>
-</html>`;
-}
-
-
-
 async function handleRequest(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
   const path = url.pathname;
   const method = req.method || 'GET';
 
   try {
-    if (path === '/read' && method === 'GET') {
-      const targetUrl = url.searchParams.get('url');
-      if (!targetUrl) {
-        res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
-        return res.end('Missing url query param');
-      }
-      const safeTarget = parseExternalUrlOrThrow(targetUrl);
-      const pRes = await fetch(safeTarget, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Feedreader/1.0)' },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!pRes.ok) throw new HttpError(502, `Upstream returned ${pRes.status}`);
-      const html = await pRes.text();
-      const result = await Defuddle(html, safeTarget.href);
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      return res.end(renderReadPage(targetUrl, result));
-    }
-
     if (path === '/api/entries' && method === 'GET') {
       const feed = url.searchParams.get('feed') || undefined;
       return json(res, await getEntries(feed));
     }
 
     if (path === '/api/refresh' && method === 'POST') {
-      if (refreshing) return json(res, { count: 0 });
+      if (refreshing) return json(res, { count: 0, entries: await getEntries(), feeds: await getFeedsWithHealth() });
       refreshing = true;
       try {
         const count = await refreshFeeds();
-        return json(res, { count });
+        const [entries, feeds] = await Promise.all([getEntries(), getFeedsWithHealth()]);
+        return json(res, { count, entries, feeds });
       } finally {
         refreshing = false;
       }
@@ -276,15 +177,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
 
     if (path === '/api/feeds' && method === 'GET') {
-      const [feedsFile, cache] = await Promise.all([readFeeds(), readCache()]);
-      const health: Record<string, { lastFetched: number | null; error: string | null }> = {};
-      for (const f of feedsFile.feeds) {
-        health[f.id] = {
-          lastFetched: cache.lastFetched[f.id] || null,
-          error: cache.feedErrors?.[f.id] || null,
-        };
-      }
-      return json(res, { ...feedsFile, health });
+      return json(res, await getFeedsWithHealth());
     }
 
     if (path === '/api/feeds' && method === 'POST') {
@@ -396,12 +289,6 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       if (!body || typeof body !== 'object') throw new HttpError(400, 'Invalid config payload');
 
       const patch: any = {};
-      if ('defaultOpenAction' in body) {
-        if (body.defaultOpenAction !== 'original' && body.defaultOpenAction !== 'defuddled') {
-          throw new HttpError(400, 'Invalid defaultOpenAction');
-        }
-        patch.defaultOpenAction = body.defaultOpenAction;
-      }
       if ('maxBulkOpen' in body) {
         if (!Number.isInteger(body.maxBulkOpen) || body.maxBulkOpen < 1 || body.maxBulkOpen > 500) {
           throw new HttpError(400, 'Invalid maxBulkOpen');
@@ -456,26 +343,6 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       const css = await readThemeCSS(themeName);
       res.writeHead(200, { 'Content-Type': 'text/css' });
       return res.end(css);
-    }
-
-    if (path === '/api/defuddle' && method === 'GET') {
-      const targetUrl = url.searchParams.get('url');
-      if (!targetUrl) return err(res, 'Missing url param', 400);
-      const safeTarget = parseExternalUrlOrThrow(targetUrl);
-      const pRes = await fetch(safeTarget, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Feedreader/1.0)' },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!pRes.ok) throw new HttpError(502, `Upstream returned ${pRes.status}`);
-      const html = await pRes.text();
-      const result = await Defuddle(html, safeTarget.href);
-      return json(res, {
-        title: result.title,
-        author: result.author,
-        published: result.published,
-        site: result.site,
-        content: result.content,
-      });
     }
 
     if (path.startsWith('/api/')) {

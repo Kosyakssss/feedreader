@@ -3,6 +3,7 @@ import type { Entry, Feed } from './types.ts';
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', htmlEntities: true });
 const UA = 'Feedreader/1.0';
+const MAX_FEED_FETCH_CONCURRENCY = 8;
 
 const namedEntities: Record<string, string> = {
   amp: '&',
@@ -57,6 +58,11 @@ function pickDate(...candidates: (string | undefined)[]): string {
     if (!isNaN(d.getTime())) return d.toISOString();
   }
   return new Date().toISOString();
+}
+
+export function publishedTime(entry: Pick<Entry, 'published'>): number {
+  const time = Date.parse(entry.published);
+  return Number.isFinite(time) ? time : 0;
 }
 
 function pickLink(link: any): string {
@@ -130,7 +136,22 @@ export async function fetchFeed(feed: Feed): Promise<{ entries: Entry[]; error?:
 }
 
 export async function fetchAllFeeds(feeds: Feed[]): Promise<{ entries: Entry[]; errors: Record<string, string> }> {
-  const results = await Promise.allSettled(feeds.map(f => fetchFeed(f)));
+  const results: PromiseSettledResult<{ entries: Entry[]; error?: string }>[] = new Array(feeds.length);
+  let nextFeedIndex = 0;
+
+  async function worker() {
+    while (nextFeedIndex < feeds.length) {
+      const index = nextFeedIndex++;
+      results[index] = await Promise.resolve(fetchFeed(feeds[index])).then(
+        value => ({ status: 'fulfilled', value }),
+        reason => ({ status: 'rejected', reason }),
+      );
+    }
+  }
+
+  const workerCount = Math.min(MAX_FEED_FETCH_CONCURRENCY, feeds.length);
+  await Promise.all(Array.from({ length: workerCount }, worker));
+
   const all: Entry[] = [];
   const errors: Record<string, string> = {};
   for (let i = 0; i < results.length; i++) {
@@ -142,7 +163,7 @@ export async function fetchAllFeeds(feeds: Feed[]): Promise<{ entries: Entry[]; 
       errors[feeds[i].id] = r.reason?.message || 'Unknown error';
     }
   }
-  all.sort((a, b) => new Date(b.published).getTime() - new Date(a.published).getTime());
+  all.sort((a, b) => publishedTime(b) - publishedTime(a));
   return { entries: all, errors };
 }
 

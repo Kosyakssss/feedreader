@@ -99,8 +99,7 @@ export function renderApp(config: Config, themes: ThemeMeta[]): string {
     <div class="shortcuts-grid">
       <kbd>j</kbd><span>Next entry</span>
       <kbd>k</kbd><span>Previous entry</span>
-      <kbd>o</kbd><span>Open (default action)</span>
-      <kbd>O</kbd><span>Open (alt action)</span>
+      <kbd>o</kbd><span>Open entry</span>
       <kbd>m</kbd><span>Toggle read</span>
       <kbd>s</kbd><span>Toggle star</span>
       <kbd>x</kbd><span>Toggle select</span>
@@ -169,6 +168,17 @@ async function api(method, path, body) {
   return data;
 }
 
+async function refreshData() {
+  const r = await api('POST', '/api/refresh');
+  if (Array.isArray(r.entries) && r.feeds) {
+    entries = r.entries;
+    feeds = r.feeds;
+    return r;
+  }
+  [entries, feeds] = await Promise.all([api('GET', '/api/entries'), api('GET', '/api/feeds')]);
+  return r;
+}
+
 function getFiltered(source) {
   let list = source || entries;
   if (currentFilter === 'unread') list = list.filter(e => !e.state?.read);
@@ -200,10 +210,8 @@ function getVisibleEntries() {
   return getFiltered(getCurrentSource()).slice(0, loadLimit);
 }
 
-function openUrl(entry, alt) {
-  const defuddled = alt ? CONFIG.defaultOpenAction !== 'defuddled' : CONFIG.defaultOpenAction === 'defuddled';
-  const url = defuddled ? '/read?url=' + encodeURIComponent(entry.url) : entry.url;
-  window.open(url, '_blank', 'noopener');
+function openUrl(entry) {
+  window.open(entry.url, '_blank', 'noopener');
 }
 
 function entryHtml(entry, i) {
@@ -304,9 +312,6 @@ function renderFeeds() {
 function renderSettings() {
   let html = '<div class="page"><div class="page-header"><h1 class="page-title">Settings</h1></div>';
   html += '<form class="settings-form" id="settings-form">';
-  html += '<div class="settings-field"><label>Default open action</label><select name="defaultOpenAction">'
-    + '<option value="original"' + (CONFIG.defaultOpenAction === 'original' ? ' selected' : '') + '>Original page</option>'
-    + '<option value="defuddled"' + (CONFIG.defaultOpenAction === 'defuddled' ? ' selected' : '') + '>Defuddled</option></select></div>';
   html += '<div class="settings-field"><label>Max bulk open tabs</label><input name="maxBulkOpen" type="number" min="1" value="' + CONFIG.maxBulkOpen + '"></div>';
   html += '<div class="settings-field"><label>Max entries to keep</label><input name="maxEntries" type="number" min="100" value="' + CONFIG.retention.maxEntries + '"></div>';
   html += '<div class="settings-field"><label>Max entry age (days, empty = no limit)</label><input name="maxDays" type="number" min="1" value="' + (CONFIG.retention.maxDays || '') + '"></div>';
@@ -434,7 +439,7 @@ function bindPage() {
       const id = entryLink.dataset.entryLink;
       const entry = entries.find(x => x.id === id);
       if (entry) {
-        openUrl(entry, false);
+        openUrl(entry);
         void markEntries([id], { read: true });
       }
       return;
@@ -489,7 +494,7 @@ function bindPage() {
       if (unread.length > CONFIG.maxBulkOpen) {
         if (!confirm(unread.length + ' unread entries. Open first ' + CONFIG.maxBulkOpen + '?')) return;
       }
-      for (const entry of toOpen) openUrl(entry, false);
+      for (const entry of toOpen) openUrl(entry);
       await markEntries(toOpen.map(x => x.id), { read: true });
       return;
     }
@@ -508,9 +513,7 @@ function bindPage() {
       refreshBtn.disabled = true;
       refreshBtn.textContent = 'Refreshing…';
       toast('Refreshing feeds…');
-      const r = await api('POST', '/api/refresh');
-      entries = await api('GET', '/api/entries');
-      feeds = await api('GET', '/api/feeds');
+      const r = await refreshData();
       toast(r.count + ' new entries');
       navigate(currentPage, false);
       return;
@@ -566,7 +569,6 @@ function bindPage() {
       e.preventDefault();
       const fd = new FormData(settingsForm);
       const updated = {
-        defaultOpenAction: fd.get('defaultOpenAction'),
         maxBulkOpen: parseInt(fd.get('maxBulkOpen')) || 20,
         retention: {
           maxEntries: parseInt(fd.get('maxEntries')) || 3000,
@@ -635,7 +637,7 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
   } else if (key === 'o' && hasFocused) {
     const entry = filtered[focusedIndex];
-    openUrl(entry, !!e.shiftKey);
+    openUrl(entry);
     void markEntries([entry.id], { read: true });
     e.preventDefault();
   } else if (key === 'm' && hasFocused) {
@@ -685,7 +687,7 @@ document.getElementById('bulk-open').onclick = () => {
     if (!confirm(toOpen.length + ' selected. Open first ' + CONFIG.maxBulkOpen + '?')) return;
     toOpen = toOpen.slice(0, CONFIG.maxBulkOpen);
   }
-  for (const e of toOpen) openUrl(e, false);
+  for (const e of toOpen) openUrl(e);
   void markEntries(toOpen.map(e => e.id), { read: true });
   selectedIds.clear(); updateBulkBar(); reRenderList();
 };
@@ -708,9 +710,7 @@ window.addEventListener('popstate', () => navigate(location.pathname, false));
   // Auto-refresh feeds after initial load
   try {
     toast('Refreshing feeds…');
-    const r = await api('POST', '/api/refresh');
-    entries = await api('GET', '/api/entries');
-    feeds = await api('GET', '/api/feeds');
+    const r = await refreshData();
     if (r.count > 0) toast(r.count + ' new entries');
     navigate(currentPage, false);
   } catch {}

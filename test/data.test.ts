@@ -16,7 +16,6 @@ describe('pruneEntries', () => {
     const state: StateFile = { a: { read: true }, b: { read: true }, c: { read: true } };
     const config: Config = {
       maxBulkOpen: 20,
-      defaultOpenAction: 'original',
       theme: null,
       port: 8787,
       retention: { maxEntries: 2, maxDays: null },
@@ -40,7 +39,6 @@ describe('pruneEntries', () => {
     const state: StateFile = { a: { read: true }, b: { read: true }, c: { starred: true, starredAt: now } };
     const config: Config = {
       maxBulkOpen: 20,
-      defaultOpenAction: 'original',
       theme: null,
       port: 8787,
       retention: { maxEntries: 2, maxDays: null },

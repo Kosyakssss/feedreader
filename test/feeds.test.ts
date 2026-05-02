@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseFeed, parseOPML } from '../lib/feeds.ts';
+import { fetchAllFeeds, parseFeed, parseOPML } from '../lib/feeds.ts';
 
 describe('parseFeed', () => {
   test('parses RSS items', () => {
@@ -102,5 +102,53 @@ describe('parseOPML', () => {
     const feeds = parseOPML(xml);
     expect(feeds.length).toBe(1);
     expect(feeds[0].label).toBe('Dev & Design');
+  });
+});
+
+describe('fetchAllFeeds', () => {
+  test('limits concurrent feed fetches and preserves feed errors', async () => {
+    const originalFetch = globalThis.fetch;
+    let active = 0;
+    let maxActive = 0;
+
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise(r => setTimeout(r, 5));
+      active--;
+
+      if (String(url).includes('bad.example')) {
+        return new Response('nope', { status: 500 });
+      }
+
+      return new Response(`<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <guid>${url}</guid>
+      <title>${url}</title>
+      <link>${url}</link>
+      <pubDate>Mon, 01 Jan 2024 10:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>`, { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      const feeds = Array.from({ length: 12 }, (_, i) => ({
+        id: `feed-${i}`,
+        url: i === 10 ? 'https://bad.example/rss' : `https://example.com/${i}.xml`,
+        label: `Feed ${i}`,
+        folderId: null,
+      }));
+
+      const result = await fetchAllFeeds(feeds);
+
+      expect(maxActive).toBeLessThanOrEqual(8);
+      expect(result.entries.length).toBe(11);
+      expect(result.errors['feed-10']).toBe('HTTP 500');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

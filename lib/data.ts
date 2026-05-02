@@ -2,13 +2,12 @@ import { readdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import type { CacheFile, Config, Entry, EntryState, FeedsFile, StateFile, ThemeMeta } from './types.ts';
-import { createEntryId } from './feeds.ts';
+import { createEntryId, publishedTime } from './feeds.ts';
 import { sanitizeThemeName } from './security.ts';
 
 const DEFAULT_CONFIG: Config = {
   maxBulkOpen: 20,
   retention: { maxEntries: 3000, maxDays: null },
-  defaultOpenAction: 'original',
   theme: null,
   port: 8787,
 };
@@ -177,7 +176,7 @@ export async function mergeSyncConflicts(): Promise<void> {
 
 export function pruneEntries(cache: CacheFile, state: StateFile, config: Config): { cache: CacheFile; state: StateFile } {
   const sorted = cache.entries.slice().sort((a, b) =>
-    new Date(b.published).getTime() - new Date(a.published).getTime()
+    publishedTime(b) - publishedTime(a)
   );
 
   const starredIds = new Set(
@@ -188,7 +187,7 @@ export function pruneEntries(cache: CacheFile, state: StateFile, config: Config)
 
   if (config.retention.maxDays) {
     const cutoff = Date.now() - config.retention.maxDays * 86400000;
-    entries = entries.filter(e => starredIds.has(e.id) || new Date(e.published).getTime() >= cutoff);
+    entries = entries.filter(e => starredIds.has(e.id) || publishedTime(e) >= cutoff);
   }
 
   if (entries.length > config.retention.maxEntries) {

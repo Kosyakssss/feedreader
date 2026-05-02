@@ -41,7 +41,6 @@ export interface Config {
     maxEntries: number;
     maxDays: number | null;
   };
-  defaultOpenAction: 'original' | 'defuddled';
   theme: string | null;
   port: number;
 }

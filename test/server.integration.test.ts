@@ -53,11 +53,6 @@ describe('server hardening', () => {
     expect(res.status).toBe(400);
   });
 
-  test('blocks localhost SSRF in /read', async () => {
-    const res = await fetch(`http://127.0.0.1:${port}/read?url=http%3A%2F%2F127.0.0.1%3A${port}%2Fapi%2Ffeeds`);
-    expect(res.status).toBe(400);
-  });
-
   test('returns 404 JSON for unknown API routes', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/proxy?url=https%3A%2F%2Fexample.com`);
     expect(res.status).toBe(404);
@@ -130,5 +125,20 @@ describe('server hardening', () => {
     expect(res.status).toBe(200);
     const body = await res.json() as { theme: string };
     expect(body.theme).toBe('default');
+  });
+
+  test('returns refreshed entries and feed health from /api/refresh', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/refresh`, { method: 'POST' });
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      count: number;
+      entries: unknown[];
+      feeds: { feeds: unknown[]; health: Record<string, unknown> };
+    };
+    expect(typeof body.count).toBe('number');
+    expect(Array.isArray(body.entries)).toBeTrue();
+    expect(Array.isArray(body.feeds.feeds)).toBeTrue();
+    expect(body.feeds.health).toBeDefined();
   });
 });
