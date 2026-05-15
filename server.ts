@@ -11,6 +11,8 @@ import type { EnrichedEntry } from './lib/types.ts';
 import { isSafeExternalUrl, sanitizeThemeName } from './lib/security.ts';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const DEFAULT_HOST = '127.0.0.1';
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 let refreshing = false;
 
 class HttpError extends Error {
@@ -102,7 +104,20 @@ function parseBody(req: import('node:http').IncomingMessage): Promise<string> {
   });
 }
 
+function headerValue(req: import('node:http').IncomingMessage, name: string): string {
+  const value = req.headers[name.toLowerCase()];
+  return Array.isArray(value) ? value[0] || '' : value || '';
+}
+
+function hasJsonContentType(req: import('node:http').IncomingMessage): boolean {
+  const contentType = headerValue(req, 'content-type').split(';', 1)[0].trim().toLowerCase();
+  return contentType === 'application/json' || contentType.endsWith('+json');
+}
+
 async function parseJSONBody(req: import('node:http').IncomingMessage): Promise<any> {
+  if (!hasJsonContentType(req)) {
+    throw new HttpError(415, 'Content-Type must be application/json');
+  }
   const raw = await parseBody(req);
   try {
     return JSON.parse(raw);
@@ -126,6 +141,26 @@ function err(res: import('node:http').ServerResponse, msg: string, status = 500)
   json(res, { error: msg }, status);
 }
 
+function assertTrustedRequest(req: import('node:http').IncomingMessage, url: URL): void {
+  const secFetchSite = headerValue(req, 'sec-fetch-site').toLowerCase();
+  if (secFetchSite && secFetchSite !== 'same-origin' && secFetchSite !== 'same-site' && secFetchSite !== 'none') {
+    throw new HttpError(403, 'Cross-origin requests are not allowed');
+  }
+
+  const origin = headerValue(req, 'origin');
+  if (!origin) return;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    throw new HttpError(403, 'Invalid request origin');
+  }
+  if (parsed.origin !== url.origin) {
+    throw new HttpError(403, 'Cross-origin requests are not allowed');
+  }
+}
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -136,11 +171,13 @@ function escapeHtml(value: string): string {
 }
 
 async function handleRequest(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
-  const url = new URL(req.url || '/', `http://${req.headers.host}`);
-  const path = url.pathname;
-  const method = req.method || 'GET';
-
   try {
+    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const path = url.pathname;
+    const method = req.method || 'GET';
+
+    if (MUTATING_METHODS.has(method)) assertTrustedRequest(req, url);
+
     if (path === '/api/entries' && method === 'GET') {
       const feed = url.searchParams.get('feed') || undefined;
       return json(res, await getEntries(feed));
@@ -368,12 +405,15 @@ async function main() {
   const config = await readConfig();
   const portArg = process.argv.indexOf('--port');
   const port = (portArg !== -1 && process.argv[portArg + 1]) ? parseInt(process.argv[portArg + 1]) : config.port;
+  const hostArg = process.argv.indexOf('--host');
+  const host = (hostArg !== -1 && process.argv[hostArg + 1]) ? process.argv[hostArg + 1] : DEFAULT_HOST;
 
   await mergeSyncConflicts();
 
   const server = createServer(handleRequest);
-  server.listen(port, () => {
-    console.log(`Feedreader running at http://localhost:${port}`);
+  server.listen(port, host, () => {
+    const displayHost = host === DEFAULT_HOST ? 'localhost' : host;
+    console.log(`Feedreader running at http://${displayHost}:${port}`);
   });
 }
 

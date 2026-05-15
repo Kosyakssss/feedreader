@@ -44,6 +44,23 @@ afterAll(async () => {
 });
 
 describe('server hardening', () => {
+  test('rejects cross-origin mutating requests', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/refresh`, {
+      method: 'POST',
+      headers: { origin: 'https://evil.example' },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test('requires JSON content type for JSON endpoints', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/state`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: JSON.stringify({ entries: {} }),
+    });
+    expect(res.status).toBe(415);
+  });
+
   test('rejects malformed JSON in /api/state with 400', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/state`, {
       method: 'POST',
