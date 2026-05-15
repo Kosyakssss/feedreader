@@ -70,10 +70,46 @@ describe('server hardening', () => {
     expect(res.status).toBe(400);
   });
 
+  test('rejects magic state keys', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/state`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"entries":{"__proto__":{"read":true}}}',
+    });
+    expect(res.status).toBe(400);
+  });
+
   test('returns 404 JSON for unknown API routes', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/proxy?url=https%3A%2F%2Fexample.com`);
     expect(res.status).toBe(404);
     expect(res.headers.get('content-type')).toContain('application/json');
+  });
+
+  test('normalizes incomplete but valid cache JSON', async () => {
+    const cachePath = join(dataDir, 'cache.json');
+    const original = await readFile(cachePath, 'utf-8');
+    await writeFile(cachePath, '{}\n');
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/entries`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual([]);
+    } finally {
+      await writeFile(cachePath, original);
+    }
+  });
+
+  test('fails loudly on malformed cache JSON', async () => {
+    const cachePath = join(dataDir, 'cache.json');
+    const original = await readFile(cachePath, 'utf-8');
+    await writeFile(cachePath, '{bad');
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/entries`);
+      expect(res.status).toBe(500);
+      const body = await res.json() as { error: string };
+      expect(body.error).toContain('Malformed JSON in cache.json');
+    } finally {
+      await writeFile(cachePath, original);
+    }
   });
 
   test('skips unsafe feed URLs during OPML import', async () => {

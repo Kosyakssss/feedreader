@@ -6,6 +6,10 @@ export function sanitizeThemeName(name: unknown): string | null {
   return name;
 }
 
+export function isSafeObjectKey(key: string): boolean {
+  return key !== '__proto__' && key !== 'constructor' && key !== 'prototype';
+}
+
 function isPrivateIPv4(host: string): boolean {
   const parts = host.split('.').map(Number);
   if (parts.length !== 4 || parts.some(n => Number.isNaN(n) || n < 0 || n > 255)) return true;

@@ -8,7 +8,7 @@ import {
 import { fetchAllFeeds, parseOPML, discoverFeedUrl, decodeHtmlEntities, publishedTime } from './lib/feeds.ts';
 import { renderApp } from './lib/render.ts';
 import type { EnrichedEntry } from './lib/types.ts';
-import { isSafeExternalUrl, sanitizeThemeName } from './lib/security.ts';
+import { isSafeExternalUrl, isSafeObjectKey, sanitizeThemeName } from './lib/security.ts';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const DEFAULT_HOST = '127.0.0.1';
@@ -202,12 +202,13 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
 
     if (path === '/api/state' && method === 'POST') {
       const body = await parseJSONBody(req);
-      if (!body || typeof body !== 'object' || typeof body.entries !== 'object' || Array.isArray(body.entries)) {
+      if (!body || typeof body !== 'object' || !body.entries || typeof body.entries !== 'object' || Array.isArray(body.entries)) {
         throw new HttpError(400, 'Invalid state payload');
       }
       const now = Date.now();
       await updateState((state) => {
         for (const [id, updates] of Object.entries(body.entries as Record<string, any>)) {
+          if (!isSafeObjectKey(id)) throw new HttpError(400, 'Invalid entry id');
           if (!updates || typeof updates !== 'object') continue;
           if (!state[id]) state[id] = {};
           if ('read' in updates && typeof updates.read === 'boolean') { state[id].read = updates.read; state[id].readAt = now; }

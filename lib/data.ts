@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import type { CacheFile, Config, Entry, EntryState, FeedsFile, StateFile, ThemeMeta } from './types.ts';
 import { createEntryId, publishedTime } from './feeds.ts';
-import { sanitizeThemeName } from './security.ts';
+import { isSafeObjectKey, sanitizeThemeName } from './security.ts';
 
 const DEFAULT_CONFIG: Config = {
   maxBulkOpen: 20,
@@ -25,12 +25,148 @@ export function getDataDir(): string {
 }
 
 async function readJSON<T>(filename: string, fallback: T): Promise<T> {
+  let raw: string;
   try {
-    const raw = await readFile(join(getDataDir(), filename), 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return fallback;
+    raw = await readFile(join(getDataDir(), filename), 'utf-8');
+  } catch (e) {
+    const code = typeof e === 'object' && e && 'code' in e ? (e as { code?: unknown }).code : undefined;
+    if (code === 'ENOENT') return fallback;
+    throw new Error(`Failed to read ${filename}: ${(e as Error).message}`);
   }
+
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`Malformed JSON in ${filename}: ${(e as Error).message}`);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function createStateFile(): StateFile {
+  return Object.create(null) as StateFile;
+}
+
+function stringRecord(value: unknown): Record<string, string> {
+  const out: Record<string, string> = Object.create(null);
+  if (!isRecord(value)) return out;
+  for (const [key, entry] of Object.entries(value)) {
+    if (isSafeObjectKey(key) && typeof entry === 'string') out[key] = entry;
+  }
+  return out;
+}
+
+function numberRecord(value: unknown): Record<string, number> {
+  const out: Record<string, number> = Object.create(null);
+  if (!isRecord(value)) return out;
+  for (const [key, entry] of Object.entries(value)) {
+    if (isSafeObjectKey(key) && typeof entry === 'number' && Number.isFinite(entry)) out[key] = entry;
+  }
+  return out;
+}
+
+function normalizeFeedsFile(value: unknown): FeedsFile {
+  if (!isRecord(value)) return { folders: [], feeds: [] };
+  const folders = Array.isArray(value.folders)
+    ? value.folders.filter(isRecord).flatMap(folder => {
+      const { id, name } = folder;
+      if (typeof id !== 'string' || !isSafeObjectKey(id) || typeof name !== 'string') return [];
+      return [{ id, name }];
+    })
+    : [];
+  const feeds = Array.isArray(value.feeds)
+    ? value.feeds.filter(isRecord).flatMap(feed => {
+      const { id, url, label, folderId } = feed;
+      if (typeof id !== 'string' || !isSafeObjectKey(id)) return [];
+      if (typeof url !== 'string' || typeof label !== 'string') return [];
+      if (folderId !== null && folderId !== undefined && typeof folderId !== 'string') return [];
+      return [{ id, url, label, folderId: folderId || null }];
+    })
+    : [];
+  return { folders, feeds };
+}
+
+function normalizeEntry(entry: unknown): Entry | null {
+  if (!isRecord(entry)) return null;
+  if (typeof entry.feedId !== 'string' || !entry.feedId) return null;
+  const url = typeof entry.url === 'string' ? entry.url : '';
+  const title = typeof entry.title === 'string' ? entry.title : 'Untitled';
+  const published = typeof entry.published === 'string' ? entry.published : new Date(0).toISOString();
+  const sourceId = typeof entry.sourceId === 'string' && entry.sourceId
+    ? entry.sourceId
+    : typeof entry.id === 'string' && entry.id
+      ? entry.id
+      : url || `${title}:${published}`;
+  const id = createEntryId(entry.feedId, sourceId);
+  return { id, sourceId, feedId: entry.feedId, url, title, published };
+}
+
+function normalizeCacheFile(cache: unknown): CacheFile {
+  if (!isRecord(cache)) return { entries: [], lastFetched: {}, feedErrors: {} };
+  const entries = Array.isArray(cache.entries)
+    ? cache.entries.flatMap(entry => normalizeEntry(entry) || [])
+    : [];
+  return {
+    entries,
+    lastFetched: numberRecord(cache.lastFetched),
+    feedErrors: stringRecord(cache.feedErrors),
+  };
+}
+
+function normalizeEntryState(value: unknown): EntryState | null {
+  if (!isRecord(value)) return null;
+  const out: EntryState = {};
+  if (typeof value.read === 'boolean') out.read = value.read;
+  if (typeof value.readAt === 'number' && Number.isFinite(value.readAt) && value.readAt >= 0) out.readAt = value.readAt;
+  if (typeof value.starred === 'boolean') out.starred = value.starred;
+  if (typeof value.starredAt === 'number' && Number.isFinite(value.starredAt) && value.starredAt >= 0) out.starredAt = value.starredAt;
+  return Object.keys(out).length ? out : null;
+}
+
+function normalizeStateShape(value: unknown): StateFile {
+  const normalized = createStateFile();
+  if (!isRecord(value)) return normalized;
+  for (const [id, entryState] of Object.entries(value)) {
+    if (!isSafeObjectKey(id)) continue;
+    const state = normalizeEntryState(entryState);
+    if (state) normalized[id] = state;
+  }
+  return normalized;
+}
+
+function normalizeConfig(value: unknown): Config {
+  const config: Config = { ...DEFAULT_CONFIG, retention: { ...DEFAULT_CONFIG.retention } };
+  if (!isRecord(value)) return config;
+
+  const maxBulkOpen = value.maxBulkOpen;
+  if (typeof maxBulkOpen === 'number' && Number.isInteger(maxBulkOpen) && maxBulkOpen >= 1 && maxBulkOpen <= 500) {
+    config.maxBulkOpen = maxBulkOpen;
+  }
+  const port = value.port;
+  if (typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535) {
+    config.port = port;
+  }
+  if (value.theme === null || value.theme === '') {
+    config.theme = null;
+  } else if (typeof value.theme === 'string') {
+    config.theme = sanitizeThemeName(value.theme);
+  }
+  if (isRecord(value.retention)) {
+    const maxEntries = value.retention.maxEntries;
+    const maxDays = value.retention.maxDays;
+    if (typeof maxEntries === 'number' && Number.isInteger(maxEntries) && maxEntries >= 100 && maxEntries <= 100000) {
+      config.retention.maxEntries = maxEntries;
+    }
+    if (maxDays === null) {
+      config.retention.maxDays = null;
+    } else if (typeof maxDays === 'number' && Number.isInteger(maxDays) && maxDays >= 1 && maxDays <= 36500) {
+      config.retention.maxDays = maxDays;
+    }
+  }
+
+  return config;
 }
 
 async function writeJSON(filename: string, data: unknown): Promise<void> {
@@ -40,31 +176,17 @@ async function writeJSON(filename: string, data: unknown): Promise<void> {
   await rename(tmp, target);
 }
 
-function normalizeEntry(entry: Entry): Entry {
-  const sourceId = typeof entry.sourceId === 'string' && entry.sourceId ? entry.sourceId : entry.id;
-  const id = createEntryId(entry.feedId, sourceId);
-  if (entry.id === id && entry.sourceId === sourceId) return entry;
-  return { ...entry, id, sourceId };
-}
-
-function normalizeCacheFile(cache: CacheFile): CacheFile {
-  const entries = cache.entries.map(normalizeEntry);
-  const unchanged = entries.every((entry, index) => entry === cache.entries[index]);
-  if (unchanged && cache.feedErrors) return cache;
-  return { ...cache, entries, feedErrors: cache.feedErrors || {} };
-}
-
 function mergeStateEntry(existing: EntryState | undefined, incoming: EntryState): EntryState {
   const next: EntryState = existing ? { ...existing } : {};
 
-  if ('read' in incoming && !('read' in next)) next.read = incoming.read;
-  if (incoming.readAt && (!next.readAt || incoming.readAt >= next.readAt)) {
+  if (typeof incoming.read === 'boolean' && !('read' in next)) next.read = incoming.read;
+  if (typeof incoming.read === 'boolean' && incoming.readAt && (!next.readAt || incoming.readAt >= next.readAt)) {
     next.read = incoming.read;
     next.readAt = incoming.readAt;
   }
 
-  if ('starred' in incoming && !('starred' in next)) next.starred = incoming.starred;
-  if (incoming.starredAt && (!next.starredAt || incoming.starredAt >= next.starredAt)) {
+  if (typeof incoming.starred === 'boolean' && !('starred' in next)) next.starred = incoming.starred;
+  if (typeof incoming.starred === 'boolean' && incoming.starredAt && (!next.starredAt || incoming.starredAt >= next.starredAt)) {
     next.starred = incoming.starred;
     next.starredAt = incoming.starredAt;
   }
@@ -83,8 +205,8 @@ function normalizeStateFile(state: StateFile, cache: CacheFile): StateFile {
     else idsBySource.set(sourceId, [entry.id]);
   }
 
-  const normalized: StateFile = {};
-  for (const [id, entryState] of Object.entries(state)) {
+  const normalized = createStateFile();
+  for (const [id, entryState] of Object.entries(normalizeStateShape(state))) {
     if (currentIds.has(id)) {
       normalized[id] = mergeStateEntry(normalized[id], entryState);
       continue;
@@ -106,11 +228,10 @@ function normalizeStateFile(state: StateFile, cache: CacheFile): StateFile {
 
 let stateUpdateChain: Promise<void> = Promise.resolve();
 
-export const readFeeds = () => readJSON<FeedsFile>('feeds.json', { folders: [], feeds: [] });
-export const writeFeeds = (d: FeedsFile) => writeJSON('feeds.json', d);
+export const writeFeeds = (d: FeedsFile) => writeJSON('feeds.json', normalizeFeedsFile(d));
 
 async function readRawState(): Promise<StateFile> {
-  return readJSON<StateFile>('state.json', {});
+  return normalizeStateShape(await readJSON<unknown>('state.json', {}));
 }
 
 export async function readState(cache?: CacheFile): Promise<StateFile> {
@@ -118,7 +239,7 @@ export async function readState(cache?: CacheFile): Promise<StateFile> {
   return cache ? normalizeStateFile(state, cache) : state;
 }
 
-export const writeState = (d: StateFile) => writeJSON('state.json', d);
+export const writeState = (d: StateFile) => writeJSON('state.json', normalizeStateShape(d));
 
 export async function updateState(mutator: (state: StateFile) => StateFile | void | Promise<StateFile | void>, cache?: CacheFile): Promise<StateFile> {
   let result!: StateFile;
@@ -134,18 +255,17 @@ export async function updateState(mutator: (state: StateFile) => StateFile | voi
   return result;
 }
 
-export const readCache = async () => normalizeCacheFile(await readJSON<CacheFile>('cache.json', { entries: [], lastFetched: {}, feedErrors: {} }));
+export const readFeeds = async () => normalizeFeedsFile(await readJSON<unknown>('feeds.json', { folders: [], feeds: [] }));
+export const readCache = async () => normalizeCacheFile(await readJSON<unknown>('cache.json', { entries: [], lastFetched: {}, feedErrors: {} }));
 export const writeCache = (d: CacheFile) => writeJSON('cache.json', normalizeCacheFile(d));
 
 export async function readConfig(): Promise<Config> {
-  const saved = await readJSON<Partial<Config>>('config.json', {});
-  return { ...DEFAULT_CONFIG, ...saved, retention: { ...DEFAULT_CONFIG.retention, ...saved.retention } };
+  return normalizeConfig(await readJSON<unknown>('config.json', {}));
 }
 
 export async function writeConfig(partial: Partial<Config>): Promise<Config> {
   const current = await readConfig();
-  const updated = { ...current, ...partial, retention: { ...current.retention, ...partial.retention } };
-  updated.theme = updated.theme ? sanitizeThemeName(updated.theme) : null;
+  const updated = normalizeConfig({ ...current, ...partial, retention: { ...current.retention, ...partial.retention } });
   await writeJSON('config.json', updated);
   return updated;
 }
