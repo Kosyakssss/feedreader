@@ -210,8 +210,19 @@ function getVisibleEntries() {
   return getFiltered(getCurrentSource()).slice(0, loadLimit);
 }
 
+function safeHttpUrl(raw) {
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
 function openUrl(entry) {
-  window.open(entry.url, '_blank', 'noopener');
+  const url = safeHttpUrl(entry.url);
+  if (!url) { toast('Entry has no safe link'); return; }
+  window.open(url, '_blank', 'noopener');
 }
 
 function entryHtml(entry, i) {
@@ -221,11 +232,15 @@ function entryHtml(entry, i) {
   const foc = i === focusedIndex;
   const displayTitle = entry.title || '';
   const displayFeed = entry.feedLabel || '';
+  const safeUrl = safeHttpUrl(entry.url);
+  const titleHtml = safeUrl
+    ? '<a href="' + esc(safeUrl) + '" target="_blank" rel="noopener" class="entry-title" data-entry-link="' + esc(entry.id) + '">' + esc(displayTitle) + '</a>'
+    : '<span class="entry-title">' + esc(displayTitle) + '</span>';
   return '<div class="entry-card ' + (read ? 'entry-read' : 'entry-unread') + (foc ? ' entry-focused' : '') + '" data-idx="' + i + '" data-id="' + esc(entry.id) + '">'
     + '<label class="entry-checkbox"><input type="checkbox" data-select="' + esc(entry.id) + '"' + (sel ? ' checked' : '') + '></label>'
     + '<span class="entry-leading-space" aria-hidden="true"></span>'
     + '<div class="entry-content">'
-    + '<a href="' + esc(entry.url) + '" target="_blank" rel="noopener" class="entry-title" data-entry-link="' + esc(entry.id) + '">' + esc(displayTitle) + '</a>'
+    + titleHtml
     + '<span class="entry-meta">' + esc(displayFeed) + ' · ' + timeAgo(entry.published) + '</span>'
     + '</div>'
     + '<div class="entry-actions">'

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { fetchAllFeeds, parseFeed, parseOPML } from '../lib/feeds.ts';
+import { fetchAllFeeds, fetchFeed, parseFeed, parseOPML } from '../lib/feeds.ts';
 
 describe('parseFeed', () => {
   test('parses RSS items', () => {
@@ -73,6 +73,21 @@ describe('parseFeed', () => {
     expect(right.sourceId).toBe('shared-guid');
     expect(left.id).not.toBe(right.id);
   });
+
+  test('drops unsafe entry link schemes', () => {
+    const xml = `<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <guid>unsafe-link</guid>
+      <title>Unsafe</title>
+      <link>javascript:alert(1)</link>
+    </item>
+  </channel>
+</rss>`;
+    const entry = parseFeed(xml, 'feed-unsafe')[0];
+    expect(entry.url).toBe('');
+  });
 });
 
 describe('parseOPML', () => {
@@ -117,7 +132,7 @@ describe('fetchAllFeeds', () => {
       await new Promise(r => setTimeout(r, 5));
       active--;
 
-      if (String(url).includes('bad.example')) {
+      if (String(url).includes('/bad.xml')) {
         return new Response('nope', { status: 500 });
       }
 
@@ -137,7 +152,7 @@ describe('fetchAllFeeds', () => {
     try {
       const feeds = Array.from({ length: 12 }, (_, i) => ({
         id: `feed-${i}`,
-        url: i === 10 ? 'https://bad.example/rss' : `https://example.com/${i}.xml`,
+        url: i === 10 ? 'https://93.184.216.34/bad.xml' : `https://93.184.216.34/${i}.xml`,
         label: `Feed ${i}`,
         folderId: null,
       }));
@@ -147,6 +162,34 @@ describe('fetchAllFeeds', () => {
       expect(maxActive).toBeLessThanOrEqual(8);
       expect(result.entries.length).toBe(11);
       expect(result.errors['feed-10']).toBe('HTTP 500');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('rejects redirects to local addresses', async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: string[] = [];
+
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      calls.push(String(url));
+      return new Response('', {
+        status: 302,
+        headers: { location: 'http://127.0.0.1/rss.xml' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const result = await fetchFeed({
+        id: 'feed-local-redirect',
+        url: 'https://93.184.216.34/feed.xml',
+        label: 'Redirect',
+        folderId: null,
+      });
+
+      expect(result.entries).toEqual([]);
+      expect(result.error).toContain('Private IPv4 addresses are not allowed');
+      expect(calls).toEqual(['https://93.184.216.34/feed.xml']);
     } finally {
       globalThis.fetch = originalFetch;
     }

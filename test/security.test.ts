@@ -30,11 +30,14 @@ describe('isSafeExternalUrl', () => {
 
   test('rejects localhost and private ranges', () => {
     expect(isSafeExternalUrl('http://localhost:8080').ok).toBeFalse();
+    expect(isSafeExternalUrl('http://localhost.').ok).toBeFalse();
     expect(isSafeExternalUrl('http://127.0.0.1').ok).toBeFalse();
     expect(isSafeExternalUrl('http://192.168.0.10').ok).toBeFalse();
     expect(isSafeExternalUrl('http://10.0.1.2').ok).toBeFalse();
     expect(isSafeExternalUrl('http://172.16.0.1').ok).toBeFalse();
     expect(isSafeExternalUrl('http://[::1]').ok).toBeFalse();
     expect(isSafeExternalUrl('http://[fc00::1]').ok).toBeFalse();
+    expect(isSafeExternalUrl('http://[::ffff:7f00:1]').ok).toBeFalse();
+    expect(isSafeExternalUrl('http://[::ffff:a00:1]').ok).toBeFalse();
   });
 });

@@ -23,6 +23,11 @@ class HttpError extends Error {
   }
 }
 
+function safeEntryUrl(rawUrl: string): string {
+  const safe = isSafeExternalUrl(rawUrl);
+  return safe.ok ? safe.url.href : '';
+}
+
 async function getEntries(feedFilter?: string): Promise<EnrichedEntry[]> {
   const cache = await readCache();
   const [state, feedsFile] = await Promise.all([readState(cache), readFeeds()]);
@@ -32,7 +37,7 @@ async function getEntries(feedFilter?: string): Promise<EnrichedEntry[]> {
   return entries
     .slice()
     .sort((a, b) => publishedTime(b) - publishedTime(a))
-    .map(e => ({ ...e, title: decodeHtmlEntities(e.title), feedLabel: feedMap[e.feedId] || 'Unknown', state: state[e.id] || {} }));
+    .map(e => ({ ...e, url: safeEntryUrl(e.url), title: decodeHtmlEntities(e.title), feedLabel: feedMap[e.feedId] || 'Unknown', state: state[e.id] || {} }));
 }
 
 async function getFeedsWithHealth() {

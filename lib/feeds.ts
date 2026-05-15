@@ -1,9 +1,15 @@
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { XMLParser } from 'fast-xml-parser';
 import type { Entry, Feed } from './types.ts';
+import { isPrivateAddress, isSafeExternalUrl } from './security.ts';
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', htmlEntities: true });
 const UA = 'Feedreader/1.0';
 const MAX_FEED_FETCH_CONCURRENCY = 8;
+const MAX_FEED_BYTES = 10 * 1024 * 1024;
+const MAX_DISCOVERY_BYTES = 2 * 1024 * 1024;
+const MAX_REDIRECTS = 5;
 
 const namedEntities: Record<string, string> = {
   amp: '&',
@@ -75,16 +81,82 @@ function pickLink(link: any): string {
   return link?.['@_href'] || '';
 }
 
+function safeEntryUrl(rawUrl: string): string {
+  const safe = isSafeExternalUrl(rawUrl);
+  return safe.ok ? safe.url.href : '';
+}
+
 function buildEntry(feedId: string, rawSourceId: string, url: string, title: string, published: string): Entry {
-  const sourceId = rawSourceId || url || `${title}:${published}`;
+  const safeUrl = safeEntryUrl(url);
+  const sourceId = rawSourceId || safeUrl || `${title}:${published}`;
   return {
     id: createEntryId(feedId, sourceId),
     sourceId,
     feedId,
-    url,
+    url: safeUrl,
     title,
     published,
   };
+}
+
+async function assertSafeFetchTarget(url: URL): Promise<void> {
+  const safe = isSafeExternalUrl(url.href);
+  if (!safe.ok) throw new Error(safe.reason);
+
+  const host = url.hostname.replace(/^\[|\]$/g, '').replace(/\.+$/, '');
+  if (isIP(host)) {
+    if (isPrivateAddress(host)) throw new Error('Private IP addresses are not allowed');
+    return;
+  }
+
+  const records = await lookup(host, { all: true });
+  if (records.length === 0) throw new Error('Hostname did not resolve');
+  for (const record of records) {
+    if (isPrivateAddress(record.address)) {
+      throw new Error('Host resolves to a private IP address');
+    }
+  }
+}
+
+async function safeFetchExternal(rawUrl: string, init: RequestInit): Promise<Response> {
+  let current = new URL(rawUrl);
+  for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
+    await assertSafeFetchTarget(current);
+    const res = await fetch(current.href, { ...init, redirect: 'manual' });
+
+    if (![301, 302, 303, 307, 308].includes(res.status)) return res;
+
+    const location = res.headers.get('location');
+    if (!location) return res;
+    current = new URL(location, current);
+  }
+  throw new Error('Too many redirects');
+}
+
+async function readResponseText(res: Response, maxBytes: number): Promise<string> {
+  if (!res.body) {
+    const text = await res.text();
+    if (Buffer.byteLength(text) > maxBytes) throw new Error('Response body too large');
+    return text;
+  }
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new Error('Response body too large');
+    }
+    chunks.push(value);
+  }
+
+  return Buffer.concat(chunks.map(chunk => Buffer.from(chunk))).toString('utf-8');
 }
 
 export function parseFeed(xml: string, feedId: string): Entry[] {
@@ -121,12 +193,12 @@ export function parseFeed(xml: string, feedId: string): Entry[] {
 
 export async function fetchFeed(feed: Feed): Promise<{ entries: Entry[]; error?: string }> {
   try {
-    const res = await fetch(feed.url, {
+    const res = await safeFetchExternal(feed.url, {
       headers: { 'User-Agent': UA, Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml' },
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) return { entries: [], error: `HTTP ${res.status}` };
-    const xml = await res.text();
+    const xml = await readResponseText(res, MAX_FEED_BYTES);
     return { entries: parseFeed(xml, feed.id) };
   } catch (e) {
     const msg = (e as Error).message || 'Unknown error';
@@ -187,19 +259,22 @@ export function parseOPML(xml: string): { url: string; label: string }[] {
 
 export async function discoverFeedUrl(pageUrl: string): Promise<string | null> {
   try {
-    const res = await fetch(pageUrl, {
+    const res = await safeFetchExternal(pageUrl, {
       headers: { 'User-Agent': UA },
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) return null;
-    const html = await res.text();
+    const html = await readResponseText(res, MAX_DISCOVERY_BYTES);
 
     const linkRe = /<link[^>]+(?:application\/(?:rss|atom)\+xml|text\/xml)[^>]*>/gi;
     const matches = html.match(linkRe);
     if (matches) {
       for (const m of matches) {
         const href = m.match(/href\s*=\s*["']([^"']+)["']/i);
-        if (href) return new URL(href[1], pageUrl).href;
+        if (href) {
+          const discovered = new URL(href[1], pageUrl).href;
+          if (isSafeExternalUrl(discovered).ok) return discovered;
+        }
       }
     }
   } catch {}
@@ -208,7 +283,7 @@ export async function discoverFeedUrl(pageUrl: string): Promise<string | null> {
   const guesses = ['/feed', '/rss', '/feed.xml', '/atom.xml', '/index.xml', '/rss.xml'];
   for (const path of guesses) {
     try {
-      const res = await fetch(base + path, {
+      const res = await safeFetchExternal(base + path, {
         method: 'HEAD',
         headers: { 'User-Agent': UA },
         signal: AbortSignal.timeout(5000),
