@@ -1,9 +1,9 @@
 import { createServer } from 'node:http';
 
 import {
-  readFeeds, writeFeeds, readState, updateState, readConfig, writeConfig,
-  readCache, writeCache, mergeSyncConflicts, pruneEntries, listThemes,
-  readThemeCSS, generateId,
+  readFeeds, readState, updateState, readConfig, writeConfig,
+  readCache, mergeSyncConflicts, pruneEntries, listThemes,
+  readThemeCSS, generateId, runDataMutation, writeDataFiles,
 } from './lib/data.ts';
 import { fetchAllFeeds, parseOPML, discoverFeedUrl, decodeHtmlEntities, publishedTime } from './lib/feeds.ts';
 import { renderApp } from './lib/render.ts';
@@ -53,34 +53,45 @@ async function getFeedsWithHealth() {
 }
 
 async function refreshFeeds(): Promise<number> {
-  await mergeSyncConflicts();
-  const [feedsFile, cache, config] = await Promise.all([
-    readFeeds(), readCache(), readConfig(),
-  ]);
-  const countBefore = cache.entries.length;
-  const { entries: fresh, errors } = await fetchAllFeeds(feedsFile.feeds);
-  const existing = new Set(cache.entries.map(e => e.id));
-  for (const entry of fresh) {
-    if (!existing.has(entry.id)) {
+  await runDataMutation(() => mergeSyncConflicts());
+  const feedsToFetch = (await readFeeds()).feeds;
+  const fetchedFeedIds = new Set(feedsToFetch.map(feed => feed.id));
+  const { entries: fresh, errors } = await fetchAllFeeds(feedsToFetch);
+
+  return runDataMutation(async () => {
+    const [feedsFile, cache, config] = await Promise.all([
+      readFeeds(), readCache(), readConfig(),
+    ]);
+    const currentFeedIds = new Set(feedsFile.feeds.map(feed => feed.id));
+    const existing = new Set(cache.entries.map(e => e.id));
+    let added = 0;
+
+    for (const entry of fresh) {
+      if (!currentFeedIds.has(entry.feedId) || !fetchedFeedIds.has(entry.feedId) || existing.has(entry.id)) continue;
       cache.entries.push(entry);
       existing.add(entry.id);
+      added++;
     }
-  }
-  const now = Date.now();
-  for (const f of feedsFile.feeds) cache.lastFetched[f.id] = now;
-  if (!cache.feedErrors) cache.feedErrors = {};
-  for (const f of feedsFile.feeds) {
-    if (errors[f.id]) cache.feedErrors[f.id] = errors[f.id];
-    else delete cache.feedErrors[f.id];
-  }
-  let nextCache = cache;
-  await updateState((state) => {
+
+    const now = Date.now();
+    for (const f of feedsFile.feeds) {
+      if (!fetchedFeedIds.has(f.id)) continue;
+      cache.lastFetched[f.id] = now;
+      if (errors[f.id]) cache.feedErrors[f.id] = errors[f.id];
+      else delete cache.feedErrors[f.id];
+    }
+    for (const id of Object.keys(cache.lastFetched)) {
+      if (!currentFeedIds.has(id)) delete cache.lastFetched[id];
+    }
+    for (const id of Object.keys(cache.feedErrors)) {
+      if (!currentFeedIds.has(id)) delete cache.feedErrors[id];
+    }
+
+    const state = await readState(cache);
     const pruned = pruneEntries(cache, state, config);
-    nextCache = pruned.cache;
-    return pruned.state;
-  }, cache);
-  await writeCache(nextCache);
-  return Math.max(0, nextCache.entries.length - countBefore);
+    await writeDataFiles({ 'cache.json': pruned.cache, 'state.json': pruned.state });
+    return added;
+  });
 }
 
 function parseBody(req: import('node:http').IncomingMessage): Promise<string> {
@@ -206,7 +217,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         throw new HttpError(400, 'Invalid state payload');
       }
       const now = Date.now();
-      await updateState((state) => {
+      await runDataMutation(() => updateState((state) => {
         for (const [id, updates] of Object.entries(body.entries as Record<string, any>)) {
           if (!isSafeObjectKey(id)) throw new HttpError(400, 'Invalid entry id');
           if (!updates || typeof updates !== 'object') continue;
@@ -215,7 +226,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
           if ('starred' in updates && typeof updates.starred === 'boolean') { state[id].starred = updates.starred; state[id].starredAt = now; }
         }
         return state;
-      });
+      }));
       return json(res, { ok: true });
     }
 
@@ -236,34 +247,38 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         if (discovered) feedUrl = discovered;
       }
       parseExternalUrlOrThrow(feedUrl);
-      const feedsFile = await readFeeds();
-      if (feedsFile.feeds.some(f => f.url === feedUrl)) {
-        return err(res, 'Feed already exists', 409);
-      }
-      const newFeed = {
-        id: generateId(),
-        url: feedUrl,
-        label: typeof body.label === 'string' && body.label.trim() ? body.label.trim() : new URL(feedUrl).hostname,
-        folderId: null,
-      };
-      feedsFile.feeds.push(newFeed);
-      await writeFeeds(feedsFile);
+      const newFeed = await runDataMutation(async () => {
+        const feedsFile = await readFeeds();
+        if (feedsFile.feeds.some(f => f.url === feedUrl)) {
+          throw new HttpError(409, 'Feed already exists');
+        }
+        const feed = {
+          id: generateId(),
+          url: feedUrl,
+          label: typeof body.label === 'string' && body.label.trim() ? body.label.trim() : new URL(feedUrl).hostname,
+          folderId: null,
+        };
+        feedsFile.feeds.push(feed);
+        await writeDataFiles({ 'feeds.json': feedsFile });
+        return feed;
+      });
       return json(res, newFeed, 201);
     }
 
     if (path.startsWith('/api/feeds/') && method === 'DELETE') {
       const id = path.slice('/api/feeds/'.length);
-      const feedsFile = await readFeeds();
-      feedsFile.feeds = feedsFile.feeds.filter(f => f.id !== id);
-      const cache = await readCache();
-      const removedIds = new Set(cache.entries.filter(e => e.feedId === id).map(e => e.id));
-      cache.entries = cache.entries.filter(e => e.feedId !== id);
-      delete cache.lastFetched[id];
-      const stateUpdate = updateState((state) => {
+      await runDataMutation(async () => {
+        const feedsFile = await readFeeds();
+        feedsFile.feeds = feedsFile.feeds.filter(f => f.id !== id);
+        const cache = await readCache();
+        const removedIds = new Set(cache.entries.filter(e => e.feedId === id).map(e => e.id));
+        cache.entries = cache.entries.filter(e => e.feedId !== id);
+        delete cache.lastFetched[id];
+        delete cache.feedErrors[id];
+        const state = await readState(cache);
         for (const rid of removedIds) delete state[rid];
-        return state;
-      }, cache);
-      await Promise.all([writeFeeds(feedsFile), writeCache(cache), stateUpdate]);
+        await writeDataFiles({ 'feeds.json': feedsFile, 'cache.json': cache, 'state.json': state });
+      });
       return json(res, { ok: true });
     }
 
@@ -285,27 +300,30 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         }
       }
       const imported = parseOPML(opmlText);
-      const feedsFile = await readFeeds();
-      const existingUrls = new Set(feedsFile.feeds.map(f => f.url));
-      let added = 0;
-      for (const f of imported) {
-        let feedUrl: string;
-        try {
-          feedUrl = parseExternalUrlOrThrow(f.url).href;
-        } catch {
-          continue;
+      const added = await runDataMutation(async () => {
+        const feedsFile = await readFeeds();
+        const existingUrls = new Set(feedsFile.feeds.map(f => f.url));
+        let count = 0;
+        for (const f of imported) {
+          let feedUrl: string;
+          try {
+            feedUrl = parseExternalUrlOrThrow(f.url).href;
+          } catch {
+            continue;
+          }
+          if (existingUrls.has(feedUrl)) continue;
+          feedsFile.feeds.push({
+            id: generateId(),
+            url: feedUrl,
+            label: f.label || new URL(feedUrl).hostname,
+            folderId: null,
+          });
+          existingUrls.add(feedUrl);
+          count++;
         }
-        if (existingUrls.has(feedUrl)) continue;
-        feedsFile.feeds.push({
-          id: generateId(),
-          url: feedUrl,
-          label: f.label || new URL(feedUrl).hostname,
-          folderId: null,
-        });
-        existingUrls.add(feedUrl);
-        added++;
-      }
-      await writeFeeds(feedsFile);
+        await writeDataFiles({ 'feeds.json': feedsFile });
+        return count;
+      });
       return json(res, { added, skipped: imported.length - added });
     }
 
@@ -372,7 +390,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         patch.retention = retentionPatch;
       }
 
-      const updated = await writeConfig(patch);
+      const updated = await runDataMutation(() => writeConfig(patch));
       return json(res, updated);
     }
 

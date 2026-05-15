@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import type { CacheFile, Config, Entry, EntryState, FeedsFile, StateFile, ThemeMeta } from './types.ts';
@@ -12,7 +12,12 @@ const DEFAULT_CONFIG: Config = {
   port: 8787,
 };
 
+const TRANSACTION_FILE = 'transaction.json';
+type DataFilename = 'feeds.json' | 'state.json' | 'cache.json' | 'config.json';
+
 let dataDir: string;
+let recoveryChain: Promise<void> | null = null;
+let dataMutationChain: Promise<void> = Promise.resolve();
 
 export function getDataDir(): string {
   if (!dataDir) {
@@ -25,6 +30,7 @@ export function getDataDir(): string {
 }
 
 async function readJSON<T>(filename: string, fallback: T): Promise<T> {
+  await ensureRecovered();
   let raw: string;
   try {
     raw = await readFile(join(getDataDir(), filename), 'utf-8');
@@ -169,11 +175,90 @@ function normalizeConfig(value: unknown): Config {
   return config;
 }
 
-async function writeJSON(filename: string, data: unknown): Promise<void> {
+function isDataFilename(filename: string): filename is DataFilename {
+  return filename === 'feeds.json' || filename === 'state.json' || filename === 'cache.json' || filename === 'config.json';
+}
+
+function normalizeDataFile(filename: DataFilename, data: unknown): unknown {
+  if (filename === 'feeds.json') return normalizeFeedsFile(data);
+  if (filename === 'state.json') return normalizeStateShape(data);
+  if (filename === 'cache.json') return normalizeCacheFile(data);
+  return normalizeConfig(data);
+}
+
+async function writeJSONRaw(filename: string, data: unknown): Promise<void> {
+  await mkdir(getDataDir(), { recursive: true });
   const target = join(getDataDir(), filename);
   const tmp = `${target}.tmp.${process.pid}.${randomUUID()}`;
   await writeFile(tmp, JSON.stringify(data, null, 2) + '\n');
   await rename(tmp, target);
+}
+
+async function recoverPendingTransaction(): Promise<void> {
+  let raw: string;
+  try {
+    raw = await readFile(join(getDataDir(), TRANSACTION_FILE), 'utf-8');
+  } catch (e) {
+    const code = typeof e === 'object' && e && 'code' in e ? (e as { code?: unknown }).code : undefined;
+    if (code === 'ENOENT') return;
+    throw new Error(`Failed to read ${TRANSACTION_FILE}: ${(e as Error).message}`);
+  }
+
+  let transaction: unknown;
+  try {
+    transaction = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`Malformed JSON in ${TRANSACTION_FILE}: ${(e as Error).message}`);
+  }
+  if (!isRecord(transaction) || !isRecord(transaction.files)) {
+    throw new Error(`Invalid ${TRANSACTION_FILE}`);
+  }
+
+  const writes = Object.entries(transaction.files).flatMap(([filename, data]) =>
+    isDataFilename(filename) ? [[filename, normalizeDataFile(filename, data)] as const] : []
+  );
+  for (const [filename, data] of writes) {
+    await writeJSONRaw(filename, data);
+  }
+  await unlink(join(getDataDir(), TRANSACTION_FILE));
+}
+
+async function ensureRecovered(): Promise<void> {
+  if (!recoveryChain) recoveryChain = recoverPendingTransaction();
+  await recoveryChain;
+}
+
+async function writeJSON(filename: DataFilename, data: unknown): Promise<void> {
+  await ensureRecovered();
+  await writeJSONRaw(filename, normalizeDataFile(filename, data));
+}
+
+export async function writeDataFiles(files: Partial<Record<DataFilename, unknown>>): Promise<void> {
+  await ensureRecovered();
+  const writes = Object.entries(files).flatMap(([filename, data]) =>
+    isDataFilename(filename) ? [[filename, normalizeDataFile(filename, data)] as const] : []
+  );
+  if (writes.length === 0) return;
+  if (writes.length === 1) {
+    await writeJSONRaw(writes[0][0], writes[0][1]);
+    return;
+  }
+
+  await writeJSONRaw(TRANSACTION_FILE, { files: Object.fromEntries(writes) });
+  for (const [filename, data] of writes) {
+    await writeJSONRaw(filename, data);
+  }
+  await unlink(join(getDataDir(), TRANSACTION_FILE));
+}
+
+export async function runDataMutation<T>(operation: () => Promise<T>): Promise<T> {
+  let result!: T;
+  const run = dataMutationChain.then(async () => {
+    result = await operation();
+  });
+  dataMutationChain = run.then(() => undefined, () => undefined);
+  await run;
+  return result;
 }
 
 function mergeStateEntry(existing: EntryState | undefined, incoming: EntryState): EntryState {
@@ -282,16 +367,18 @@ export async function mergeSyncConflicts(): Promise<void> {
   if (conflicts.length === 0) return;
 
   const cache = await readCache();
+  const mergedFiles: string[] = [];
   await updateState(async (state) => {
     for (const file of conflicts) {
       const conflictState = normalizeStateFile(await readJSON<StateFile>(file, {}), cache);
       for (const [id, cs] of Object.entries(conflictState)) {
         state[id] = mergeStateEntry(state[id], cs);
       }
-      await unlink(join(dir, file));
+      mergedFiles.push(file);
     }
     return state;
   }, cache);
+  await Promise.all(mergedFiles.map(file => unlink(join(dir, file))));
 }
 
 export function pruneEntries(cache: CacheFile, state: StateFile, config: Config): { cache: CacheFile; state: StateFile } {
@@ -318,7 +405,7 @@ export function pruneEntries(cache: CacheFile, state: StateFile, config: Config)
   }
 
   const keptIds = new Set(entries.map(e => e.id));
-  const prunedState: StateFile = {};
+  const prunedState = createStateFile();
   for (const [id, s] of Object.entries(state)) {
     if (keptIds.has(id)) prunedState[id] = s;
   }
