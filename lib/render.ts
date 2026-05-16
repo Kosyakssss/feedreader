@@ -170,13 +170,27 @@ async function api(method, path, body) {
 
 async function refreshData() {
   const r = await api('POST', '/api/refresh');
-  if (Array.isArray(r.entries) && r.feeds) {
-    entries = r.entries;
-    feeds = r.feeds;
-    return r;
+  return pollRefresh(r);
+}
+
+async function pollRefresh(initial) {
+  let latest = initial;
+  while (latest?.refreshing) {
+    if (Array.isArray(latest.entries) && latest.feeds) {
+      entries = latest.entries;
+      feeds = latest.feeds;
+      navigate(currentPage, false);
+    }
+    await new Promise(r => setTimeout(r, 750));
+    latest = await api('GET', '/api/refresh/status');
+  }
+  if (Array.isArray(latest.entries) && latest.feeds) {
+    entries = latest.entries;
+    feeds = latest.feeds;
+    return latest;
   }
   [entries, feeds] = await Promise.all([api('GET', '/api/entries'), api('GET', '/api/feeds')]);
-  return r;
+  return latest;
 }
 
 function getFiltered(source) {

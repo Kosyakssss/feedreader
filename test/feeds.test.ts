@@ -88,6 +88,21 @@ describe('parseFeed', () => {
     const entry = parseFeed(xml, 'feed-unsafe')[0];
     expect(entry.url).toBe('');
   });
+
+  test('uses stable ids for entries without guid, link, or date', () => {
+    const xml = `<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>Recently</title>
+    </item>
+  </channel>
+</rss>`;
+    const first = parseFeed(xml, 'feed-stable')[0];
+    const second = parseFeed(xml, 'feed-stable')[0];
+    expect(first.sourceId).toBe('Recently');
+    expect(second.id).toBe(first.id);
+  });
 });
 
 describe('parseOPML', () => {
@@ -150,18 +165,61 @@ describe('fetchAllFeeds', () => {
     }) as typeof fetch;
 
     try {
-      const feeds = Array.from({ length: 12 }, (_, i) => ({
+      const feeds = Array.from({ length: 32 }, (_, i) => ({
         id: `feed-${i}`,
-        url: i === 10 ? 'https://93.184.216.34/bad.xml' : `https://93.184.216.34/${i}.xml`,
+        url: i === 30 ? 'https://93.184.216.34/bad.xml' : `https://93.184.216.34/${i}.xml`,
         label: `Feed ${i}`,
         folderId: null,
       }));
 
       const result = await fetchAllFeeds(feeds);
 
-      expect(maxActive).toBeLessThanOrEqual(8);
-      expect(result.entries.length).toBe(11);
-      expect(result.errors['feed-10']).toBe('HTTP 500');
+      expect(maxActive).toBeLessThanOrEqual(24);
+      expect(result.entries.length).toBe(31);
+      expect(result.errors['feed-30']).toBe('HTTP 500');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('sends conditional GET validators and preserves updated validators', async () => {
+    const originalFetch = globalThis.fetch;
+    const seenHeaders: Record<string, string> = {};
+
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      seenHeaders['if-none-match'] = headers.get('if-none-match') || '';
+      seenHeaders['if-modified-since'] = headers.get('if-modified-since') || '';
+      return new Response('', {
+        status: 304,
+        headers: {
+          etag: '"next"',
+          'last-modified': 'Sat, 16 May 2026 10:00:00 GMT',
+        },
+      });
+    }) as typeof fetch;
+
+    try {
+      const result = await fetchAllFeeds([{
+        id: 'feed-conditional',
+        url: 'https://93.184.216.34/feed.xml',
+        label: 'Conditional',
+        folderId: null,
+      }], {
+        'feed-conditional': {
+          etag: '"old"',
+          lastModified: 'Fri, 15 May 2026 10:00:00 GMT',
+        },
+      });
+
+      expect(seenHeaders['if-none-match']).toBe('"old"');
+      expect(seenHeaders['if-modified-since']).toBe('Fri, 15 May 2026 10:00:00 GMT');
+      expect(result.entries).toEqual([]);
+      expect(result.errors).toEqual({});
+      expect(result.feedMeta['feed-conditional']).toEqual({
+        etag: '"next"',
+        lastModified: 'Sat, 16 May 2026 10:00:00 GMT',
+      });
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -1,15 +1,23 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { XMLParser } from 'fast-xml-parser';
-import type { Entry, Feed } from './types.ts';
+import type { Entry, Feed, FeedCacheMeta } from './types.ts';
 import { isPrivateAddress, isSafeExternalUrl } from './security.ts';
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', htmlEntities: true });
 const UA = 'Feedreader/1.0';
-const MAX_FEED_FETCH_CONCURRENCY = 8;
+const MAX_FEED_FETCH_CONCURRENCY = 24;
+const FEED_FETCH_TIMEOUT_MS = 8000;
 const MAX_FEED_BYTES = 10 * 1024 * 1024;
 const MAX_DISCOVERY_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
+
+export interface FeedFetchResult {
+  entries: Entry[];
+  error?: string;
+  notModified?: boolean;
+  validators?: Pick<FeedCacheMeta, 'etag' | 'lastModified'>;
+}
 
 const namedEntities: Record<string, string> = {
   amp: '&',
@@ -88,7 +96,7 @@ function safeEntryUrl(rawUrl: string): string {
 
 function buildEntry(feedId: string, rawSourceId: string, url: string, title: string, published: string): Entry {
   const safeUrl = safeEntryUrl(url);
-  const sourceId = rawSourceId || safeUrl || `${title}:${published}`;
+  const sourceId = rawSourceId || safeUrl || title;
   return {
     id: createEntryId(feedId, sourceId),
     sourceId,
@@ -191,15 +199,24 @@ export function parseFeed(xml: string, feedId: string): Entry[] {
   return entries;
 }
 
-export async function fetchFeed(feed: Feed): Promise<{ entries: Entry[]; error?: string }> {
+export async function fetchFeed(feed: Feed, meta: FeedCacheMeta = {}): Promise<FeedFetchResult> {
   try {
+    const headers: Record<string, string> = {
+      'User-Agent': UA,
+      Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml',
+    };
+    if (meta.etag) headers['If-None-Match'] = meta.etag;
+    if (meta.lastModified) headers['If-Modified-Since'] = meta.lastModified;
+
     const res = await safeFetchExternal(feed.url, {
-      headers: { 'User-Agent': UA, Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml' },
-      signal: AbortSignal.timeout(15000),
+      headers,
+      signal: AbortSignal.timeout(FEED_FETCH_TIMEOUT_MS),
     });
+    const validators = pickValidators(res, meta);
+    if (res.status === 304) return { entries: [], notModified: true, validators };
     if (!res.ok) return { entries: [], error: `HTTP ${res.status}` };
     const xml = await readResponseText(res, MAX_FEED_BYTES);
-    return { entries: parseFeed(xml, feed.id) };
+    return { entries: parseFeed(xml, feed.id), validators };
   } catch (e) {
     const msg = (e as Error).message || 'Unknown error';
     console.error(`Failed to fetch ${feed.label} (${feed.url}):`, msg);
@@ -207,17 +224,34 @@ export async function fetchFeed(feed: Feed): Promise<{ entries: Entry[]; error?:
   }
 }
 
-export async function fetchAllFeeds(feeds: Feed[]): Promise<{ entries: Entry[]; errors: Record<string, string> }> {
-  const results: PromiseSettledResult<{ entries: Entry[]; error?: string }>[] = new Array(feeds.length);
+function pickValidators(res: Response, fallback: FeedCacheMeta): Pick<FeedCacheMeta, 'etag' | 'lastModified'> {
+  return {
+    etag: res.headers.get('etag') || fallback.etag,
+    lastModified: res.headers.get('last-modified') || fallback.lastModified,
+  };
+}
+
+export async function fetchAllFeeds(
+  feeds: Feed[],
+  meta: Record<string, FeedCacheMeta> = {},
+  onFeedResult?: (feed: Feed, result: FeedFetchResult) => Promise<void>,
+): Promise<{ entries: Entry[]; errors: Record<string, string>; feedMeta: Record<string, FeedCacheMeta> }> {
+  const results: PromiseSettledResult<FeedFetchResult>[] = new Array(feeds.length);
   let nextFeedIndex = 0;
 
   async function worker() {
     while (nextFeedIndex < feeds.length) {
       const index = nextFeedIndex++;
-      results[index] = await Promise.resolve(fetchFeed(feeds[index])).then(
+      results[index] = await Promise.resolve(fetchFeed(feeds[index], meta[feeds[index].id])).then(
         value => ({ status: 'fulfilled', value }),
         reason => ({ status: 'rejected', reason }),
       );
+      if (onFeedResult) {
+        const result = results[index];
+        await onFeedResult(feeds[index], result.status === 'fulfilled'
+          ? result.value
+          : { entries: [], error: result.reason?.message || 'Unknown error' });
+      }
     }
   }
 
@@ -226,17 +260,23 @@ export async function fetchAllFeeds(feeds: Feed[]): Promise<{ entries: Entry[]; 
 
   const all: Entry[] = [];
   const errors: Record<string, string> = {};
+  const nextMeta: Record<string, FeedCacheMeta> = {};
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
+    const feedId = feeds[i].id;
     if (r.status === 'fulfilled') {
       all.push(...r.value.entries);
-      if (r.value.error) errors[feeds[i].id] = r.value.error;
+      if (r.value.error) {
+        errors[feedId] = r.value.error;
+      } else if (r.value.validators?.etag || r.value.validators?.lastModified) {
+        nextMeta[feedId] = r.value.validators;
+      }
     } else {
-      errors[feeds[i].id] = r.reason?.message || 'Unknown error';
+      errors[feedId] = r.reason?.message || 'Unknown error';
     }
   }
   all.sort((a, b) => publishedTime(b) - publishedTime(a));
-  return { entries: all, errors };
+  return { entries: all, errors, feedMeta: nextMeta };
 }
 
 export function parseOPML(xml: string): { url: string; label: string }[] {

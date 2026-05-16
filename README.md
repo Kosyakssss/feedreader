@@ -78,7 +78,7 @@ All runtime data lives in `data/` (gitignored):
 {
   "maxBulkOpen": 20,
   "retention": { "maxEntries": 3000, "maxDays": null },
-  "theme": null,
+  "theme": "cupertino",
   "port": 8787
 }
 ```

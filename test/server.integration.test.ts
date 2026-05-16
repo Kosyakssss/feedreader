@@ -180,18 +180,35 @@ describe('server hardening', () => {
     expect(body.theme).toBe('default');
   });
 
-  test('returns refreshed entries and feed health from /api/refresh', async () => {
+  test('starts refresh in the background and returns entries and feed health from /api/refresh', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/refresh`, { method: 'POST' });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(202);
     const body = await res.json() as {
       count: number;
+      refreshing: boolean;
       entries: unknown[];
       feeds: { feeds: unknown[]; health: Record<string, unknown> };
     };
     expect(typeof body.count).toBe('number');
+    expect(typeof body.refreshing).toBe('boolean');
     expect(Array.isArray(body.entries)).toBeTrue();
     expect(Array.isArray(body.feeds.feeds)).toBeTrue();
     expect(body.feeds.health).toBeDefined();
+  });
+
+  test('reports refresh status', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/refresh/status`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      refreshing: boolean;
+      count: number;
+      entries: unknown[];
+      feeds: { feeds: unknown[] };
+    };
+    expect(typeof body.refreshing).toBe('boolean');
+    expect(typeof body.count).toBe('number');
+    expect(Array.isArray(body.entries)).toBeTrue();
+    expect(Array.isArray(body.feeds.feeds)).toBeTrue();
   });
 });

@@ -49,11 +49,19 @@ export interface CacheFile {
   entries: Entry[];
   lastFetched: Record<string, number>;
   feedErrors: Record<string, string>;
+  feedMeta: Record<string, FeedCacheMeta>;
 }
 
 export interface EnrichedEntry extends Entry {
   feedLabel: string;
   state: EntryState;
+}
+
+export interface FeedCacheMeta {
+  etag?: string;
+  lastModified?: string;
+  failureCount?: number;
+  nextRetryAfter?: number;
 }
 
 export interface ThemeMeta {

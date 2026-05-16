@@ -6,14 +6,18 @@ import {
   readThemeCSS, generateId, runDataMutation, writeDataFiles,
 } from './lib/data.ts';
 import { fetchAllFeeds, parseOPML, discoverFeedUrl, decodeHtmlEntities, publishedTime } from './lib/feeds.ts';
+import type { FeedFetchResult } from './lib/feeds.ts';
 import { renderApp } from './lib/render.ts';
-import type { EnrichedEntry } from './lib/types.ts';
+import type { EnrichedEntry, Feed } from './lib/types.ts';
 import { isSafeExternalUrl, isSafeObjectKey, sanitizeThemeName } from './lib/security.ts';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const DEFAULT_HOST = '127.0.0.1';
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-let refreshing = false;
+const FAILURE_BACKOFF_MS = [0, 5 * 60_000, 15 * 60_000, 60 * 60_000, 6 * 60 * 60_000];
+
+let refreshJob: Promise<number> | null = null;
+let lastRefreshResult: { count: number; finishedAt: number; error: string | null } | null = null;
 
 class HttpError extends Error {
   status: number;
@@ -54,44 +58,129 @@ async function getFeedsWithHealth() {
 
 async function refreshFeeds(): Promise<number> {
   await runDataMutation(() => mergeSyncConflicts());
-  const feedsToFetch = (await readFeeds()).feeds;
-  const fetchedFeedIds = new Set(feedsToFetch.map(feed => feed.id));
-  const { entries: fresh, errors } = await fetchAllFeeds(feedsToFetch);
+  const [feedsFile, startingCache] = await Promise.all([readFeeds(), readCache()]);
+  const now = Date.now();
+  const feedsToFetch = feedsFile.feeds.filter(feed => {
+    const retryAt = startingCache.feedMeta[feed.id]?.nextRetryAfter || 0;
+    return retryAt <= now;
+  });
+  let added = 0;
+  await fetchAllFeeds(feedsToFetch, startingCache.feedMeta, async (feed, result) => {
+    added += await mergeFeedResult(feed, result);
+  });
+  await removeDeletedFeedHealth();
+  return added;
+}
 
+async function mergeFeedResult(feed: Feed, result: FeedFetchResult): Promise<number> {
   return runDataMutation(async () => {
     const [feedsFile, cache, config] = await Promise.all([
       readFeeds(), readCache(), readConfig(),
     ]);
     const currentFeedIds = new Set(feedsFile.feeds.map(feed => feed.id));
     const existing = new Set(cache.entries.map(e => e.id));
-    let added = 0;
+    const existingSources = new Set(cache.entries.flatMap(e => e.sourceId ? [`${e.feedId}\t${e.sourceId}`] : []));
+    const existingUrls = new Set(cache.entries.flatMap(e => e.url ? [`${e.feedId}\t${e.url}`] : []));
+    const existingNoUrlTitles = new Set(cache.entries.flatMap(e => !e.url && e.title ? [`${e.feedId}\t${e.title}`] : []));
+    const addedIds: string[] = [];
 
-    for (const entry of fresh) {
-      if (!currentFeedIds.has(entry.feedId) || !fetchedFeedIds.has(entry.feedId) || existing.has(entry.id)) continue;
+    for (const entry of result.entries) {
+      if (entry.feedId !== feed.id || !currentFeedIds.has(entry.feedId)) continue;
+      if (existing.has(entry.id)) continue;
+      if (entry.sourceId && existingSources.has(`${entry.feedId}\t${entry.sourceId}`)) continue;
+      if (entry.url && existingUrls.has(`${entry.feedId}\t${entry.url}`)) continue;
+      if (!entry.url && entry.title && existingNoUrlTitles.has(`${entry.feedId}\t${entry.title}`)) continue;
       cache.entries.push(entry);
       existing.add(entry.id);
-      added++;
+      if (entry.sourceId) existingSources.add(`${entry.feedId}\t${entry.sourceId}`);
+      if (entry.url) existingUrls.add(`${entry.feedId}\t${entry.url}`);
+      if (!entry.url && entry.title) existingNoUrlTitles.add(`${entry.feedId}\t${entry.title}`);
+      addedIds.push(entry.id);
     }
 
     const now = Date.now();
-    for (const f of feedsFile.feeds) {
-      if (!fetchedFeedIds.has(f.id)) continue;
-      cache.lastFetched[f.id] = now;
-      if (errors[f.id]) cache.feedErrors[f.id] = errors[f.id];
-      else delete cache.feedErrors[f.id];
-    }
-    for (const id of Object.keys(cache.lastFetched)) {
-      if (!currentFeedIds.has(id)) delete cache.lastFetched[id];
-    }
-    for (const id of Object.keys(cache.feedErrors)) {
-      if (!currentFeedIds.has(id)) delete cache.feedErrors[id];
+    cache.lastFetched[feed.id] = now;
+    const priorMeta = cache.feedMeta[feed.id] || {};
+    if (result.error) {
+      const failureCount = Math.min((priorMeta.failureCount || 0) + 1, FAILURE_BACKOFF_MS.length - 1);
+      cache.feedMeta[feed.id] = {
+        ...priorMeta,
+        failureCount,
+        nextRetryAfter: now + FAILURE_BACKOFF_MS[failureCount],
+      };
+      cache.feedErrors[feed.id] = result.error;
+    } else {
+      cache.feedMeta[feed.id] = {
+        ...priorMeta,
+        ...(result.validators || {}),
+        failureCount: 0,
+        nextRetryAfter: 0,
+      };
+      delete cache.feedErrors[feed.id];
     }
 
     const state = await readState(cache);
     const pruned = pruneEntries(cache, state, config);
     await writeDataFiles({ 'cache.json': pruned.cache, 'state.json': pruned.state });
-    return added;
+    const retainedIds = new Set(pruned.cache.entries.map(entry => entry.id));
+    return addedIds.filter(id => retainedIds.has(id)).length;
   });
+}
+
+async function removeDeletedFeedHealth(): Promise<void> {
+  await runDataMutation(async () => {
+    const [feedsFile, cache] = await Promise.all([readFeeds(), readCache()]);
+    const currentFeedIds = new Set(feedsFile.feeds.map(feed => feed.id));
+    let changed = false;
+    for (const id of Object.keys(cache.lastFetched)) {
+      if (!currentFeedIds.has(id)) {
+        delete cache.lastFetched[id];
+        changed = true;
+      }
+    }
+    for (const id of Object.keys(cache.feedErrors)) {
+      if (!currentFeedIds.has(id)) {
+        delete cache.feedErrors[id];
+        changed = true;
+      }
+    }
+    for (const id of Object.keys(cache.feedMeta)) {
+      if (!currentFeedIds.has(id)) {
+        delete cache.feedMeta[id];
+        changed = true;
+      }
+    }
+    if (changed) await writeDataFiles({ 'cache.json': cache });
+  });
+}
+
+function startRefresh(): Promise<number> {
+  if (refreshJob) return refreshJob;
+  refreshJob = refreshFeeds()
+    .then(count => {
+      lastRefreshResult = { count, finishedAt: Date.now(), error: null };
+      return count;
+    })
+    .catch(error => {
+      lastRefreshResult = { count: 0, finishedAt: Date.now(), error: (error as Error).message || 'Refresh failed' };
+      throw error;
+    })
+    .finally(() => {
+      refreshJob = null;
+    });
+  return refreshJob;
+}
+
+async function getRefreshStatus() {
+  const [entries, feeds] = await Promise.all([getEntries(), getFeedsWithHealth()]);
+  return {
+    refreshing: !!refreshJob,
+    count: lastRefreshResult?.count || 0,
+    error: lastRefreshResult?.error || null,
+    finishedAt: lastRefreshResult?.finishedAt || null,
+    entries,
+    feeds,
+  };
 }
 
 function parseBody(req: import('node:http').IncomingMessage): Promise<string> {
@@ -200,15 +289,12 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
 
     if (path === '/api/refresh' && method === 'POST') {
-      if (refreshing) return json(res, { count: 0, entries: await getEntries(), feeds: await getFeedsWithHealth() });
-      refreshing = true;
-      try {
-        const count = await refreshFeeds();
-        const [entries, feeds] = await Promise.all([getEntries(), getFeedsWithHealth()]);
-        return json(res, { count, entries, feeds });
-      } finally {
-        refreshing = false;
-      }
+      startRefresh().catch(error => console.error('Refresh error:', error));
+      return json(res, await getRefreshStatus(), 202);
+    }
+
+    if (path === '/api/refresh/status' && method === 'GET') {
+      return json(res, await getRefreshStatus());
     }
 
     if (path === '/api/state' && method === 'POST') {
@@ -438,6 +524,7 @@ async function main() {
   server.listen(port, host, () => {
     const displayHost = host === DEFAULT_HOST ? 'localhost' : host;
     console.log(`Feedreader running at http://${displayHost}:${port}`);
+    startRefresh().catch(error => console.error('Startup refresh error:', error));
   });
 }
 

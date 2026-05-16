@@ -1,14 +1,14 @@
 import { mkdir, readdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
-import type { CacheFile, Config, Entry, EntryState, FeedsFile, StateFile, ThemeMeta } from './types.ts';
+import type { CacheFile, Config, Entry, EntryState, FeedCacheMeta, FeedsFile, StateFile, ThemeMeta } from './types.ts';
 import { createEntryId, publishedTime } from './feeds.ts';
 import { isSafeObjectKey, sanitizeThemeName } from './security.ts';
 
 const DEFAULT_CONFIG: Config = {
   maxBulkOpen: 20,
   retention: { maxEntries: 3000, maxDays: null },
-  theme: null,
+  theme: 'cupertino',
   port: 8787,
 };
 
@@ -73,6 +73,25 @@ function numberRecord(value: unknown): Record<string, number> {
   return out;
 }
 
+function normalizeFeedMeta(value: unknown): Record<string, FeedCacheMeta> {
+  const out: Record<string, FeedCacheMeta> = Object.create(null);
+  if (!isRecord(value)) return out;
+  for (const [key, entry] of Object.entries(value)) {
+    if (!isSafeObjectKey(key) || !isRecord(entry)) continue;
+    const meta: FeedCacheMeta = {};
+    if (typeof entry.etag === 'string' && entry.etag) meta.etag = entry.etag;
+    if (typeof entry.lastModified === 'string' && entry.lastModified) meta.lastModified = entry.lastModified;
+    if (typeof entry.failureCount === 'number' && Number.isInteger(entry.failureCount) && entry.failureCount > 0) {
+      meta.failureCount = entry.failureCount;
+    }
+    if (typeof entry.nextRetryAfter === 'number' && Number.isFinite(entry.nextRetryAfter) && entry.nextRetryAfter > 0) {
+      meta.nextRetryAfter = entry.nextRetryAfter;
+    }
+    if (Object.keys(meta).length) out[key] = meta;
+  }
+  return out;
+}
+
 function normalizeFeedsFile(value: unknown): FeedsFile {
   if (!isRecord(value)) return { folders: [], feeds: [] };
   const folders = Array.isArray(value.folders)
@@ -110,7 +129,7 @@ function normalizeEntry(entry: unknown): Entry | null {
 }
 
 function normalizeCacheFile(cache: unknown): CacheFile {
-  if (!isRecord(cache)) return { entries: [], lastFetched: {}, feedErrors: {} };
+  if (!isRecord(cache)) return { entries: [], lastFetched: {}, feedErrors: {}, feedMeta: {} };
   const entries = Array.isArray(cache.entries)
     ? cache.entries.flatMap(entry => normalizeEntry(entry) || [])
     : [];
@@ -118,6 +137,7 @@ function normalizeCacheFile(cache: unknown): CacheFile {
     entries,
     lastFetched: numberRecord(cache.lastFetched),
     feedErrors: stringRecord(cache.feedErrors),
+    feedMeta: normalizeFeedMeta(cache.feedMeta),
   };
 }
 
