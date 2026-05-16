@@ -5,7 +5,7 @@ A local-first RSS/Atom reader that runs in the browser. Portable, pretty, lightw
 ## Philosophy
 
 - **Local-first** — everything lives on disk (`data/` folder). Sync via Syncthing, iCloud, or just copy the folder. No accounts, no cloud.
-- **Minimal reading in-app** — entries open original links. The app is a *launcher*, not a reader.
+- **Minimal reading in-app** — entries open original links. The app is a _launcher_, not a reader.
 - **Runs everywhere** — uses Node.js standard APIs. Works with Bun on Mac and Node/tsx on Android via Termux. No Bun-specific APIs.
 - **Two dependencies** — `fast-xml-parser`, `tsx`. That's it.
 - **Theming** — drop CSS files in `data/themes/`. The base UI is itself a theme (`default.css`). Themes use CSS custom properties and can override anything. Theme metadata lives in CSS comment headers (`@name`, `@author`, `@description`).
@@ -25,6 +25,7 @@ npx tsx server.ts
 ```
 
 Open `http://localhost:8787`. Override the port with `--port 3000` or in `data/config.json`.
+The server binds to `127.0.0.1` by default; pass `--host 0.0.0.0` only if you intentionally want LAN access.
 
 Point to a custom data directory:
 
@@ -36,22 +37,23 @@ bun server.ts --data /path/to/data
 
 All runtime data lives in `data/` (gitignored):
 
-| File | Purpose |
-|------|---------|
-| `feeds.json` | Feed subscriptions |
-| `state.json` | Read/starred state per entry |
-| `cache.json` | Fetched entries + fetch timestamps |
-| `config.json` | Settings (created on first write) |
-| `themes/*.css` | Theme files |
+| File               | Purpose                                      |
+| ------------------ | -------------------------------------------- |
+| `feeds.json`       | Feed subscriptions                           |
+| `state.json`       | Read/starred state per entry                 |
+| `cache.json`       | Fetched entries + fetch timestamps           |
+| `config.json`      | Settings (created on first write)            |
+| `transaction.json` | Crash-recovery journal for multi-file writes |
+| `themes/*.css`     | Theme files                                  |
 
 ## Pages
 
-| Route | Page |
-|-------|------|
-| `/` | Timeline — all entries, newest first |
-| `/starred` | Starred entries |
-| `/feeds` | Feed management, add/remove/OPML import |
-| `/feed/:id` | Per-feed view |
+| Route       | Page                                            |
+| ----------- | ----------------------------------------------- |
+| `/`         | Timeline — all entries, newest first            |
+| `/starred`  | Starred entries                                 |
+| `/feeds`    | Feed management, add/remove/OPML import         |
+| `/feed/:id` | Per-feed view                                   |
 | `/settings` | Config (also editable by hand in `config.json`) |
 
 ## Features
