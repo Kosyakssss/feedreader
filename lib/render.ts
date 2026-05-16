@@ -409,29 +409,46 @@ function reRenderList() {
   }
 }
 
+function updateToolbarCounts() {
+  const toolbar = document.querySelector('.toolbar');
+  if (!toolbar) return;
+  const source = getCurrentSource();
+  const c = counts(source);
+  toolbar.querySelectorAll('[data-filter]').forEach(b => {
+    const f = b.dataset.filter;
+    const n = f === 'all' ? c.all : f === 'unread' ? c.unread : c.read;
+    b.textContent = f.charAt(0).toUpperCase() + f.slice(1) + ' (' + n + ')';
+    b.classList.toggle('active', f === currentFilter);
+  });
+}
+
 async function markEntries(ids, updates) {
   const map = {};
+  const previous = new Map();
   for (const id of ids) {
     map[id] = updates;
     const e = entries.find(x => x.id === id);
     if (e) {
+      previous.set(id, e.state ? { ...e.state } : {});
       if ('read' in updates) { e.state = { ...e.state, read: updates.read, readAt: Date.now() }; }
       if ('starred' in updates) { e.state = { ...e.state, starred: updates.starred, starredAt: Date.now() }; }
     }
   }
   reRenderList();
-  const toolbar = document.querySelector('.toolbar');
-  if (toolbar) {
-    const source = getCurrentSource();
-    const c = counts(source);
-    toolbar.querySelectorAll('[data-filter]').forEach(b => {
-      const f = b.dataset.filter;
-      const n = f === 'all' ? c.all : f === 'unread' ? c.unread : c.read;
-      b.textContent = f.charAt(0).toUpperCase() + f.slice(1) + ' (' + n + ')';
-      b.classList.toggle('active', f === currentFilter);
-    });
+  updateToolbarCounts();
+  try {
+    await api('POST', '/api/state', { entries: map });
+    return true;
+  } catch (err) {
+    for (const [id, state] of previous) {
+      const e = entries.find(x => x.id === id);
+      if (e) e.state = state;
+    }
+    reRenderList();
+    updateToolbarCounts();
+    toast('Could not save state: ' + err.message);
+    return false;
   }
-  await api('POST', '/api/state', { entries: map });
 }
 
 function bindPage() {
@@ -518,8 +535,9 @@ function bindPage() {
     if (markAll) {
       const unread = getFiltered(getCurrentSource()).filter(x => !x.state?.read);
       if (unread.length === 0) return;
-      await markEntries(unread.map(x => x.id), { read: true });
-      toast(unread.length + ' marked as read');
+      if (await markEntries(unread.map(x => x.id), { read: true })) {
+        toast(unread.length + ' marked as read');
+      }
       return;
     }
 
@@ -671,7 +689,11 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
   } else if (key === 'a') {
     const unread = filtered.filter(x => !x.state?.read);
-    if (unread.length > 0) { markEntries(unread.map(x => x.id), { read: true }); toast(unread.length + ' marked as read'); }
+    if (unread.length > 0) {
+      markEntries(unread.map(x => x.id), { read: true }).then((ok) => {
+        if (ok) toast(unread.length + ' marked as read');
+      });
+    }
     e.preventDefault();
   } else if (key === 'r') {
     document.querySelector('[data-refresh]')?.click();
