@@ -79,7 +79,7 @@ All runtime data lives in `data/` (gitignored):
 
 - **Keyboard-driven**: `j`/`k` navigate, `o` open, `m` toggle read, `s` toggle star, `x` select, `a` mark all read, `r` refresh, `/` search, `?` shortcuts overlay
 - **Search**: instant, client-side, case-insensitive substring match on title + feed label
-- **Bulk actions**: open all unread (tab cap configurable, default 20), mark read/starred, select multiple with `x` or shift-click
+- **Bulk actions**: open all unread (tab cap configurable, default 20), mark read/starred, select multiple with `x`, shift-click, or drag-selecting the checkbox lane
 - **Feed auto-discovery**: fetches HTML, looks for `<link rel="alternate">`, tries common paths
 - **OPML import**: paste or upload OPML to add feeds in bulk; unsafe/local URLs are skipped
 - **View transitions**: uses the View Transition API for page navigation — browsers that don't support it just skip the animation

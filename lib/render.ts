@@ -125,6 +125,8 @@ let currentFilter = 'all';
 let currentPage = '';
 let loadLimit = 50;
 let selectionAnchorId = null;
+let selectionDrag = null;
+let suppressNextSelectClick = false;
 
 function esc(s) {
   const d = document.createElement('div');
@@ -177,7 +179,7 @@ async function pollRefresh(initial) {
     if (Array.isArray(latest.entries) && latest.feeds) {
       entries = latest.entries;
       feeds = latest.feeds;
-      navigate(currentPage, false);
+      renderCurrentPage();
     }
     await new Promise(r => setTimeout(r, 750));
     latest = await api('GET', '/api/refresh/status');
@@ -248,7 +250,7 @@ function entryHtml(entry, i) {
   const titleHtml = safeUrl
     ? '<a href="' + esc(safeUrl) + '" target="_blank" rel="noopener" class="entry-title" data-entry-link="' + esc(entry.id) + '">' + esc(displayTitle) + '</a>'
     : '<span class="entry-title">' + esc(displayTitle) + '</span>';
-  return '<div class="entry-card ' + (read ? 'entry-read' : 'entry-unread') + (foc ? ' entry-focused' : '') + '" data-idx="' + i + '" data-id="' + esc(entry.id) + '">'
+  return '<div class="entry-card ' + (read ? 'entry-read' : 'entry-unread') + (sel ? ' entry-selected' : '') + (foc ? ' entry-focused' : '') + '" data-idx="' + i + '" data-id="' + esc(entry.id) + '">'
     + '<label class="entry-checkbox"><input type="checkbox" data-select="' + esc(entry.id) + '"' + (sel ? ' checked' : '') + '></label>'
     + '<span class="entry-leading-space" aria-hidden="true"></span>'
     + '<div class="entry-content">'
@@ -356,6 +358,17 @@ function route(path) {
   return renderTimeline();
 }
 
+function renderCurrentPage() {
+  const update = () => {
+    updateBulkBar();
+    document.getElementById('app').innerHTML = route(currentPage);
+    updateNav();
+    bindPage();
+  };
+  if (document.startViewTransition) document.startViewTransition(update);
+  else update();
+}
+
 function navigate(path, push) {
   const update = () => {
     currentPage = path;
@@ -399,13 +412,19 @@ function reRenderList() {
     return;
   }
   for (let i = 0; i < visible.length; i++) {
+    if (listEl.children[i].dataset.id !== visible[i].id) {
+      el.innerHTML = entryListHtml(getCurrentSource());
+      return;
+    }
+  }
+  for (let i = 0; i < visible.length; i++) {
     const entry = visible[i];
     const card = listEl.children[i];
     const read = entry.state?.read;
     const starred = entry.state?.starred;
     const sel = selectedIds.has(entry.id);
     const foc = i === focusedIndex;
-    card.className = 'entry-card ' + (read ? 'entry-read' : 'entry-unread') + (foc ? ' entry-focused' : '');
+    card.className = 'entry-card ' + (read ? 'entry-read' : 'entry-unread') + (sel ? ' entry-selected' : '') + (foc ? ' entry-focused' : '');
     const cb = card.querySelector('input[type="checkbox"]');
     if (cb) cb.checked = sel;
     const starBtn = card.querySelector('.btn-star');
@@ -426,6 +445,54 @@ function updateToolbarCounts() {
     b.textContent = f.charAt(0).toUpperCase() + f.slice(1) + ' (' + n + ')';
     b.classList.toggle('active', f === currentFilter);
   });
+}
+
+function setEntrySelected(id, selected) {
+  if (selected) selectedIds.add(id);
+  else selectedIds.delete(id);
+}
+
+function toggleEntrySelection(id, idx, useRange) {
+  const visible = getVisibleEntries();
+  const shouldSelect = !selectedIds.has(id);
+  if (useRange) {
+    const anchorIdx = selectionAnchorId ? visible.findIndex(v => v.id === selectionAnchorId) : 0;
+    if (anchorIdx !== -1 && idx !== -1 && visible.length > 0) {
+      const [start, end] = anchorIdx < idx ? [anchorIdx, idx] : [idx, anchorIdx];
+      for (let i = start; i <= end; i++) {
+        setEntrySelected(visible[i].id, shouldSelect);
+      }
+      selectionAnchorId = id;
+      reRenderList();
+      updateBulkBar();
+      return;
+    }
+  }
+  setEntrySelected(id, shouldSelect);
+  selectionAnchorId = id;
+  reRenderList();
+  updateBulkBar();
+}
+
+function applyDragSelectionToIndex(idx) {
+  if (!selectionDrag || idx < 0) return;
+  const visible = getVisibleEntries();
+  if (idx >= visible.length) return;
+  const [start, end] = selectionDrag.lastIdx < idx ? [selectionDrag.lastIdx, idx] : [idx, selectionDrag.lastIdx];
+  for (let i = start; i <= end; i++) {
+    setEntrySelected(visible[i].id, selectionDrag.selecting);
+  }
+  selectionDrag.lastIdx = idx;
+  selectionAnchorId = visible[idx].id;
+  reRenderList();
+  updateBulkBar();
+}
+
+function dragSelectionIndexFromPoint(x, y) {
+  const el = document.elementFromPoint(x, y);
+  const card = el?.closest?.('.entry-card');
+  if (!card) return -1;
+  return Number.parseInt(card.dataset.idx, 10);
 }
 
 async function markEntries(ids, updates) {
@@ -468,6 +535,46 @@ function bindPage() {
 
   if (!app.dataset.clickBound) {
     app.dataset.clickBound = '1';
+    app.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      if (e.shiftKey) return;
+      const checkbox = e.target.closest('.entry-checkbox')?.querySelector('[data-select]');
+      if (!checkbox) return;
+      const card = checkbox.closest('.entry-card');
+      const idx = card ? Number.parseInt(card.dataset.idx, 10) : -1;
+      if (idx < 0) return;
+      e.preventDefault();
+      const id = checkbox.dataset.select;
+      selectionDrag = {
+        pointerId: e.pointerId,
+        selecting: !selectedIds.has(id),
+        lastIdx: idx,
+      };
+      app.setPointerCapture?.(e.pointerId);
+      suppressNextSelectClick = true;
+      document.querySelector('.entry-list')?.classList.add('is-selecting');
+      setEntrySelected(id, selectionDrag.selecting);
+      selectionAnchorId = id;
+      reRenderList();
+      updateBulkBar();
+    });
+
+    app.addEventListener('pointermove', (e) => {
+      if (!selectionDrag || e.pointerId !== selectionDrag.pointerId) return;
+      e.preventDefault();
+      applyDragSelectionToIndex(dragSelectionIndexFromPoint(e.clientX, e.clientY));
+    });
+
+    const endDragSelection = (e) => {
+      if (!selectionDrag || e.pointerId !== selectionDrag.pointerId) return;
+      selectionDrag = null;
+      app.releasePointerCapture?.(e.pointerId);
+      document.querySelector('.entry-list')?.classList.remove('is-selecting');
+      setTimeout(() => { suppressNextSelectClick = false; }, 0);
+    };
+    app.addEventListener('pointerup', endDragSelection);
+    app.addEventListener('pointercancel', endDragSelection);
+
     app.addEventListener('click', async (e) => {
       const target = e.target;
 
@@ -488,30 +595,14 @@ function bindPage() {
 
     const selectBox = target.closest('[data-select]');
     if (selectBox) {
+      if (suppressNextSelectClick) {
+        e.preventDefault();
+        return;
+      }
       const id = selectBox.dataset.select;
-      const visible = getVisibleEntries();
       const card = selectBox.closest('.entry-card');
       const idx = card ? parseInt(card.dataset.idx, 10) : -1;
-      const shouldSelect = !selectedIds.has(id);
-
-      if (e.shiftKey) {
-        const anchorIdx = selectionAnchorId ? visible.findIndex(v => v.id === selectionAnchorId) : 0;
-        if (anchorIdx !== -1 && idx !== -1 && visible.length > 0) {
-          const [start, end] = anchorIdx < idx ? [anchorIdx, idx] : [idx, anchorIdx];
-          for (let i = start; i <= end; i++) {
-            if (shouldSelect) selectedIds.add(visible[i].id);
-            else selectedIds.delete(visible[i].id);
-          }
-          selectionAnchorId = id;
-          reRenderList();
-          updateBulkBar();
-          return;
-        }
-      }
-
-      if (shouldSelect) selectedIds.add(id); else selectedIds.delete(id);
-      selectionAnchorId = id;
-      updateBulkBar();
+      toggleEntrySelection(id, idx, e.shiftKey);
       return;
     }
 
@@ -554,7 +645,7 @@ function bindPage() {
       toast('Refreshing feeds…');
       const r = await refreshData();
       toast(r.count + ' new entries');
-      navigate(currentPage, false);
+      renderCurrentPage();
       return;
     }
 
@@ -754,7 +845,7 @@ window.addEventListener('popstate', () => navigate(location.pathname, false));
     toast('Refreshing feeds…');
     const r = await refreshData();
     if (r.count > 0) toast(r.count + ' new entries');
-    navigate(currentPage, false);
+    renderCurrentPage();
   } catch {}
 })();
 </script>
