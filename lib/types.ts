@@ -63,10 +63,3 @@ export interface FeedCacheMeta {
   failureCount?: number;
   nextRetryAfter?: number;
 }
-
-export interface ThemeMeta {
-  file: string;
-  name: string;
-  author: string;
-  description: string;
-}

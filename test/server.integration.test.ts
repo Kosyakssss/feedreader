@@ -25,7 +25,7 @@ beforeAll(async () => {
   await writeFile(join(dataDir, 'feeds.json'), '{ "folders": [], "feeds": [] }\n');
   await writeFile(join(dataDir, 'state.json'), '{}\n');
   await writeFile(join(dataDir, 'cache.json'), '{ "entries": [], "lastFetched": {} }\n');
-  await writeFile(join(dataDir, 'themes', 'default.css'), 'body { color: #111; }\n');
+  await writeFile(join(dataDir, 'themes', 'cupertino.css'), 'body { color: #111; }\n');
 
   port = 41000 + Math.floor(Math.random() * 5000);
   proc = Bun.spawn({
@@ -184,15 +184,24 @@ describe('server hardening', () => {
     expect(res.status).toBe(400);
   });
 
-  test('accepts valid theme name in /api/config', async () => {
+  test('accepts Cupertino theme in /api/config', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/config`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ theme: 'cupertino' }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { theme: string };
+    expect(body.theme).toBe('cupertino');
+  });
+
+  test('rejects unavailable theme names in /api/config', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/config`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ theme: 'default' }),
     });
-    expect(res.status).toBe(200);
-    const body = await res.json() as { theme: string };
-    expect(body.theme).toBe('default');
+    expect(res.status).toBe(400);
   });
 
   test('starts refresh in the background and returns entries and feed health from /api/refresh', async () => {

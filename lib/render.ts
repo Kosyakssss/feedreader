@@ -1,10 +1,10 @@
-import type { Config, ThemeMeta } from './types.ts';
+import type { Config } from './types.ts';
 
 function safeJsonForScript(data: unknown): string {
   return JSON.stringify(data).replace(/</g, '\\u003c');
 }
 
-export function renderApp(config: Config, themes: ThemeMeta[]): string {
+export function renderApp(config: Config): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -116,8 +116,6 @@ export function renderApp(config: Config, themes: ThemeMeta[]): string {
 
 <script>
 const CONFIG = ${safeJsonForScript(config)};
-const THEMES = ${safeJsonForScript(themes)};
-
 let entries = [];
 let feeds = { folders: [], feeds: [] };
 let selectedIds = new Set();
@@ -344,12 +342,6 @@ function renderSettings() {
   html += '<div class="settings-field"><label>Max bulk open tabs</label><input name="maxBulkOpen" type="number" min="1" value="' + CONFIG.maxBulkOpen + '"></div>';
   html += '<div class="settings-field"><label>Max entries to keep</label><input name="maxEntries" type="number" min="100" value="' + CONFIG.retention.maxEntries + '"></div>';
   html += '<div class="settings-field"><label>Max entry age (days, empty = no limit)</label><input name="maxDays" type="number" min="1" value="' + (CONFIG.retention.maxDays || '') + '"></div>';
-  html += '<div class="settings-field"><label>Theme</label><select name="theme"><option value="">Default</option>';
-  for (const t of THEMES) {
-    if (t.file === 'default') continue;
-    html += '<option value="' + esc(t.file) + '"' + (CONFIG.theme === t.file ? ' selected' : '') + '>' + esc(t.name) + '</option>';
-  }
-  html += '</select></div>';
   html += '<button class="btn btn-primary" type="submit">Save</button>';
   html += '</form></div>';
   return html;
@@ -621,11 +613,10 @@ function bindPage() {
           maxEntries: parseInt(fd.get('maxEntries')) || 3000,
           maxDays: parseInt(fd.get('maxDays')) || null,
         },
-        theme: fd.get('theme') || null,
+        theme: 'cupertino',
       };
       const saved = await api('PUT', '/api/config', updated);
       Object.assign(CONFIG, saved);
-      document.getElementById('theme-link').href = '/api/theme?t=' + Date.now();
       toast('Settings saved!');
     });
   }

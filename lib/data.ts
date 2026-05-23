@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
-import type { CacheFile, Config, Entry, EntryState, FeedCacheMeta, FeedsFile, StateFile, ThemeMeta } from './types.ts';
+import type { CacheFile, Config, Entry, EntryState, FeedCacheMeta, FeedsFile, StateFile } from './types.ts';
 import { createEntryId, publishedTime } from './feeds.ts';
 import { isSafeObjectKey, sanitizeThemeName } from './security.ts';
 
@@ -174,10 +174,8 @@ function normalizeConfig(value: unknown): Config {
   if (typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535) {
     config.port = port;
   }
-  if (value.theme === null || value.theme === '') {
-    config.theme = null;
-  } else if (typeof value.theme === 'string') {
-    config.theme = sanitizeThemeName(value.theme);
+  if (value.theme === null || value.theme === '' || value.theme === 'cupertino') {
+    config.theme = 'cupertino';
   }
   if (isRecord(value.retention)) {
     const maxEntries = value.retention.maxEntries;
@@ -431,37 +429,6 @@ export function pruneEntries(cache: CacheFile, state: StateFile, config: Config)
   }
 
   return { cache: { ...cache, entries }, state: prunedState };
-}
-
-export async function listThemes(): Promise<ThemeMeta[]> {
-  const dir = join(getDataDir(), 'themes');
-  let files: string[];
-  try {
-    files = await readdir(dir);
-  } catch {
-    return [];
-  }
-  const themes: ThemeMeta[] = [];
-  for (const f of files.filter(f => f.endsWith('.css'))) {
-    const css = await readFile(join(dir, f), 'utf-8');
-    const meta: ThemeMeta = {
-      file: f.replace(/\.css$/, ''),
-      name: f.replace(/\.css$/, ''),
-      author: '',
-      description: '',
-    };
-    const header = css.match(/\/\*\*([\s\S]*?)\*\//);
-    if (header) {
-      const nameMatch = header[1].match(/@name\s+(.+)/);
-      const authorMatch = header[1].match(/@author\s+(.+)/);
-      const descMatch = header[1].match(/@description\s+(.+)/);
-      if (nameMatch) meta.name = nameMatch[1].trim();
-      if (authorMatch) meta.author = authorMatch[1].trim();
-      if (descMatch) meta.description = descMatch[1].trim();
-    }
-    themes.push(meta);
-  }
-  return themes;
 }
 
 export async function readThemeCSS(name: string): Promise<string> {

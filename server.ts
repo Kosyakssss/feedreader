@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 
 import {
   readFeeds, readState, updateState, readConfig, writeConfig,
-  readCache, mergeSyncConflicts, pruneEntries, listThemes,
+  readCache, mergeSyncConflicts, pruneEntries,
   readThemeCSS, generateId, getDataDir, runDataMutation, writeDataFiles,
 } from './lib/data.ts';
 import { fetchAllFeeds, parseOPML, discoverFeedUrl, decodeHtmlEntities, publishedTime } from './lib/feeds.ts';
@@ -471,12 +471,12 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         patch.port = body.port;
       }
       if ('theme' in body) {
-        if (body.theme === null || body.theme === '') {
-          patch.theme = null;
+        if (body.theme === null || body.theme === '' || body.theme === 'cupertino') {
+          patch.theme = 'cupertino';
         } else {
           const safeTheme = sanitizeThemeName(body.theme);
           if (!safeTheme) throw new HttpError(400, 'Invalid theme name');
-          patch.theme = safeTheme;
+          throw new HttpError(400, 'Only the Cupertino theme is available');
         }
       }
       if ('retention' in body) {
@@ -502,13 +502,9 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       return json(res, updated);
     }
 
-    if (path === '/api/themes' && method === 'GET') {
-      return json(res, await listThemes());
-    }
-
     if (path === '/api/theme' && method === 'GET') {
       const config = await readConfig();
-      const themeName = config.theme || 'default';
+      const themeName = config.theme || 'cupertino';
       const css = await readThemeCSS(themeName);
       res.writeHead(200, { 'Content-Type': 'text/css' });
       return res.end(css);
@@ -519,8 +515,8 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
 
     // SPA: serve the app for all non-API routes
-    const [config, themes] = await Promise.all([readConfig(), listThemes()]);
-    const html = renderApp(config, themes);
+    const config = await readConfig();
+    const html = renderApp(config);
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(html);
 

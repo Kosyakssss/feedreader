@@ -8,7 +8,7 @@ A local-first RSS/Atom reader that runs in the browser. Portable, pretty, lightw
 - **Minimal reading in-app** — entries open original links. The app is a _launcher_, not a reader.
 - **Runs everywhere** — uses Node.js standard APIs. Works with Bun on Mac and Node/tsx on Android via Termux. No Bun-specific APIs.
 - **Two dependencies** — `fast-xml-parser`, `tsx`. That's it.
-- **Theming** — drop CSS files in `data/themes/`. The base UI is itself a theme (`default.css`). Themes use CSS custom properties and can override anything. Theme metadata lives in CSS comment headers (`@name`, `@author`, `@description`).
+- **Cupertino UI** — a single Apple-inspired theme keeps the app quiet, crisp, and consistent.
 - **File-synced state** — Syncthing conflict files (`state.sync-conflict-*.json`) are auto-merged using latest-timestamp-wins per entry.
 - **Safer imports/state** — feed URLs are validated on both manual add and OPML import, and entry IDs are scoped per feed so state cannot bleed across subscriptions.
 
@@ -56,14 +56,14 @@ The LaunchAgent runs `server.ts` from this checkout at login and writes logs to 
 
 All runtime data lives in `data/` (gitignored):
 
-| File               | Purpose                                      |
-| ------------------ | -------------------------------------------- |
-| `feeds.json`       | Feed subscriptions                           |
-| `state.json`       | Read/starred state per entry                 |
-| `cache.json`       | Fetched entries + fetch timestamps           |
-| `config.json`      | Settings (created on first write)            |
-| `transaction.json` | Crash-recovery journal for multi-file writes |
-| `themes/*.css`     | Theme files                                  |
+| File                   | Purpose                                      |
+| ---------------------- | -------------------------------------------- |
+| `feeds.json`           | Feed subscriptions                           |
+| `state.json`           | Read/starred state per entry                 |
+| `cache.json`           | Fetched entries + fetch timestamps           |
+| `config.json`          | Settings (created on first write)            |
+| `transaction.json`     | Crash-recovery journal for multi-file writes |
+| `themes/cupertino.css` | App theme                                    |
 
 ## Pages
 
@@ -97,7 +97,6 @@ All runtime data lives in `data/` (gitignored):
 {
   "maxBulkOpen": 20,
   "retention": { "maxEntries": 3000, "maxDays": null },
-  "theme": "cupertino",
   "port": 8787
 }
 ```
