@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import {
   readFeeds, readState, updateState, readConfig, writeConfig,
   readCache, mergeSyncConflicts, pruneEntries, listThemes,
-  readThemeCSS, generateId, runDataMutation, writeDataFiles,
+  readThemeCSS, generateId, getDataDir, runDataMutation, writeDataFiles,
 } from './lib/data.ts';
 import { fetchAllFeeds, parseOPML, discoverFeedUrl, decodeHtmlEntities, publishedTime } from './lib/feeds.ts';
 import type { FeedFetchResult } from './lib/feeds.ts';
@@ -15,9 +15,13 @@ const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const DEFAULT_HOST = '127.0.0.1';
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const FAILURE_BACKOFF_MS = [0, 5 * 60_000, 15 * 60_000, 60 * 60_000, 6 * 60 * 60_000];
+const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 let refreshJob: Promise<number> | null = null;
 let lastRefreshResult: { count: number; finishedAt: number; error: string | null } | null = null;
+const startedAt = new Date().toISOString();
+let startupHost = DEFAULT_HOST;
+let startupPort = 8787;
 
 class HttpError extends Error {
   status: number;
@@ -183,6 +187,20 @@ async function getRefreshStatus() {
   };
 }
 
+async function getHealth() {
+  return {
+    ok: true,
+    pid: process.pid,
+    startedAt,
+    uptimeSeconds: Math.round(process.uptime()),
+    dataDir: getDataDir(),
+    host: startupHost,
+    port: startupPort,
+    refreshing: !!refreshJob,
+    lastRefreshResult,
+  };
+}
+
 function parseBody(req: import('node:http').IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const contentLength = Number(req.headers['content-length'] || 0);
@@ -282,6 +300,10 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     const method = req.method || 'GET';
 
     if (MUTATING_METHODS.has(method)) assertTrustedRequest(req, url);
+
+    if (path === '/api/health' && method === 'GET') {
+      return json(res, await getHealth());
+    }
 
     if (path === '/api/entries' && method === 'GET') {
       const feed = url.searchParams.get('feed') || undefined;
@@ -511,21 +533,98 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   }
 }
 
+function listen(server: import('node:http').Server, port: number, host: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onError = (error: Error) => {
+      server.off('listening', onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      server.off('error', onError);
+      resolve();
+    };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen(port, host);
+  });
+}
+
+function describeListenError(error: unknown, host: string, port: number): string {
+  const code = typeof error === 'object' && error && 'code' in error ? (error as { code?: unknown }).code : undefined;
+  if (code === 'EADDRINUSE') {
+    return `Port ${port} is already in use on ${host}. Stop the other Feedreader process or change data/config.json port.`;
+  }
+  if (code === 'EACCES') {
+    return `Cannot bind to ${host}:${port}; permission denied.`;
+  }
+  return (error as Error).message || String(error);
+}
+
+function installShutdownHandlers(server: import('node:http').Server) {
+  let shuttingDown = false;
+  const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`Received ${signal}; shutting down Feedreader`);
+
+    const forceExit = setTimeout(() => {
+      console.error('Timed out waiting for Feedreader to shut down');
+      process.exit(1);
+    }, SHUTDOWN_TIMEOUT_MS);
+    forceExit.unref?.();
+
+    server.close(error => {
+      void (async () => {
+        if (refreshJob) await refreshJob.catch(() => undefined);
+        clearTimeout(forceExit);
+        if (error) {
+          console.error('Error while closing Feedreader:', error);
+          process.exit(1);
+        }
+        process.exit(0);
+      })();
+    });
+  };
+
+  process.once('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+}
+
 async function main() {
   const config = await readConfig();
   const portArg = process.argv.indexOf('--port');
   const port = (portArg !== -1 && process.argv[portArg + 1]) ? parseInt(process.argv[portArg + 1]) : config.port;
   const hostArg = process.argv.indexOf('--host');
   const host = (hostArg !== -1 && process.argv[hostArg + 1]) ? process.argv[hostArg + 1] : DEFAULT_HOST;
+  startupHost = host;
+  startupPort = port;
 
   await mergeSyncConflicts();
 
   const server = createServer(handleRequest);
-  server.listen(port, host, () => {
-    const displayHost = host === DEFAULT_HOST ? 'localhost' : host;
-    console.log(`Feedreader running at http://${displayHost}:${port}`);
-    startRefresh().catch(error => console.error('Startup refresh error:', error));
-  });
+  server.requestTimeout = 30_000;
+  server.headersTimeout = 10_000;
+  server.keepAliveTimeout = 5_000;
+
+  await listen(server, port, host);
+  server.on('error', error => console.error('Server error:', error));
+  installShutdownHandlers(server);
+
+  const displayHost = host === DEFAULT_HOST ? 'localhost' : host;
+  console.log(`Feedreader running at http://${displayHost}:${port}`);
+  startRefresh().catch(error => console.error('Startup refresh error:', error));
 }
 
-main();
+process.on('unhandledRejection', reason => {
+  console.error('Unhandled rejection:', reason);
+});
+
+process.on('uncaughtException', error => {
+  console.error('Uncaught exception:', error);
+  process.exit(1);
+});
+
+main().catch(error => {
+  console.error('Feedreader failed to start:', describeListenError(error, startupHost, startupPort));
+  process.exit(1);
+});

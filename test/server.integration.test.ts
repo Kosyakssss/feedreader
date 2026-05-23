@@ -44,6 +44,21 @@ afterAll(async () => {
 });
 
 describe('server hardening', () => {
+  test('reports health for launch agents and smoke checks', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/health`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      ok: boolean;
+      pid: number;
+      uptimeSeconds: number;
+      refreshing: boolean;
+    };
+    expect(body.ok).toBeTrue();
+    expect(typeof body.pid).toBe('number');
+    expect(typeof body.uptimeSeconds).toBe('number');
+    expect(typeof body.refreshing).toBe('boolean');
+  });
+
   test('rejects cross-origin mutating requests', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/refresh`, {
       method: 'POST',

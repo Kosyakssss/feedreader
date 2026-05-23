@@ -136,9 +136,18 @@ async function safeFetchExternal(rawUrl: string, init: RequestInit): Promise<Res
 
     const location = res.headers.get('location');
     if (!location) return res;
+    await discardResponseBody(res);
     current = new URL(location, current);
   }
   throw new Error('Too many redirects');
+}
+
+async function discardResponseBody(res: Response): Promise<void> {
+  try {
+    await res.body?.cancel();
+  } catch {
+    // Nothing useful to do here; this is just defensive resource cleanup.
+  }
 }
 
 async function readResponseText(res: Response, maxBytes: number): Promise<string> {
@@ -213,8 +222,14 @@ export async function fetchFeed(feed: Feed, meta: FeedCacheMeta = {}): Promise<F
       signal: AbortSignal.timeout(FEED_FETCH_TIMEOUT_MS),
     });
     const validators = pickValidators(res, meta);
-    if (res.status === 304) return { entries: [], notModified: true, validators };
-    if (!res.ok) return { entries: [], error: `HTTP ${res.status}` };
+    if (res.status === 304) {
+      await discardResponseBody(res);
+      return { entries: [], notModified: true, validators };
+    }
+    if (!res.ok) {
+      await discardResponseBody(res);
+      return { entries: [], error: `HTTP ${res.status}` };
+    }
     const xml = await readResponseText(res, MAX_FEED_BYTES);
     return { entries: parseFeed(xml, feed.id), validators };
   } catch (e) {

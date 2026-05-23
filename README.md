@@ -33,6 +33,25 @@ Point to a custom data directory:
 bun server.ts --data /path/to/data
 ```
 
+## macOS startup
+
+Install Feedreader as a user LaunchAgent:
+
+```fish
+fish scripts/feedreader-launch-agent.fish install
+```
+
+Useful commands:
+
+```fish
+fish scripts/feedreader-launch-agent.fish status
+fish scripts/feedreader-launch-agent.fish restart
+fish scripts/feedreader-launch-agent.fish stop
+fish scripts/feedreader-launch-agent.fish uninstall
+```
+
+The LaunchAgent runs `server.ts` from this checkout at login and writes logs to `~/Library/Logs/feedreader/`.
+
 ## Data
 
 All runtime data lives in `data/` (gitignored):
