@@ -27,6 +27,8 @@ npx tsx server.ts
 Open `http://localhost:8787`. Override the port with `--port 3000` or in `data/config.json`.
 The server binds to `127.0.0.1` by default; pass `--host 0.0.0.0` only if you intentionally want LAN access.
 
+For private access from trusted devices, install Tailscale on both devices and use the macOS LaunchAgent helper below. It keeps feedreader bound to localhost and publishes `http://127.0.0.1:8787` at `/feedreader` with Tailscale Serve inside your tailnet. Open it from another tailnet device at `https://<mac-name>.<tailnet>.ts.net/feedreader`.
+
 Point to a custom data directory:
 
 ```sh
@@ -51,6 +53,8 @@ fish scripts/feedreader-launch-agent.fish uninstall
 ```
 
 The LaunchAgent runs `server.ts` from this checkout at login and writes logs to `~/Library/Logs/feedreader/`.
+It also starts Tailscale Serve for the configured feedreader port at `/feedreader` when Tailscale is installed.
+Tailscale Serve strips the `/feedreader` prefix before proxying to the local server, so Feedreader renders `/feedreader`-prefixed links automatically for `*.ts.net` hosts.
 
 ## Data
 

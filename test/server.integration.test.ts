@@ -67,6 +67,50 @@ describe('server hardening', () => {
     expect(res.status).toBe(403);
   });
 
+  test('accepts same-origin mutating requests through an HTTPS reverse proxy', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/state`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'host': 'airm1.example.ts.net',
+        'origin': 'https://airm1.example.ts.net',
+        'x-forwarded-proto': 'https',
+      },
+      body: JSON.stringify({ entries: {} }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  test('serves the app and APIs under the Tailscale /feedreader path', async () => {
+    const page = await fetch(`http://127.0.0.1:${port}/feedreader/`);
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('href="/feedreader/api/theme"');
+    expect(html).toContain('const BASE_PATH = "/feedreader"');
+
+    const api = await fetch(`http://127.0.0.1:${port}/feedreader/api/state`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'host': 'airm1.example.ts.net',
+        'origin': 'https://airm1.example.ts.net',
+        'x-forwarded-proto': 'https',
+      },
+      body: JSON.stringify({ entries: {} }),
+    });
+    expect(api.status).toBe(200);
+  });
+
+  test('renders /feedreader links when Tailscale Serve strips the path prefix', async () => {
+    const page = await fetch(`http://127.0.0.1:${port}/`, {
+      headers: { host: 'airm1.example.ts.net' },
+    });
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('href="/feedreader/api/theme"');
+    expect(html).toContain('const BASE_PATH = "/feedreader"');
+  });
+
   test('requires JSON content type for JSON endpoints', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/state`, {
       method: 'POST',

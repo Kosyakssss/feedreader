@@ -13,6 +13,7 @@ import { isSafeExternalUrl, isSafeObjectKey, sanitizeThemeName } from './lib/sec
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const DEFAULT_HOST = '127.0.0.1';
+const SERVE_BASE_PATH = '/feedreader';
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const FAILURE_BACKOFF_MS = [0, 5 * 60_000, 15 * 60_000, 60 * 60_000, 6 * 60 * 60_000];
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -237,6 +238,25 @@ function hasJsonContentType(req: import('node:http').IncomingMessage): boolean {
   return contentType === 'application/json' || contentType.endsWith('+json');
 }
 
+function requestUrl(req: import('node:http').IncomingMessage): URL {
+  const host = req.headers.host || 'localhost';
+  const forwardedProto = headerValue(req, 'x-forwarded-proto').split(',', 1)[0].trim().toLowerCase();
+  const proto = forwardedProto === 'https' ? 'https' : 'http';
+  return new URL(req.url || '/', `${proto}://${host}`);
+}
+
+function appPath(path: string): string {
+  if (path === SERVE_BASE_PATH) return '/';
+  if (path.startsWith(SERVE_BASE_PATH + '/')) return path.slice(SERVE_BASE_PATH.length) || '/';
+  return path;
+}
+
+function renderBasePath(req: import('node:http').IncomingMessage, pathname: string): string {
+  const host = headerValue(req, 'host').split(':', 1)[0].toLowerCase();
+  if (pathname.startsWith(SERVE_BASE_PATH) || host.endsWith('.ts.net')) return SERVE_BASE_PATH;
+  return '';
+}
+
 async function parseJSONBody(req: import('node:http').IncomingMessage): Promise<any> {
   if (!hasJsonContentType(req)) {
     throw new HttpError(415, 'Content-Type must be application/json');
@@ -295,8 +315,8 @@ function escapeHtml(value: string): string {
 
 async function handleRequest(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
   try {
-    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-    const path = url.pathname;
+    const url = requestUrl(req);
+    const path = appPath(url.pathname);
     const method = req.method || 'GET';
 
     if (MUTATING_METHODS.has(method)) assertTrustedRequest(req, url);
@@ -516,7 +536,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
 
     // SPA: serve the app for all non-API routes
     const config = await readConfig();
-    const html = renderApp(config);
+    const html = renderApp(config, renderBasePath(req, url.pathname));
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(html);
 

@@ -18,6 +18,56 @@ function usage
     echo "Usage: scripts/feedreader-launch-agent.fish install|uninstall|start|stop|restart|status|plist"
 end
 
+function tailscale_serve_target
+    set -l port (current_port)
+    echo "http://127.0.0.1:$port"
+end
+
+function tailscale_serve_path
+    echo "/feedreader"
+end
+
+function start_tailscale_serve
+    if not command -q tailscale
+        echo "tailscale: not installed; skipping Serve"
+        return 0
+    end
+
+    set -l target (tailscale_serve_target)
+    set -l path (tailscale_serve_path)
+    set -l status_text (tailscale serve status 2>/dev/null)
+    set -l root_line (string match --regex --entire "\\|-- / +proxy $target" -- $status_text)
+    set -l served_paths (string match --regex --all '\\|-- .* proxy ' -- $status_text)
+    if test -n "$root_line"; and test (count $served_paths) -le 2
+        tailscale serve reset >/dev/null
+        echo "tailscale serve: removed old root feedreader route"
+    end
+
+    if tailscale serve --bg --set-path "$path" "$target" >/dev/null
+        echo "tailscale serve: $path -> $target"
+    else
+        echo "tailscale serve: failed to serve $target" >&2
+    end
+end
+
+function stop_tailscale_serve
+    if not command -q tailscale
+        return 0
+    end
+
+    set -l port (current_port)
+    set -l status_text (tailscale serve status 2>/dev/null)
+    if string match --quiet --regex "127\\.0\\.0\\.1:$port|localhost:$port" -- $status_text
+        set -l served_paths (string match --regex --all '\\|-- .* proxy ' -- $status_text)
+        if test (count $served_paths) -eq 1
+            tailscale serve reset >/dev/null
+            echo "tailscale serve: reset feedreader serve config"
+        else
+            echo "tailscale serve: feedreader is one of multiple served paths; leaving Serve config intact"
+        end
+    end
+end
+
 function current_port
     set -l port 8787
     set -l config "$project_dir/data/config.json"
@@ -90,6 +140,11 @@ function show_status
             echo "health: no response from $health_url"
         end
     end
+
+    if command -q tailscale
+        echo "tailscale serve:"
+        tailscale serve status 2>/dev/null; or echo "  unavailable"
+    end
 end
 
 function stop_agent
@@ -109,9 +164,11 @@ switch "$cmd"
         stop_agent >/dev/null 2>&1
         launchctl bootstrap "$domain" "$plist"; or exit 1
         launchctl enable "$service"
+        start_tailscale_serve
         sleep 1
         show_status
     case uninstall
+        stop_tailscale_serve
         stop_agent >/dev/null 2>&1
         rm -f "$plist"
         echo "removed: $plist"
@@ -125,9 +182,11 @@ switch "$cmd"
             launchctl kickstart -k "$service"; or exit 1
         end
         launchctl enable "$service"
+        start_tailscale_serve
         sleep 1
         show_status
     case stop
+        stop_tailscale_serve
         stop_agent
         show_status
     case restart
@@ -137,6 +196,7 @@ switch "$cmd"
         stop_agent >/dev/null 2>&1
         launchctl bootstrap "$domain" "$plist"; or exit 1
         launchctl enable "$service"
+        start_tailscale_serve
         sleep 1
         show_status
     case status

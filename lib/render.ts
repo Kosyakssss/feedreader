@@ -4,7 +4,7 @@ function safeJsonForScript(data: unknown): string {
   return JSON.stringify(data).replace(/</g, '\\u003c');
 }
 
-export function renderApp(config: Config): string {
+export function renderApp(config: Config, basePath = ''): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -16,7 +16,7 @@ export function renderApp(config: Config): string {
 <meta name="application-name" content="Feedreader">
 <meta property="og:title" content="Feedreader">
 <meta property="og:site_name" content="Feedreader">
-<link rel="stylesheet" href="/api/theme" id="theme-link">
+<link rel="stylesheet" href="${basePath}/api/theme" id="theme-link">
 <style>
 @layer structural {
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -76,12 +76,12 @@ export function renderApp(config: Config): string {
 </head>
 <body>
 <nav class="nav-bar">
-  <a href="/" class="nav-logo" data-link>🔖 Feedreader</a>
+  <a href="${basePath}/" class="nav-logo" data-link>🔖 Feedreader</a>
   <div class="nav-links">
-    <a href="/" data-link class="nav-link" data-nav="/">Timeline</a>
-    <a href="/starred" data-link class="nav-link" data-nav="/starred">Starred</a>
-    <a href="/feeds" data-link class="nav-link" data-nav="/feeds">Feeds</a>
-    <a href="/settings" data-link class="nav-link" data-nav="/settings">Settings</a>
+    <a href="${basePath}/" data-link class="nav-link" data-nav="/">Timeline</a>
+    <a href="${basePath}/starred" data-link class="nav-link" data-nav="/starred">Starred</a>
+    <a href="${basePath}/feeds" data-link class="nav-link" data-nav="/feeds">Feeds</a>
+    <a href="${basePath}/settings" data-link class="nav-link" data-nav="/settings">Settings</a>
   </div>
 </nav>
 <main id="app"></main>
@@ -116,6 +116,7 @@ export function renderApp(config: Config): string {
 
 <script>
 const CONFIG = ${safeJsonForScript(config)};
+const BASE_PATH = ${safeJsonForScript(basePath)};
 let entries = [];
 let feeds = { folders: [], feeds: [] };
 let selectedIds = new Set();
@@ -149,6 +150,23 @@ function debounce(fn, ms) {
   let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
 
+function externalPath(path) {
+  if (!BASE_PATH) return path;
+  if (path === '/') return BASE_PATH + '/';
+  return BASE_PATH + path;
+}
+
+function internalPath(path) {
+  if (!BASE_PATH) return path;
+  if (path === BASE_PATH) return '/';
+  if (path.startsWith(BASE_PATH + '/')) return path.slice(BASE_PATH.length) || '/';
+  return path;
+}
+
+function apiPath(path) {
+  return externalPath(path);
+}
+
 function toast(msg) {
   const el = document.createElement('div');
   el.className = 'toast';
@@ -161,7 +179,7 @@ async function api(method, path, body) {
   const opts = { method, headers: {} };
   if (body instanceof FormData) { opts.body = body; }
   else if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-  const res = await fetch(path, opts);
+  const res = await fetch(apiPath(path), opts);
   const ct = res.headers.get('content-type') || '';
   const data = ct.includes('json') ? await res.json() : await res.text();
   if (!res.ok) throw new Error(data?.error || data || res.statusText);
@@ -317,7 +335,7 @@ function renderFeeds() {
   html += '<form class="add-form" id="add-feed-form"><input class="search-input" name="url" placeholder="Feed or site URL…" required style="margin-bottom:0">';
   html += '<input class="search-input" name="label" placeholder="Label (optional)" style="margin-bottom:0;max-width:160px">';
   html += '<button class="btn btn-primary" type="submit">Add</button></form>';
-  html += '<div style="margin-bottom:var(--spacing-md);display:flex;gap:var(--spacing-sm)"><label class="btn" style="cursor:pointer"><input type="file" accept=".opml,.xml" id="opml-input" hidden>Import OPML</label><a href="/api/feeds/export" class="btn" download="feedreader.opml">Export OPML</a></div>';
+  html += '<div style="margin-bottom:var(--spacing-md);display:flex;gap:var(--spacing-sm)"><label class="btn" style="cursor:pointer"><input type="file" accept=".opml,.xml" id="opml-input" hidden>Import OPML</label><a href="' + externalPath('/api/feeds/export') + '" class="btn" download="feedreader.opml">Export OPML</a></div>';
   html += '<div class="feed-list">';
   for (const f of feeds.feeds) {
     const unread = entries.filter(e => e.feedId === f.id && !e.state?.read).length;
@@ -329,7 +347,7 @@ function renderFeeds() {
       + '<div class="feed-meta">' + esc(f.url) + '</div></div>'
       + '<div class="feed-actions">'
       + (unread > 0 ? '<span class="feed-unread-badge">' + unread + '</span>' : '')
-      + '<a href="/feed/' + esc(f.id) + '" data-link class="btn">View →</a>'
+      + '<a href="' + externalPath('/feed/' + esc(f.id)) + '" data-link class="btn">View →</a>'
       + '<button class="btn" data-delete-feed="' + esc(f.id) + '">✕</button>'
       + '</div></div>';
   }
@@ -385,7 +403,7 @@ function navigate(path, push) {
   };
   if (document.startViewTransition) document.startViewTransition(update);
   else update();
-  if (push !== false) history.pushState({}, '', path);
+  if (push !== false) history.pushState({}, '', externalPath(path));
 }
 
 function updateNav() {
@@ -829,16 +847,16 @@ document.getElementById('bulk-cancel').onclick = () => { selectedIds.clear(); up
 // Nav links
 document.body.addEventListener('click', (e) => {
   const link = e.target.closest('[data-link]');
-  if (link) { e.preventDefault(); navigate(link.getAttribute('href')); }
+  if (link) { e.preventDefault(); navigate(internalPath(link.getAttribute('href'))); }
 });
 
 // Popstate
-window.addEventListener('popstate', () => navigate(location.pathname, false));
+window.addEventListener('popstate', () => navigate(internalPath(location.pathname), false));
 
 // Init
 (async () => {
   [feeds, entries] = await Promise.all([api('GET', '/api/feeds'), api('GET', '/api/entries')]);
-  navigate(location.pathname, false);
+  navigate(internalPath(location.pathname), false);
 
   // Auto-refresh feeds after initial load
   try {
