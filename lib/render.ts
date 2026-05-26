@@ -29,6 +29,8 @@ export function renderApp(config: Config, basePath = ''): string {
     gap: var(--spacing-md);
   }
   .nav-links { display: flex; gap: var(--spacing-xs); }
+  .nav-menu-button { display: none; }
+  .nav-scrim { position: fixed; inset: 0; z-index: 40; }
   .page { max-width: 720px; margin: 0 auto; padding: var(--spacing-md); }
   .search-input { display: block; width: 100%; margin-bottom: var(--spacing-sm); }
   .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-sm); margin-bottom: var(--spacing-sm); row-gap: var(--spacing-xs); }
@@ -77,6 +79,7 @@ export function renderApp(config: Config, basePath = ''): string {
 <body>
 <nav class="nav-bar">
   <a href="${basePath}/" class="nav-logo" data-link>🔖 Feedreader</a>
+  <button class="nav-menu-button" type="button" aria-label="Open navigation" aria-expanded="false" data-nav-menu>☰</button>
   <div class="nav-links">
     <a href="${basePath}/" data-link class="nav-link" data-nav="/">Timeline</a>
     <a href="${basePath}/starred" data-link class="nav-link" data-nav="/starred">Starred</a>
@@ -84,6 +87,7 @@ export function renderApp(config: Config, basePath = ''): string {
     <a href="${basePath}/settings" data-link class="nav-link" data-nav="/settings">Settings</a>
   </div>
 </nav>
+<div class="nav-scrim" data-nav-scrim hidden></div>
 <main id="app"></main>
 <div id="bulk-bar" class="bulk-bar" hidden>
   <span class="bulk-count" id="bulk-count"></span>
@@ -331,24 +335,23 @@ function renderFeedDetail(feedId) {
 }
 
 function renderFeeds() {
-  let html = '<div class="page"><div class="page-header"><h1 class="page-title">Feeds</h1></div>';
+  let html = '<div class="page feeds-page"><div class="page-header feeds-header"><div><h1 class="page-title">Feeds</h1>'
+    + '<div class="feeds-subtitle">' + feeds.feeds.length + ' sources</div></div></div>';
   html += '<form class="add-form" id="add-feed-form"><input class="search-input" name="url" placeholder="Feed or site URL…" required style="margin-bottom:0">';
-  html += '<input class="search-input" name="label" placeholder="Label (optional)" style="margin-bottom:0;max-width:160px">';
   html += '<button class="btn btn-primary" type="submit">Add</button></form>';
-  html += '<div style="margin-bottom:var(--spacing-md);display:flex;gap:var(--spacing-sm)"><label class="btn" style="cursor:pointer"><input type="file" accept=".opml,.xml" id="opml-input" hidden>Import OPML</label><a href="' + externalPath('/api/feeds/export') + '" class="btn" download="feedreader.opml">Export OPML</a></div>';
+  html += '<div class="feed-file-actions"><label class="btn" style="cursor:pointer"><input type="file" accept=".opml,.xml" id="opml-input" hidden>Import OPML</label><a href="' + externalPath('/api/feeds/export') + '" class="btn" download="feedreader.opml">Export OPML</a></div>';
   html += '<div class="feed-list">';
   for (const f of feeds.feeds) {
     const unread = entries.filter(e => e.feedId === f.id && !e.state?.read).length;
     const h = feeds.health?.[f.id];
     const lastFetch = h?.lastFetched ? timeAgo(new Date(h.lastFetched).toISOString()) : 'never';
-    const healthStatus = h?.error ? '<span class="feed-error" title="' + esc(h.error) + '">⚠ Error</span>' : '<span class="feed-ok">✓ ' + lastFetch + '</span>';
+    const healthStatus = h?.error ? '<span class="feed-error" title="' + esc(h.error) + '">Error</span>' : '<span class="feed-ok">Updated ' + lastFetch + '</span>';
     html += '<div class="feed-item"><div class="feed-info">'
-      + '<div class="feed-label">' + esc(f.label) + ' ' + healthStatus + '</div>'
+      + '<div class="feed-label-row"><a href="' + externalPath('/feed/' + esc(f.id)) + '" data-link class="feed-label">' + esc(f.label) + '</a>' + healthStatus + '</div>'
       + '<div class="feed-meta">' + esc(f.url) + '</div></div>'
       + '<div class="feed-actions">'
       + (unread > 0 ? '<span class="feed-unread-badge">' + unread + '</span>' : '')
-      + '<a href="' + externalPath('/feed/' + esc(f.id)) + '" data-link class="btn">View →</a>'
-      + '<button class="btn" data-delete-feed="' + esc(f.id) + '">✕</button>'
+      + '<button class="btn btn-feed-delete" data-delete-feed="' + esc(f.id) + '" title="Remove feed">✕</button>'
       + '</div></div>';
   }
   if (feeds.feeds.length === 0) html += '<div class="empty-state">No feeds yet. Add one above!</div>';
@@ -414,9 +417,17 @@ function updateNav() {
   if (currentPage === '/') document.querySelector('[data-nav="/"]')?.classList.add('active');
 }
 
+function setNavMenuOpen(open) {
+  document.body.classList.toggle('nav-menu-open', open);
+  document.querySelector('[data-nav-menu]')?.setAttribute('aria-expanded', String(open));
+  const scrim = document.querySelector('[data-nav-scrim]');
+  if (scrim) scrim.hidden = !open;
+}
+
 function updateBulkBar() {
   const bar = document.getElementById('bulk-bar');
   bar.hidden = selectedIds.size === 0;
+  document.body.classList.toggle('bulk-active', selectedIds.size > 0);
   document.getElementById('bulk-count').textContent = selectedIds.size + ' selected';
 }
 
@@ -686,7 +697,7 @@ function bindPage() {
       e.preventDefault();
       const fd = new FormData(addForm);
       try {
-        await api('POST', '/api/feeds', { url: fd.get('url'), label: fd.get('label') || undefined });
+        await api('POST', '/api/feeds', { url: fd.get('url') });
         entries = await api('GET', '/api/entries');
         feeds = await api('GET', '/api/feeds');
         navigate('/feeds', false);
@@ -821,6 +832,7 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 'Escape') {
     selectedIds.clear();
     updateBulkBar();
+    setNavMenuOpen(false);
     document.getElementById('shortcuts-overlay').hidden = true;
     focusedIndex = -1;
     reRenderList();
@@ -846,8 +858,19 @@ document.getElementById('bulk-cancel').onclick = () => { selectedIds.clear(); up
 
 // Nav links
 document.body.addEventListener('click', (e) => {
+  const menuButton = e.target.closest('[data-nav-menu]');
+  if (menuButton) {
+    setNavMenuOpen(!document.body.classList.contains('nav-menu-open'));
+    return;
+  }
+
+  if (e.target.closest('[data-nav-scrim]')) {
+    setNavMenuOpen(false);
+    return;
+  }
+
   const link = e.target.closest('[data-link]');
-  if (link) { e.preventDefault(); navigate(internalPath(link.getAttribute('href'))); }
+  if (link) { e.preventDefault(); setNavMenuOpen(false); navigate(internalPath(link.getAttribute('href'))); }
 });
 
 // Popstate

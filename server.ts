@@ -385,7 +385,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         const feed = {
           id: generateId(),
           url: feedUrl,
-          label: typeof body.label === 'string' && body.label.trim() ? body.label.trim() : new URL(feedUrl).hostname,
+          label: new URL(feedUrl).hostname,
           folderId: null,
         };
         feedsFile.feeds.push(feed);
