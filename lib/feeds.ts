@@ -65,11 +65,109 @@ function toArray<T>(v: T | T[] | undefined): T[] {
   return Array.isArray(v) ? v : [v];
 }
 
+const monthNumbers: Record<string, number> = {
+  jan: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  may: 4,
+  jun: 5,
+  jul: 6,
+  aug: 7,
+  sep: 8,
+  oct: 9,
+  nov: 10,
+  dec: 11,
+};
+
+const rfc822ZoneOffsets: Record<string, number> = {
+  UT: 0,
+  UTC: 0,
+  GMT: 0,
+  Z: 0,
+  EST: -5 * 60,
+  EDT: -4 * 60,
+  CST: -6 * 60,
+  CDT: -5 * 60,
+  MST: -7 * 60,
+  MDT: -6 * 60,
+  PST: -8 * 60,
+  PDT: -7 * 60,
+};
+
+function parseFeedDate(input: string): string | null {
+  const direct = new Date(input);
+  if (!isNaN(direct.getTime())) return direct.toISOString();
+
+  const match = input.trim().match(
+    /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+)?(\d{1,2})\s+([A-Za-z]{3})\s+(\d{2,4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s+([A-Za-z]{1,5}|[+-]\d{2}:?\d{2}))?$/i,
+  );
+  if (!match) return null;
+
+  const [, dayText, monthText, yearText, hourText, minuteText, secondText, zoneText] = match;
+  const month = monthNumbers[monthText.toLowerCase()];
+  if (month === undefined) return null;
+
+  const day = Number(dayText);
+  const rawYear = Number(yearText);
+  const year = yearText.length === 2 ? rawYear + (rawYear >= 70 ? 1900 : 2000) : rawYear;
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = secondText ? Number(secondText) : 0;
+  if (
+    !Number.isInteger(day) || day < 1 || day > 31 ||
+    !Number.isInteger(year) ||
+    !Number.isInteger(hour) || hour > 23 ||
+    !Number.isInteger(minute) || minute > 59 ||
+    !Number.isInteger(second) || second > 59
+  ) {
+    return null;
+  }
+
+  const wallClock = new Date(Date.UTC(year, month, day, hour, minute, second));
+  if (
+    wallClock.getUTCFullYear() !== year ||
+    wallClock.getUTCMonth() !== month ||
+    wallClock.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  const offsetMinutes = parseZoneOffset(zoneText);
+  const parsed = new Date(wallClock.getTime() - offsetMinutes * 60 * 1000);
+  return parsed.toISOString();
+}
+
+function parseZoneOffset(zone: string | undefined): number {
+  if (!zone) return 0;
+
+  const numeric = zone.match(/^([+-])(\d{2}):?(\d{2})$/);
+  if (numeric) {
+    const sign = numeric[1] === '-' ? -1 : 1;
+    const hours = Number(numeric[2]);
+    const minutes = Number(numeric[3]);
+    if (hours > 23 || minutes > 59) return 0;
+    return sign * (hours * 60 + minutes);
+  }
+
+  const upper = zone.toUpperCase();
+  if (upper in rfc822ZoneOffsets) return rfc822ZoneOffsets[upper];
+
+  if (/^[A-IK-M]$/.test(upper)) {
+    return upper.charCodeAt(0) - 'A'.charCodeAt(0) + 1;
+  }
+  if (/^[N-Y]$/.test(upper)) {
+    return -(upper.charCodeAt(0) - 'N'.charCodeAt(0) + 1);
+  }
+
+  return 0;
+}
+
 function pickDate(...candidates: (string | undefined)[]): string {
   for (const c of candidates) {
     if (!c) continue;
-    const d = new Date(c);
-    if (!isNaN(d.getTime())) return d.toISOString();
+    const parsed = parseFeedDate(c);
+    if (parsed) return parsed;
   }
   return new Date().toISOString();
 }

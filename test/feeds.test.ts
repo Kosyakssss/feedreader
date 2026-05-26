@@ -56,6 +56,29 @@ describe('parseFeed', () => {
     expect(entries[0].title).toBe("A Visit To ACMI's Game Worlds & More");
   });
 
+  test('parses RFC-style dates with nonstandard alphabetic timezones', () => {
+    const xml = `<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <guid>summer</guid>
+      <title>Summer time</title>
+      <link>https://example.com/summer</link>
+      <pubDate>Wed, 31 Dec 2025 16:00:05 AEDT</pubDate>
+    </item>
+    <item>
+      <guid>unknown</guid>
+      <title>Unknown zone</title>
+      <link>https://example.com/unknown</link>
+      <pubDate>Wed, 24 Sep 2025 17:09:51 XYZ</pubDate>
+    </item>
+  </channel>
+</rss>`;
+    const entries = parseFeed(xml, 'feed-au');
+    expect(entries[0].published).toBe('2025-12-31T16:00:05.000Z');
+    expect(entries[1].published).toBe('2025-09-24T17:09:51.000Z');
+  });
+
   test('scopes entry ids by feed', () => {
     const xml = `<?xml version="1.0"?>
 <rss version="2.0">
