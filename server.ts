@@ -177,15 +177,17 @@ function startRefresh(): Promise<number> {
 }
 
 async function getRefreshStatus() {
-  const [entries, feeds] = await Promise.all([getEntries(), getFeedsWithHealth()]);
-  return {
+  const status = {
     refreshing: !!refreshJob,
     count: lastRefreshResult?.count || 0,
     error: lastRefreshResult?.error || null,
     finishedAt: lastRefreshResult?.finishedAt || null,
-    entries,
-    feeds,
   };
+
+  if (refreshJob) return status;
+
+  const [entries, feeds] = await Promise.all([getEntries(), getFeedsWithHealth()]);
+  return { ...status, entries, feeds };
 }
 
 async function getHealth() {
