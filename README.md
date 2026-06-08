@@ -50,6 +50,8 @@ fish scripts/feedreader-launch-agent.fish status
 fish scripts/feedreader-launch-agent.fish restart
 fish scripts/feedreader-launch-agent.fish stop
 fish scripts/feedreader-launch-agent.fish uninstall
+bun run unread
+bun run unread --limit 20
 ```
 
 The LaunchAgent runs `server.ts` from this checkout at login and writes logs to `~/Library/Logs/feedreader/`.
