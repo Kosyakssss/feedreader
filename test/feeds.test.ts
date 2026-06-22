@@ -313,6 +313,44 @@ describe('ATProto feeds', () => {
     }
   });
 
+  test('resolves plain websites only when feed discovery succeeds', async () => {
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      if (String(url) === 'https://93.184.216.34/') {
+        return new Response(
+          '<link rel="alternate" type="application/rss+xml" href="/feed.xml">',
+          { status: 200, headers: { 'content-type': 'text/html' } },
+        );
+      }
+      return new Response('', { status: 404 });
+    }) as typeof fetch;
+
+    try {
+      await expect(resolveFeedInput('https://93.184.216.34/')).resolves.toEqual({
+        url: 'https://93.184.216.34/feed.xml',
+        label: '93.184.216.34',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('rejects plain websites with no feed or ATProto metadata', async () => {
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = (async () => new Response('<title>No feed here</title>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    })) as typeof fetch;
+
+    try {
+      await expect(resolveFeedInput('https://example.com/')).rejects.toThrow('No RSS, Atom, JSON Feed');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('fetches Standard Site documents from an ATProto profile feed', async () => {
     const originalFetch = globalThis.fetch;
     const calls: string[] = [];

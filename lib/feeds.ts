@@ -17,6 +17,8 @@ const PLC_DIRECTORY = 'https://plc.directory';
 const ATPROTO_DOCUMENT_COLLECTION = 'site.standard.document';
 const ATPROTO_PUBLICATION_COLLECTION = 'site.standard.publication';
 const MAX_ATPROTO_RECORDS = 1000;
+const DIRECT_FEED_PATH_RE = /\.(xml|rss|atom|json)$/i;
+const DIRECT_FEED_ROUTE_RE = /\/(feed|rss|atom|json)\/?$/i;
 
 export interface FeedFetchResult {
   entries: Entry[];
@@ -771,7 +773,8 @@ export async function resolveFeedInput(rawInput: string): Promise<ResolvedFeedIn
       const standardSite = await resolveAtprotoPageInput(parsedUrl.href).catch(() => null);
       if (standardSite) return standardSite;
 
-      const discoveredFeed = input.match(/\.(xml|rss|atom)$/i) || input.match(/\/(feed|rss|atom)\/?$/i)
+      const isDirectFeed = DIRECT_FEED_PATH_RE.test(parsedUrl.pathname) || DIRECT_FEED_ROUTE_RE.test(parsedUrl.pathname);
+      const discoveredFeed = isDirectFeed
         ? parsedUrl.href
         : await discoverFeedUrl(parsedUrl.href);
       if (discoveredFeed) return { url: discoveredFeed, label: new URL(discoveredFeed).hostname };
@@ -779,7 +782,7 @@ export async function resolveFeedInput(rawInput: string): Promise<ResolvedFeedIn
       const hostnameActor = await resolveActorInput(parsedUrl.hostname).catch(() => null);
       if (hostnameActor) return hostnameActor;
 
-      return { url: parsedUrl.href, label: parsedUrl.hostname };
+      throw new Error('No RSS, Atom, JSON Feed, Standard Site metadata, or Bluesky handle found');
     }
   }
 
@@ -798,7 +801,7 @@ export async function discoverFeedUrl(pageUrl: string): Promise<string | null> {
     if (!res.ok) return null;
     const html = await readResponseText(res, MAX_DISCOVERY_BYTES);
 
-    const linkRe = /<link[^>]+(?:application\/(?:rss|atom)\+xml|text\/xml)[^>]*>/gi;
+    const linkRe = /<link[^>]+(?:application\/(?:rss|atom)\+xml|application\/feed\+json|text\/xml)[^>]*>/gi;
     const matches = html.match(linkRe);
     if (matches) {
       for (const m of matches) {
@@ -821,7 +824,7 @@ export async function discoverFeedUrl(pageUrl: string): Promise<string | null> {
         signal: AbortSignal.timeout(5000),
       });
       const ct = res.headers.get('content-type') || '';
-      if (res.ok && (ct.includes('xml') || ct.includes('rss') || ct.includes('atom'))) {
+      if (res.ok && (ct.includes('xml') || ct.includes('rss') || ct.includes('atom') || ct.includes('feed+json'))) {
         return base + path;
       }
     } catch {}
