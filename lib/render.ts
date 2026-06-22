@@ -337,7 +337,7 @@ function renderFeedDetail(feedId) {
 function renderFeeds() {
   let html = '<div class="page feeds-page"><div class="page-header feeds-header"><div><h1 class="page-title">Feeds</h1>'
     + '<div class="feeds-subtitle">' + feeds.feeds.length + ' sources</div></div></div>';
-  html += '<form class="add-form" id="add-feed-form"><input class="search-input" name="url" placeholder="Feed or site URL…" required style="margin-bottom:0">';
+  html += '<form class="add-form" id="add-feed-form"><input class="search-input" name="url" placeholder="Feed, site URL, or @handle…" required style="margin-bottom:0">';
   html += '<button class="btn btn-primary" type="submit">Add</button></form>';
   html += '<div class="feed-file-actions"><label class="btn" style="cursor:pointer"><input type="file" accept=".opml,.xml" id="opml-input" hidden>Import OPML</label><a href="' + externalPath('/api/feeds/export') + '" class="btn" download="feedreader.opml">Export OPML</a></div>';
   html += '<div class="feed-list">';

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { fetchAllFeeds, fetchFeed, parseFeed, parseOPML } from '../lib/feeds.ts';
+import { fetchAllFeeds, fetchFeed, parseAtprotoFeedUrl, parseFeed, parseOPML, resolveFeedInput } from '../lib/feeds.ts';
 
 describe('parseFeed', () => {
   test('parses RSS items', () => {
@@ -271,6 +271,111 @@ describe('fetchAllFeeds', () => {
       expect(result.entries).toEqual([]);
       expect(result.error).toContain('Private IPv4 addresses are not allowed');
       expect(calls).toEqual(['https://93.184.216.34/feed.xml']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe('ATProto feeds', () => {
+  test('parses internal ATProto feed URLs', () => {
+    expect(parseAtprotoFeedUrl('atproto://profile/kote-pdj.bsky.social')).toEqual({
+      type: 'profile',
+      handle: 'kote-pdj.bsky.social',
+    });
+    expect(parseAtprotoFeedUrl('atproto://publication/did:plc:abc/3abc')).toEqual({
+      type: 'publication',
+      did: 'did:plc:abc',
+      rkey: '3abc',
+    });
+    expect(parseAtprotoFeedUrl('https://example.com/rss.xml')).toBeNull();
+  });
+
+  test('resolves Bluesky handles to internal profile feeds', async () => {
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      expect(String(url)).toContain('/xrpc/app.bsky.actor.getProfile');
+      return new Response(JSON.stringify({
+        did: 'did:plc:alice',
+        handle: 'alice.example',
+        displayName: 'Alice',
+      }), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      await expect(resolveFeedInput('@alice.example')).resolves.toEqual({
+        url: 'atproto://profile/alice.example',
+        label: 'Alice',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('fetches Standard Site documents from an ATProto profile feed', async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: string[] = [];
+
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const raw = String(url);
+      calls.push(raw);
+
+      if (raw.includes('/xrpc/com.atproto.identity.resolveHandle')) {
+        return new Response(JSON.stringify({ did: 'did:plc:alice' }), { status: 200 });
+      }
+
+      if (raw.startsWith('https://plc.directory/')) {
+        return new Response(JSON.stringify({
+          service: [{ id: '#atproto_pds', serviceEndpoint: 'https://93.184.216.34' }],
+        }), { status: 200 });
+      }
+
+      if (raw.includes('/xrpc/com.atproto.repo.listRecords')) {
+        return new Response(JSON.stringify({
+          records: [{
+            uri: 'at://did:plc:alice/site.standard.document/3doc',
+            value: {
+              title: 'Hello Standard Site',
+              publishedAt: '2026-06-01T10:00:00.000Z',
+              path: '/hello',
+              site: 'at://did:plc:alice/site.standard.publication/3pub',
+            },
+          }],
+        }), { status: 200 });
+      }
+
+      if (raw.includes('/xrpc/com.atproto.repo.getRecord')) {
+        return new Response(JSON.stringify({
+          uri: 'at://did:plc:alice/site.standard.publication/3pub',
+          value: {
+            name: 'Alice Notes',
+            url: 'https://alice.example',
+          },
+        }), { status: 200 });
+      }
+
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+
+    try {
+      const result = await fetchFeed({
+        id: 'feed-atproto',
+        url: 'atproto://profile/alice.example',
+        label: 'Alice',
+        folderId: null,
+      });
+
+      expect(result.error).toBeUndefined();
+      expect(result.entries).toEqual([{
+        id: 'feed-atproto:at%3A%2F%2Fdid%3Aplc%3Aalice%2Fsite.standard.document%2F3doc',
+        sourceId: 'at://did:plc:alice/site.standard.document/3doc',
+        feedId: 'feed-atproto',
+        url: 'https://alice.example/hello',
+        title: 'Hello Standard Site',
+        published: '2026-06-01T10:00:00.000Z',
+      }]);
+      expect(calls.some(call => call.includes('site.standard.document'))).toBeTrue();
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -5,7 +5,7 @@ import {
   readCache, mergeSyncConflicts, pruneEntries,
   readThemeCSS, generateId, getDataDir, runDataMutation, writeDataFiles,
 } from './lib/data.ts';
-import { fetchAllFeeds, parseOPML, discoverFeedUrl, decodeHtmlEntities, publishedTime } from './lib/feeds.ts';
+import { fetchAllFeeds, parseOPML, decodeHtmlEntities, publishedTime, resolveFeedInput } from './lib/feeds.ts';
 import type { FeedFetchResult } from './lib/feeds.ts';
 import { renderApp } from './lib/render.ts';
 import type { EnrichedEntry, Feed } from './lib/types.ts';
@@ -369,14 +369,10 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       if (!body || typeof body !== 'object' || typeof body.url !== 'string') {
         throw new HttpError(400, 'Invalid feed payload');
       }
-      let feedUrl: string = body.url.trim();
-      if (!feedUrl) throw new HttpError(400, 'Feed URL is required');
-      parseExternalUrlOrThrow(feedUrl);
-      if (!feedUrl.match(/\.(xml|rss|atom)$/i) && !feedUrl.match(/\/(feed|rss|atom)\/?$/i)) {
-        const discovered = await discoverFeedUrl(feedUrl);
-        if (discovered) feedUrl = discovered;
-      }
-      parseExternalUrlOrThrow(feedUrl);
+      const resolved = await resolveFeedInput(body.url).catch(error => {
+        throw new HttpError(400, (error as Error).message || 'Could not resolve feed');
+      });
+      const feedUrl = resolved.url;
       const newFeed = await runDataMutation(async () => {
         const feedsFile = await readFeeds();
         if (feedsFile.feeds.some(f => f.url === feedUrl)) {
@@ -385,7 +381,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         const feed = {
           id: generateId(),
           url: feedUrl,
-          label: new URL(feedUrl).hostname,
+          label: resolved.label,
           folderId: null,
         };
         feedsFile.feeds.push(feed);
