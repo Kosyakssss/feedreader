@@ -6,7 +6,7 @@ A local-first RSS/Atom reader that runs in the browser. Portable, pretty, lightw
 
 - **Local-first** — everything lives on disk (`data/` folder). Sync via Syncthing, iCloud, or just copy the folder. No accounts, no cloud.
 - **Minimal reading in-app** — entries open original links. The app is a _launcher_, not a reader.
-- **Runs everywhere** — uses Node.js standard APIs. Works with Bun on Mac and Node/tsx on Android via Termux. No Bun-specific APIs.
+- **Portable server** — uses Node.js standard APIs and runs with Bun on macOS and Linux. No Bun-specific APIs.
 - **Two dependencies** — `fast-xml-parser`, `tsx`. That's it.
 - **Cupertino UI** — a single Apple-inspired theme keeps the app quiet, crisp, and consistent.
 - **File-synced state** — Syncthing conflict files (`state.sync-conflict-*.json`) are auto-merged using latest-timestamp-wins per entry.
@@ -15,13 +15,8 @@ A local-first RSS/Atom reader that runs in the browser. Portable, pretty, lightw
 ## Running
 
 ```sh
-# With Bun (Mac)
 bun install
 bun server.ts
-
-# With Node.js (Android/Termux)
-npm install
-npx tsx server.ts
 ```
 
 Open `http://localhost:8787`. Override the port with `--port 3000` or in `data/config.json`.
@@ -39,17 +34,17 @@ bun server.ts --data /path/to/data
 
 Install Feedreader as a user LaunchAgent:
 
-```fish
-fish scripts/feedreader-launch-agent.fish install
+```sh
+scripts/feedreader-launch-agent.sh install
 ```
 
 Useful commands:
 
-```fish
-fish scripts/feedreader-launch-agent.fish status
-fish scripts/feedreader-launch-agent.fish restart
-fish scripts/feedreader-launch-agent.fish stop
-fish scripts/feedreader-launch-agent.fish uninstall
+```sh
+scripts/feedreader-launch-agent.sh status
+scripts/feedreader-launch-agent.sh restart
+scripts/feedreader-launch-agent.sh stop
+scripts/feedreader-launch-agent.sh uninstall
 bun run unread
 bun run unread --limit 20
 ```
@@ -60,7 +55,7 @@ Tailscale Serve strips the `/feedreader` prefix before proxying to the local ser
 
 ## Data
 
-All runtime data lives in `data/` (gitignored):
+All runtime data lives in `data/`. It is deliberately public and versioned with this repository:
 
 | File                   | Purpose                                      |
 | ---------------------- | -------------------------------------------- |
@@ -113,6 +108,5 @@ All runtime data lives in `data/` (gitignored):
 
 ## Notes
 
-- No swipe gestures, no push notifications — by design
-- iOS is out of scope for now (Android via Termux + Node works)
-- `data/*.json` is gitignored so personal data never gets pushed
+- No swipe gestures or push notifications — by design.
+- Feed subscriptions, cached public feed content, and read state under `data/` are intentionally public. Never put authenticated feed URLs, cookies, tokens, or private content there.

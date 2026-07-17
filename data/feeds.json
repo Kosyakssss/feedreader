@@ -1,0 +1,29 @@
+{
+  "folders": [],
+  "feeds": [
+    { "id": "b26ddd79-e1ab-4a25-90b2-f565220415ba", "url": "https://ampcode.com/news.rss", "label": "ampcode.com", "folderId": null },
+    { "id": "4d08904b-b650-4bc3-a83e-c8796297818e", "url": "https://blog.decryption.net.au/feed.xml", "label": "decryption's blog", "folderId": null },
+    { "id": "f924a40c-c282-418c-b973-cff9e6be2c97", "url": "https://blog.jim-nielsen.com/feed.xml", "label": "Jim Nielsen’s Blog", "folderId": null },
+    { "id": "0794aa40-2c49-4431-b73c-5e0da67fee4b", "url": "https://borretti.me/feed.xml", "label": "borretti.me", "folderId": null },
+    { "id": "056b4352-0356-4d16-b6ff-2db705a3431c", "url": "https://drobinin.com/feed.xml", "label": "drobinin.com", "folderId": null },
+    { "id": "a60a81d3-7c31-4b33-8269-6325e1323c7e", "url": "https://ethanding.substack.com/feed", "label": "mandates", "folderId": null },
+    { "id": "f97dd6cf-e784-46ad-8e4f-fa52676f005c", "url": "https://futo.org/blog/index.xml", "label": "FUTO - Blog", "folderId": null },
+    { "id": "14e69152-71e5-4964-930d-ac4eb5ec4cd6", "url": "https://geohot.github.io/blog/feed.xml", "label": "the singularity is nearer", "folderId": null },
+    { "id": "946de706-de46-46ea-9887-0ab38587f606", "url": "https://gpanders.com/index.xml", "label": "g.p. anders", "folderId": null },
+    { "id": "f3b44900-da89-40c3-b285-29c6ef364672", "url": "https://ludic.mataroa.blog/rss/", "label": "Ludicity", "folderId": null },
+    { "id": "32185eb7-4720-406b-8b1e-29101f0b9797", "url": "https://macwright.com/rss.xml", "label": "macwright.com", "folderId": null },
+    { "id": "add3aaa6-0006-4be8-8828-6622e69f1062", "url": "https://mwarrenarts.com/rss", "label": "Michael Warren RSS Feed", "folderId": null },
+    { "id": "b2c29a00-8938-4c66-a210-2d4b86a41e9d", "url": "https://nazhamid.com/feed.xml", "label": "Naz Hamid", "folderId": null },
+    { "id": "96b9c268-dce1-4fb7-895a-d85f773bd154", "url": "https://pawelgrzybek.com/feed.xml", "label": "pawelgrzybek.com", "folderId": null },
+    { "id": "50e1b93d-c0ab-456c-b890-8219826db441", "url": "https://polluterofminds.com/feed.xml", "label": "A blog by Justin Hunter to pollutes your mind", "folderId": null },
+    { "id": "c561e255-c800-48a5-af35-da1f7adc3c1c", "url": "https://rachsmith.com/feed.xml", "label": "Rach Smith's digital garden", "folderId": null },
+    { "id": "951d4ead-11b5-448b-8d9e-e1014590871f", "url": "https://registerspill.thorstenball.com/feed", "label": "Register Spill", "folderId": null },
+    { "id": "32eb4239-421e-4b68-85d6-1f070e3373b8", "url": "https://simonwillison.net/atom/entries/", "label": "simonwillison.net", "folderId": null },
+    { "id": "dbf11ddf-ee51-4689-bdf9-8a16b2d25c2c", "url": "https://stephango.com/feed.xml", "label": "Steph Ango", "folderId": null },
+    { "id": "0e9acb7f-4422-4db8-9e75-6b02829dec50", "url": "https://stevedylan.dev/rss.xml", "label": "Steve Simkins", "folderId": null },
+    { "id": "4a1e4c81-6c63-4ff8-baa9-102969229c3a", "url": "https://wojtek.im/rss.xml", "label": "wojtek.im", "folderId": null },
+    { "id": "09f8ae6a-2ee2-4c7e-9cfe-1bf5a373f3c5", "url": "https://www.davidimel.com/rss/", "label": "www.davidimel.com", "folderId": null },
+    { "id": "724a9500-b418-4bdd-9900-f6ed3b6b611d", "url": "https://www.theslowinternet.com/category/notes/feed", "label": "Notes – THE SLOW INTERNET", "folderId": null },
+    { "id": "98cf22b2-f747-4865-a187-293358da7bf3", "url": "https://マリウス.com/index.xml", "label": "マリウス", "folderId": null }
+  ]
+}
