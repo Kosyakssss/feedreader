@@ -55,17 +55,17 @@ Tailscale Serve strips the `/feedreader` prefix before proxying to the local ser
 
 ## Data
 
-All runtime data lives in `data/`. It is deliberately public and versioned with this repository:
+All runtime data lives in `data/`. The public feed list and themes are versioned; local state is ignored:
 
-| File                   | Purpose                                      |
-| ---------------------- | -------------------------------------------- |
-| `feeds.json`           | Feed subscriptions                           |
-| `state.json`           | Read/starred state per entry                 |
-| `cache.json`           | Fetched entries + fetch timestamps           |
-| `config.json`          | Settings (created on first write)            |
-| `transaction.json`     | Crash-recovery journal for multi-file writes |
-| `themes/cupertino.css` | Default Cupertino theme                      |
-| `themes/flexoki.css`   | Square Flexoki theme                         |
+| File                   | Purpose                                      | Versioned |
+| ---------------------- | -------------------------------------------- | --------- |
+| `feeds.json`           | Feed subscriptions                           | Yes       |
+| `state.json`           | Read/starred state per entry                 | No        |
+| `cache.json`           | Fetched entries + fetch timestamps           | No        |
+| `config.json`          | Local settings (created on first write)      | No        |
+| `transaction.json`     | Crash-recovery journal for multi-file writes | No        |
+| `themes/cupertino.css` | Default Cupertino theme                      | Yes       |
+| `themes/flexoki.css`   | Square Flexoki theme                         | Yes       |
 
 ## Pages
 
@@ -110,4 +110,5 @@ All runtime data lives in `data/`. It is deliberately public and versioned with 
 ## Notes
 
 - No swipe gestures or push notifications — by design.
-- Feed subscriptions, cached public feed content, and read state under `data/` are intentionally public. Never put authenticated feed URLs, cookies, tokens, or private content there.
+- Feed subscriptions in `data/feeds.json` are intentionally public. Never put authenticated feed URLs, cookies, tokens, or private feeds there.
+- Cache, read/star state, settings, and transaction files under `data/` stay local and are ignored.
