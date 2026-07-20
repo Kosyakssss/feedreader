@@ -26,6 +26,7 @@ beforeAll(async () => {
   await writeFile(join(dataDir, 'state.json'), '{}\n');
   await writeFile(join(dataDir, 'cache.json'), '{ "entries": [], "lastFetched": {} }\n');
   await writeFile(join(dataDir, 'themes', 'cupertino.css'), 'body { color: #111; }\n');
+  await writeFile(join(dataDir, 'themes', 'flexoki.css'), 'body { color: #100f0f; }\n');
 
   port = 41000 + Math.floor(Math.random() * 5000);
   proc = Bun.spawn({
@@ -237,6 +238,20 @@ describe('server hardening', () => {
     expect(res.status).toBe(200);
     const body = await res.json() as { theme: string };
     expect(body.theme).toBe('cupertino');
+  });
+
+  test('accepts Flexoki theme and serves its CSS', async () => {
+    const update = await fetch(`http://127.0.0.1:${port}/api/config`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ theme: 'flexoki' }),
+    });
+    expect(update.status).toBe(200);
+    expect((await update.json() as { theme: string }).theme).toBe('flexoki');
+
+    const css = await fetch(`http://127.0.0.1:${port}/api/theme`);
+    expect(css.status).toBe(200);
+    expect(await css.text()).toContain('#100f0f');
   });
 
   test('rejects unavailable theme names in /api/config', async () => {

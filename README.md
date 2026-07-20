@@ -8,7 +8,7 @@ A local-first RSS/Atom reader that runs in the browser. Portable, pretty, lightw
 - **Minimal reading in-app** — entries open original links. The app is a _launcher_, not a reader.
 - **Portable server** — uses Node.js standard APIs and runs with Bun on macOS and Linux. No Bun-specific APIs.
 - **Two dependencies** — `fast-xml-parser`, `tsx`. That's it.
-- **Cupertino UI** — a single Apple-inspired theme keeps the app quiet, crisp, and consistent.
+- **Theme choice** — pick the rounded Cupertino theme or the square Flexoki theme in Settings.
 - **File-synced state** — Syncthing conflict files (`state.sync-conflict-*.json`) are auto-merged using latest-timestamp-wins per entry.
 - **Safer imports/state** — feed URLs are validated on both manual add and OPML import, and entry IDs are scoped per feed so state cannot bleed across subscriptions.
 
@@ -64,7 +64,8 @@ All runtime data lives in `data/`. It is deliberately public and versioned with 
 | `cache.json`           | Fetched entries + fetch timestamps           |
 | `config.json`          | Settings (created on first write)            |
 | `transaction.json`     | Crash-recovery journal for multi-file writes |
-| `themes/cupertino.css` | App theme                                    |
+| `themes/cupertino.css` | Default Cupertino theme                      |
+| `themes/flexoki.css`   | Square Flexoki theme                         |
 
 ## Pages
 

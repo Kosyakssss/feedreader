@@ -132,6 +132,7 @@ let loadLimit = 50;
 let selectionAnchorId = null;
 let selectionDrag = null;
 let suppressNextSelectClick = false;
+let keyboardNavigationActive = false;
 
 function esc(s) {
   const d = document.createElement('div');
@@ -365,6 +366,10 @@ function renderSettings() {
   html += '<div class="settings-field"><label>Max bulk open tabs</label><input name="maxBulkOpen" type="number" min="1" value="' + CONFIG.maxBulkOpen + '"></div>';
   html += '<div class="settings-field"><label>Max entries to keep</label><input name="maxEntries" type="number" min="100" value="' + CONFIG.retention.maxEntries + '"></div>';
   html += '<div class="settings-field"><label>Max entry age (days, empty = no limit)</label><input name="maxDays" type="number" min="1" value="' + (CONFIG.retention.maxDays || '') + '"></div>';
+  html += '<div class="settings-field"><label>Theme</label><select name="theme">';
+  html += '<option value="cupertino"' + (CONFIG.theme === 'cupertino' ? ' selected' : '') + '>Cupertino</option>';
+  html += '<option value="flexoki"' + (CONFIG.theme === 'flexoki' ? ' selected' : '') + '>Flexoki</option>';
+  html += '</select></div>';
   html += '<button class="btn btn-primary" type="submit">Save</button>';
   html += '</form></div>';
   return html;
@@ -399,6 +404,7 @@ function navigate(path, push) {
     selectedIds.clear();
     selectionAnchorId = null;
     focusedIndex = -1;
+    keyboardNavigationActive = false;
     updateBulkBar();
     document.getElementById('app').innerHTML = route(path);
     updateNav();
@@ -429,6 +435,13 @@ function updateBulkBar() {
   bar.hidden = selectedIds.size === 0;
   document.body.classList.toggle('bulk-active', selectedIds.size > 0);
   document.getElementById('bulk-count').textContent = selectedIds.size + ' selected';
+}
+
+function dismissKeyboardNavigation(e) {
+  if (!keyboardNavigationActive || e.pointerType !== 'mouse') return;
+  keyboardNavigationActive = false;
+  focusedIndex = -1;
+  reRenderList();
 }
 
 function reRenderList() {
@@ -733,10 +746,12 @@ function bindPage() {
           maxEntries: parseInt(fd.get('maxEntries')) || 3000,
           maxDays: parseInt(fd.get('maxDays')) || null,
         },
-        theme: 'cupertino',
+        theme: fd.get('theme'),
       };
       const saved = await api('PUT', '/api/config', updated);
       Object.assign(CONFIG, saved);
+      const themeLink = document.getElementById('theme-link');
+      if (themeLink) themeLink.href = BASE_PATH + '/api/theme?t=' + Date.now();
       toast('Settings saved!');
     });
   }
@@ -766,6 +781,7 @@ document.addEventListener('keydown', (e) => {
   const visibleMax = Math.min(filtered.length, loadLimit);
 
   if (key === 'j') {
+    keyboardNavigationActive = true;
     if (e.shiftKey && focusedIndex >= 0 && focusedIndex < visibleMax) {
       selectedIds.add(filtered[focusedIndex].id);
     }
@@ -780,6 +796,7 @@ document.addEventListener('keydown', (e) => {
     if (el) el.scrollIntoView({ block: 'nearest' });
     e.preventDefault();
   } else if (key === 'k') {
+    keyboardNavigationActive = true;
     if (e.shiftKey && focusedIndex >= 0 && focusedIndex < visibleMax) {
       selectedIds.add(filtered[focusedIndex].id);
     }
@@ -835,10 +852,14 @@ document.addEventListener('keydown', (e) => {
     setNavMenuOpen(false);
     document.getElementById('shortcuts-overlay').hidden = true;
     focusedIndex = -1;
+    keyboardNavigationActive = false;
     reRenderList();
     e.preventDefault();
   }
 });
+
+document.addEventListener('pointerdown', dismissKeyboardNavigation, true);
+document.addEventListener('pointermove', dismissKeyboardNavigation, { capture: true, passive: true });
 
 // Bulk bar
 document.getElementById('bulk-read').onclick = () => { markEntries([...selectedIds], { read: true }); selectedIds.clear(); updateBulkBar(); };

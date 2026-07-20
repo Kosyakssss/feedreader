@@ -174,8 +174,10 @@ function normalizeConfig(value: unknown): Config {
   if (typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535) {
     config.port = port;
   }
-  if (value.theme === null || value.theme === '' || value.theme === 'cupertino') {
+  if (value.theme === null || value.theme === '') {
     config.theme = 'cupertino';
+  } else if (value.theme === 'cupertino' || value.theme === 'flexoki') {
+    config.theme = value.theme;
   }
   if (isRecord(value.retention)) {
     const maxEntries = value.retention.maxEntries;

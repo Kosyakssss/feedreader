@@ -489,12 +489,15 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         patch.port = body.port;
       }
       if ('theme' in body) {
-        if (body.theme === null || body.theme === '' || body.theme === 'cupertino') {
+        if (body.theme === null || body.theme === '') {
           patch.theme = 'cupertino';
         } else {
           const safeTheme = sanitizeThemeName(body.theme);
           if (!safeTheme) throw new HttpError(400, 'Invalid theme name');
-          throw new HttpError(400, 'Only the Cupertino theme is available');
+          if (safeTheme !== 'cupertino' && safeTheme !== 'flexoki') {
+            throw new HttpError(400, 'Theme is not available');
+          }
+          patch.theme = safeTheme;
         }
       }
       if ('retention' in body) {
