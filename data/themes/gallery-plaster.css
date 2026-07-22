@@ -1,21 +1,21 @@
 /**
- * @name Flexoki
- * @author Feedreader
- * @description Flexoki colors with square borders
+ * @name Stargazing Gallery Plaster
+ * @author Stargazing
+ * @description Adaptive Gallery Plaster light and dark theme
  */
 
 :root {
-  --bg: #fffcf0;
-  --bg-card: #f2f0e5;
-  --bg-hover: #e6e4d9;
-  --bg-nav: rgba(255, 252, 240, 0.92);
-  --text: #100f0f;
-  --text-muted: #6f6e69;
-  --text-link: #100f0f;
-  --accent: #205ea6;
-  --accent-hover: #1a4f8c;
+  --bg: #F1EFEA;
+  --bg-card: #E6E4DF;
+  --bg-hover: #DAD8D4;
+  --bg-nav: color-mix(in srgb, var(--bg) 92%, transparent);
+  --text: #111110;
+  --text-muted: #6B6A68;
+  --text-link: #111110;
+  --accent: #205EA6;
+  --accent-hover: #1A4F8C;
   --border: rgba(0, 0, 0, 0.08);
-  --star: #da702c;
+  --star: #BC5215;
   --radius: 0;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
   --font-mono: "SF Mono", ui-monospace, "Cascadia Code", monospace;
@@ -31,17 +31,17 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #100f0f;
-    --bg-card: #1c1b1a;
-    --bg-hover: #282726;
-    --bg-nav: rgba(16, 15, 15, 0.92);
-    --text: #fffcf0;
-    --text-muted: #878580;
-    --text-link: #fffcf0;
-    --accent: #4385be;
-    --accent-hover: #66a0c8;
+    --bg: #111110;
+    --bg-card: #1C1C1B;
+    --bg-hover: #282826;
+    --bg-nav: color-mix(in srgb, var(--bg) 92%, transparent);
+    --text: #F1EFEA;
+    --text-muted: #81807D;
+    --text-link: #F1EFEA;
+    --accent: #4385BE;
+    --accent-hover: #66A0C8;
     --border: rgba(255, 255, 255, 0.08);
-    --star: #da702c;
+    --star: #BC5215;
     --shadow: none;
   }
 }

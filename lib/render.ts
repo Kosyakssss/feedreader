@@ -367,8 +367,10 @@ function renderSettings() {
   html += '<div class="settings-field"><label>Max entries to keep</label><input name="maxEntries" type="number" min="100" value="' + CONFIG.retention.maxEntries + '"></div>';
   html += '<div class="settings-field"><label>Max entry age (days, empty = no limit)</label><input name="maxDays" type="number" min="1" value="' + (CONFIG.retention.maxDays || '') + '"></div>';
   html += '<div class="settings-field"><label>Theme</label><select name="theme">';
-  html += '<option value="cupertino"' + (CONFIG.theme === 'cupertino' ? ' selected' : '') + '>Cupertino</option>';
-  html += '<option value="flexoki"' + (CONFIG.theme === 'flexoki' ? ' selected' : '') + '>Flexoki</option>';
+  html += '<option value="blue-hour"' + (CONFIG.theme === 'blue-hour' ? ' selected' : '') + '>Stargazing Blue Hour</option>';
+  html += '<option value="gallery-plaster"' + (CONFIG.theme === 'gallery-plaster' ? ' selected' : '') + '>Stargazing Gallery Plaster</option>';
+  html += '<option value="mineral-paper"' + (CONFIG.theme === 'mineral-paper' ? ' selected' : '') + '>Stargazing Mineral Paper</option>';
+  html += '<option value="soft-parchment"' + (CONFIG.theme === 'soft-parchment' ? ' selected' : '') + '>Stargazing Soft Parchment</option>';
   html += '</select></div>';
   html += '<button class="btn btn-primary" type="submit">Save</button>';
   html += '</form></div>';
@@ -896,6 +898,22 @@ document.body.addEventListener('click', (e) => {
 
 // Popstate
 window.addEventListener('popstate', () => navigate(internalPath(location.pathname), false));
+
+async function syncExternalTheme() {
+  try {
+    const latest = await api('GET', '/api/config');
+    if (latest.theme === CONFIG.theme) return;
+    CONFIG.theme = latest.theme;
+    const themeLink = document.getElementById('theme-link');
+    if (themeLink) themeLink.href = BASE_PATH + '/api/theme?t=' + Date.now();
+    if (currentPage === '/settings') renderCurrentPage();
+  } catch {}
+}
+
+setInterval(syncExternalTheme, 2000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) void syncExternalTheme();
+});
 
 // Init
 (async () => {

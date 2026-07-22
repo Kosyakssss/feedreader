@@ -8,7 +8,7 @@ import { isSafeObjectKey, sanitizeThemeName } from './security.ts';
 const DEFAULT_CONFIG: Config = {
   maxBulkOpen: 20,
   retention: { maxEntries: 3000, maxDays: null },
-  theme: 'cupertino',
+  theme: 'blue-hour',
   port: 8787,
 };
 
@@ -175,8 +175,8 @@ function normalizeConfig(value: unknown): Config {
     config.port = port;
   }
   if (value.theme === null || value.theme === '') {
-    config.theme = 'cupertino';
-  } else if (value.theme === 'cupertino' || value.theme === 'flexoki') {
+    config.theme = 'blue-hour';
+  } else if (typeof value.theme === 'string' && ['blue-hour', 'gallery-plaster', 'mineral-paper', 'soft-parchment'].includes(value.theme)) {
     config.theme = value.theme;
   }
   if (isRecord(value.retention)) {
