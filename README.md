@@ -50,7 +50,7 @@ bun run unread --limit 20
 ```
 
 The LaunchAgent runs `server.ts` from this checkout at login and writes logs to `~/Library/Logs/feedreader/`.
-It also starts Tailscale Serve for the configured feedreader port at `/feedreader` when Tailscale is installed.
+It also checks Tailscale Serve every minute and restores the `/feedreader` route if Tailscale or another local service removes it.
 Tailscale Serve strips the `/feedreader` prefix before proxying to the local server, so Feedreader renders `/feedreader`-prefixed links automatically for `*.ts.net` hosts.
 
 ## Data

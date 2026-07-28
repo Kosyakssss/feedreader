@@ -2,13 +2,16 @@
 set -eu
 
 label='org.sk.feedreader'
+tailscale_label='org.sk.feedreader-tailscale'
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P)
 project_dir=$(CDPATH= cd "$script_dir/.." && pwd -P)
 plist="$HOME/Library/LaunchAgents/$label.plist"
+tailscale_plist="$HOME/Library/LaunchAgents/$tailscale_label.plist"
 log_dir="$HOME/Library/Logs/feedreader"
 uid=$(id -u)
 domain="gui/$uid"
 service="$domain/$label"
+tailscale_service="$domain/$tailscale_label"
 launch_path="$HOME/.local/bin:$HOME/.bun/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 usage() {
@@ -51,6 +54,11 @@ start_tailscale_serve() {
     fi
 
     target=$(tailscale_target)
+    status_text=$(tailscale serve status 2>/dev/null || true)
+    if printf '%s\n' "$status_text" | grep -F "$target" >/dev/null 2>&1; then
+        return 0
+    fi
+
     if tailscale serve --bg --set-path /feedreader "$target" >/dev/null; then
         echo "tailscale serve: /feedreader -> $target"
     else
@@ -122,8 +130,58 @@ EOF
     trap - EXIT HUP INT TERM
 }
 
+write_tailscale_plist() {
+    mkdir -p "$(dirname "$tailscale_plist")" "$log_dir"
+    tmp=$(mktemp "${TMPDIR:-/tmp}/feedreader-tailscale-launch-agent.XXXXXX")
+    trap 'rm -f "$tmp"' EXIT HUP INT TERM
+
+    script_xml=$(xml_escape "$script_dir/feedreader-launch-agent.sh")
+    stdout_xml=$(xml_escape "$log_dir/tailscale-stdout.log")
+    stderr_xml=$(xml_escape "$log_dir/tailscale-stderr.log")
+    path_xml=$(xml_escape "$launch_path")
+
+    cat >"$tmp" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$tailscale_label</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$script_xml</string>
+    <string>ensure-serve</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>$stdout_xml</string>
+  <key>StandardErrorPath</key>
+  <string>$stderr_xml</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>$path_xml</string>
+  </dict>
+</dict>
+</plist>
+EOF
+
+    plutil -lint "$tmp" >/dev/null
+    mv -f "$tmp" "$tailscale_plist"
+    trap - EXIT HUP INT TERM
+}
+
 is_loaded() {
     launchctl print "$service" >/dev/null 2>&1
+}
+
+is_tailscale_loaded() {
+    launchctl print "$tailscale_service" >/dev/null 2>&1
 }
 
 show_status() {
@@ -147,12 +205,31 @@ show_status() {
         echo 'tailscale serve:'
         tailscale serve status 2>/dev/null || echo '  unavailable'
     fi
+
+    if is_tailscale_loaded; then
+        echo "route monitor: loaded ($tailscale_service)"
+    else
+        echo "route monitor: not loaded ($tailscale_service)"
+    fi
 }
 
 stop_agent() {
     if is_loaded; then
         launchctl bootout "$domain" "$plist"
     fi
+}
+
+stop_tailscale_agent() {
+    if is_tailscale_loaded; then
+        launchctl bootout "$domain" "$tailscale_plist"
+    fi
+}
+
+start_tailscale_agent() {
+    write_tailscale_plist
+    stop_tailscale_agent >/dev/null 2>&1 || true
+    launchctl bootstrap "$domain" "$tailscale_plist"
+    launchctl enable "$tailscale_service"
 }
 
 cmd=${1:-status}
@@ -163,14 +240,16 @@ case "$cmd" in
         launchctl bootstrap "$domain" "$plist"
         launchctl enable "$service"
         start_tailscale_serve
+        start_tailscale_agent
         sleep 1
         show_status
         ;;
     uninstall)
+        stop_tailscale_agent >/dev/null 2>&1 || true
         stop_tailscale_serve
         stop_agent >/dev/null 2>&1 || true
-        rm -f "$plist"
-        echo "removed: $plist"
+        rm -f "$plist" "$tailscale_plist"
+        echo "removed: $plist and $tailscale_plist"
         ;;
     start)
         [ -f "$plist" ] || write_plist
@@ -181,10 +260,12 @@ case "$cmd" in
         fi
         launchctl enable "$service"
         start_tailscale_serve
+        start_tailscale_agent
         sleep 1
         show_status
         ;;
     stop)
+        stop_tailscale_agent >/dev/null 2>&1 || true
         stop_tailscale_serve
         stop_agent
         show_status
@@ -194,7 +275,12 @@ case "$cmd" in
         ;;
     plist)
         write_plist
+        write_tailscale_plist
         echo "$plist"
+        echo "$tailscale_plist"
+        ;;
+    ensure-serve)
+        start_tailscale_serve
         ;;
     *)
         usage
