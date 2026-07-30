@@ -176,7 +176,7 @@ function normalizeConfig(value: unknown): Config {
   }
   if (value.theme === null || value.theme === '') {
     config.theme = 'blue-hour';
-  } else if (typeof value.theme === 'string' && ['blue-hour', 'gallery-plaster', 'mineral-paper', 'soft-parchment'].includes(value.theme)) {
+  } else if (typeof value.theme === 'string' && ['blue-hour', 'gallery-plaster', 'grey-fruit', 'mineral-paper', 'soft-parchment'].includes(value.theme)) {
     config.theme = value.theme;
   }
   if (isRecord(value.retention)) {

@@ -494,7 +494,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         } else {
           const safeTheme = sanitizeThemeName(body.theme);
           if (!safeTheme) throw new HttpError(400, 'Invalid theme name');
-          if (!['blue-hour', 'gallery-plaster', 'mineral-paper', 'soft-parchment'].includes(safeTheme)) {
+          if (!['blue-hour', 'gallery-plaster', 'grey-fruit', 'mineral-paper', 'soft-parchment'].includes(safeTheme)) {
             throw new HttpError(400, 'Theme is not available');
           }
           patch.theme = safeTheme;

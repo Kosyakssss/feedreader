@@ -27,6 +27,7 @@ beforeAll(async () => {
   await writeFile(join(dataDir, 'cache.json'), '{ "entries": [], "lastFetched": {} }\n');
   await writeFile(join(dataDir, 'themes', 'blue-hour.css'), 'body { color: #0e1115; }\n');
   await writeFile(join(dataDir, 'themes', 'gallery-plaster.css'), 'body { color: #111110; }\n');
+  await writeFile(join(dataDir, 'themes', 'grey-fruit.css'), 'body { color: #000000; }\n');
   await writeFile(join(dataDir, 'themes', 'mineral-paper.css'), 'body { color: #0f1111; }\n');
   await writeFile(join(dataDir, 'themes', 'soft-parchment.css'), 'body { color: #100f0f; }\n');
 
@@ -232,7 +233,7 @@ describe('server hardening', () => {
   });
 
   test('accepts every Stargazing theme in /api/config', async () => {
-    for (const theme of ['blue-hour', 'gallery-plaster', 'mineral-paper', 'soft-parchment']) {
+    for (const theme of ['blue-hour', 'gallery-plaster', 'grey-fruit', 'mineral-paper', 'soft-parchment']) {
       const res = await fetch(`http://127.0.0.1:${port}/api/config`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },

@@ -369,6 +369,7 @@ function renderSettings() {
   html += '<div class="settings-field"><label>Theme</label><select name="theme">';
   html += '<option value="blue-hour"' + (CONFIG.theme === 'blue-hour' ? ' selected' : '') + '>Stargazing Blue Hour</option>';
   html += '<option value="gallery-plaster"' + (CONFIG.theme === 'gallery-plaster' ? ' selected' : '') + '>Stargazing Gallery Plaster</option>';
+  html += '<option value="grey-fruit"' + (CONFIG.theme === 'grey-fruit' ? ' selected' : '') + '>Stargazing Grey Fruit</option>';
   html += '<option value="mineral-paper"' + (CONFIG.theme === 'mineral-paper' ? ' selected' : '') + '>Stargazing Mineral Paper</option>';
   html += '<option value="soft-parchment"' + (CONFIG.theme === 'soft-parchment' ? ' selected' : '') + '>Stargazing Soft Parchment</option>';
   html += '</select></div>';
