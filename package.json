@@ -2,12 +2,14 @@
   "name": "feedreader",
   "type": "module",
   "scripts": {
-    "start": "bun server.ts",
-    "unread": "bun scripts/unread.ts",
-    "test": "bun test"
+    "start": "node server.ts",
+    "unread": "node scripts/unread.ts",
+    "test": "vitest run"
   },
   "dependencies": {
-    "fast-xml-parser": "^5",
-    "tsx": "^4"
+    "fast-xml-parser": "^5"
+  },
+  "devDependencies": {
+    "vitest": "^3"
   }
 }

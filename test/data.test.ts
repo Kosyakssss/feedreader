@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { pruneEntries } from '../lib/data.ts';
 import type { CacheFile, Config, StateFile } from '../lib/types.ts';
 

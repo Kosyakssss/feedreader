@@ -1,11 +1,13 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
 let dataDir = '';
 let port = 0;
-let proc: ReturnType<typeof Bun.spawn> | null = null;
+let proc: ChildProcess | null = null;
 
 async function waitForServerReady(baseUrl: string): Promise<void> {
   const deadline = Date.now() + 8000;
@@ -32,11 +34,9 @@ beforeAll(async () => {
   await writeFile(join(dataDir, 'themes', 'soft-parchment.css'), 'body { color: #100f0f; }\n');
 
   port = 41000 + Math.floor(Math.random() * 5000);
-  proc = Bun.spawn({
-    cmd: ['bun', 'server.ts', '--data', dataDir, '--port', String(port)],
-    cwd: import.meta.dir + '/..',
-    stdout: 'ignore',
-    stderr: 'ignore',
+  proc = spawn(process.execPath, ['server.ts', '--data', dataDir, '--port', String(port)], {
+    cwd: dirname(fileURLToPath(new URL('../server.ts', import.meta.url))),
+    stdio: 'ignore',
   });
 
   await waitForServerReady(`http://127.0.0.1:${port}`);
@@ -57,7 +57,7 @@ describe('server hardening', () => {
       uptimeSeconds: number;
       refreshing: boolean;
     };
-    expect(body.ok).toBeTrue();
+    expect(body.ok).toBe(true);
     expect(typeof body.pid).toBe('number');
     expect(typeof body.uptimeSeconds).toBe('number');
     expect(typeof body.refreshing).toBe('boolean');
@@ -76,7 +76,7 @@ describe('server hardening', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'host': 'airm1.example.ts.net',
+        'x-forwarded-host': 'airm1.example.ts.net',
         'origin': 'https://airm1.example.ts.net',
         'x-forwarded-proto': 'https',
       },
@@ -96,7 +96,7 @@ describe('server hardening', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'host': 'airm1.example.ts.net',
+        'x-forwarded-host': 'airm1.example.ts.net',
         'origin': 'https://airm1.example.ts.net',
         'x-forwarded-proto': 'https',
       },
@@ -107,7 +107,7 @@ describe('server hardening', () => {
 
   test('renders /feedreader links when Tailscale Serve strips the path prefix', async () => {
     const page = await fetch(`http://127.0.0.1:${port}/`, {
-      headers: { host: 'airm1.example.ts.net' },
+      headers: { 'x-forwarded-host': 'airm1.example.ts.net' },
     });
     expect(page.status).toBe(200);
     const html = await page.text();
@@ -219,8 +219,8 @@ describe('server hardening', () => {
     await Promise.all(requests);
 
     const state = JSON.parse(await readFile(join(dataDir, 'state.json'), 'utf-8')) as Record<string, { read?: boolean; starred?: boolean }>;
-    expect(state.a?.read).toBeTrue();
-    expect(state.b?.starred).toBeTrue();
+    expect(state.a?.read).toBe(true);
+    expect(state.b?.starred).toBe(true);
   });
 
   test('rejects invalid theme name in /api/config', async () => {
@@ -282,8 +282,8 @@ describe('server hardening', () => {
       expect(body.entries).toBeUndefined();
       expect(body.feeds).toBeUndefined();
     } else {
-      expect(Array.isArray(body.entries)).toBeTrue();
-      expect(Array.isArray(body.feeds?.feeds)).toBeTrue();
+      expect(Array.isArray(body.entries)).toBe(true);
+      expect(Array.isArray(body.feeds?.feeds)).toBe(true);
       expect(body.feeds?.health).toBeDefined();
     }
   });
@@ -303,8 +303,8 @@ describe('server hardening', () => {
       expect(body.entries).toBeUndefined();
       expect(body.feeds).toBeUndefined();
     } else {
-      expect(Array.isArray(body.entries)).toBeTrue();
-      expect(Array.isArray(body.feeds?.feeds)).toBeTrue();
+      expect(Array.isArray(body.entries)).toBe(true);
+      expect(Array.isArray(body.feeds?.feeds)).toBe(true);
     }
   });
 });

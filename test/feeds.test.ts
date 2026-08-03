@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { fetchAllFeeds, fetchFeed, parseAtprotoFeedUrl, parseFeed, parseOPML, resolveFeedInput } from '../lib/feeds.ts';
 
 describe('parseFeed', () => {
@@ -213,7 +213,7 @@ describe('fetchAllFeeds', () => {
       const headers = new Headers(init?.headers);
       seenHeaders['if-none-match'] = headers.get('if-none-match') || '';
       seenHeaders['if-modified-since'] = headers.get('if-modified-since') || '';
-      return new Response('', {
+      return new Response(null, {
         status: 304,
         headers: {
           etag: '"next"',
@@ -413,7 +413,7 @@ describe('ATProto feeds', () => {
         title: 'Hello Standard Site',
         published: '2026-06-01T10:00:00.000Z',
       }]);
-      expect(calls.some(call => call.includes('site.standard.document'))).toBeTrue();
+      expect(calls.some(call => call.includes('site.standard.document'))).toBe(true);
     } finally {
       globalThis.fetch = originalFetch;
     }

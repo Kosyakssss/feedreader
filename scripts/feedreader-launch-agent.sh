@@ -12,19 +12,19 @@ uid=$(id -u)
 domain="gui/$uid"
 service="$domain/$label"
 tailscale_service="$domain/$tailscale_label"
-launch_path="$HOME/.local/bin:$HOME/.bun/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+launch_path="$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 usage() {
     echo "Usage: scripts/feedreader-launch-agent.sh install|uninstall|start|stop|restart|status|plist"
 }
 
-find_bun() {
-    if command -v bun >/dev/null 2>&1; then
-        command -v bun
-    elif [ -x "$HOME/.bun/bin/bun" ]; then
-        printf '%s\n' "$HOME/.bun/bin/bun"
+find_node() {
+    if command -v node >/dev/null 2>&1; then
+        command -v node
+    elif [ -x /opt/homebrew/bin/node ]; then
+        printf '%s\n' /opt/homebrew/bin/node
     else
-        echo 'bun is not installed or not on PATH' >&2
+        echo 'node is not installed or not on PATH' >&2
         return 1
     fi
 }
@@ -82,12 +82,12 @@ stop_tailscale_serve() {
 }
 
 write_plist() {
-    bun_bin=$(find_bun) || return 1
+    node_bin=$(find_node) || return 1
     mkdir -p "$(dirname "$plist")" "$log_dir"
     tmp=$(mktemp "${TMPDIR:-/tmp}/feedreader-launch-agent.XXXXXX")
     trap 'rm -f "$tmp"' EXIT HUP INT TERM
 
-    bun_xml=$(xml_escape "$bun_bin")
+    node_xml=$(xml_escape "$node_bin")
     server_xml=$(xml_escape "$project_dir/server.ts")
     project_xml=$(xml_escape "$project_dir")
     stdout_xml=$(xml_escape "$log_dir/stdout.log")
@@ -103,7 +103,7 @@ write_plist() {
   <string>$label</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$bun_xml</string>
+    <string>$node_xml</string>
     <string>$server_xml</string>
   </array>
   <key>WorkingDirectory</key>

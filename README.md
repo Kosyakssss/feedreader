@@ -6,17 +6,17 @@ A local-first RSS/Atom reader that runs in the browser. Portable, pretty, lightw
 
 - **Local-first** — everything lives on disk (`data/` folder). Sync via Syncthing, iCloud, or just copy the folder. No accounts, no cloud.
 - **Minimal reading in-app** — entries open original links. The app is a _launcher_, not a reader.
-- **Portable server** — uses Node.js standard APIs and runs with Bun on macOS and Linux. No Bun-specific APIs.
-- **Two dependencies** — `fast-xml-parser`, `tsx`. That's it.
-- **Theme choice** — pick one of the four adaptive Stargazing families in Settings.
+- **Portable server** — runs on Node.js using standard APIs on macOS and Linux.
+- **One runtime dependency** — `fast-xml-parser`. That's it.
+- **Theme choice** — pick one of the five adaptive Stargazing families in Settings.
 - **File-synced state** — Syncthing conflict files (`state.sync-conflict-*.json`) are auto-merged using latest-timestamp-wins per entry.
 - **Safer imports/state** — feed URLs are validated on both manual add and OPML import, and entry IDs are scoped per feed so state cannot bleed across subscriptions.
 
 ## Running
 
 ```sh
-bun install
-bun server.ts
+npm install
+npm start
 ```
 
 Open `http://localhost:8787`. Override the port with `--port 3000` or in `data/config.json`.
@@ -27,7 +27,7 @@ For private access from trusted devices, install Tailscale on both devices and u
 Point to a custom data directory:
 
 ```sh
-bun server.ts --data /path/to/data
+npm start -- --data /path/to/data
 ```
 
 ## macOS startup
@@ -45,8 +45,8 @@ scripts/feedreader-launch-agent.sh status
 scripts/feedreader-launch-agent.sh restart
 scripts/feedreader-launch-agent.sh stop
 scripts/feedreader-launch-agent.sh uninstall
-bun run unread
-bun run unread --limit 20
+npm run unread
+npm run unread -- --limit 20
 ```
 
 The LaunchAgent runs `server.ts` from this checkout at login and writes logs to `~/Library/Logs/feedreader/`.
@@ -64,7 +64,7 @@ All runtime data lives in `data/`. The public feed list and themes are versioned
 | `cache.json`           | Fetched entries + fetch timestamps           | No        |
 | `config.json`          | Local settings (created on first write)      | No        |
 | `transaction.json`     | Crash-recovery journal for multi-file writes | No        |
-| `themes/*.css`         | Four adaptive Stargazing theme families      | Yes       |
+| `themes/*.css`         | Five adaptive Stargazing theme families      | Yes       |
 
 ## Pages
 

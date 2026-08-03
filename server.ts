@@ -240,8 +240,14 @@ function hasJsonContentType(req: import('node:http').IncomingMessage): boolean {
   return contentType === 'application/json' || contentType.endsWith('+json');
 }
 
+function requestHost(req: import('node:http').IncomingMessage): string {
+  return headerValue(req, 'x-forwarded-host').split(',', 1)[0].trim()
+    || headerValue(req, 'host')
+    || 'localhost';
+}
+
 function requestUrl(req: import('node:http').IncomingMessage): URL {
-  const host = req.headers.host || 'localhost';
+  const host = requestHost(req);
   const forwardedProto = headerValue(req, 'x-forwarded-proto').split(',', 1)[0].trim().toLowerCase();
   const proto = forwardedProto === 'https' ? 'https' : 'http';
   return new URL(req.url || '/', `${proto}://${host}`);
@@ -254,7 +260,7 @@ function appPath(path: string): string {
 }
 
 function renderBasePath(req: import('node:http').IncomingMessage, pathname: string): string {
-  const host = headerValue(req, 'host').split(':', 1)[0].toLowerCase();
+  const host = requestHost(req).split(':', 1)[0].toLowerCase();
   if (pathname.startsWith(SERVE_BASE_PATH) || host.endsWith('.ts.net')) return SERVE_BASE_PATH;
   return '';
 }
