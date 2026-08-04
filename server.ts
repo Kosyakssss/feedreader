@@ -496,11 +496,11 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       }
       if ('theme' in body) {
         if (body.theme === null || body.theme === '') {
-          patch.theme = 'blue-hour';
+          patch.theme = 'system';
         } else {
           const safeTheme = sanitizeThemeName(body.theme);
           if (!safeTheme) throw new HttpError(400, 'Invalid theme name');
-          if (!['blue-hour', 'gallery-plaster', 'grey-fruit', 'mineral-paper', 'soft-parchment'].includes(safeTheme)) {
+          if (!['system'].includes(safeTheme)) {
             throw new HttpError(400, 'Theme is not available');
           }
           patch.theme = safeTheme;
@@ -531,7 +531,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
 
     if (path === '/api/theme' && method === 'GET') {
       const config = await readConfig();
-      const themeName = config.theme || 'blue-hour';
+      const themeName = config.theme || 'system';
       const css = await readThemeCSS(themeName);
       res.writeHead(200, { 'Content-Type': 'text/css' });
       return res.end(css);

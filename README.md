@@ -8,7 +8,7 @@ A local-first RSS/Atom reader that runs in the browser. Portable, pretty, lightw
 - **Minimal reading in-app** — entries open original links. The app is a _launcher_, not a reader.
 - **Portable server** — runs on Node.js using standard APIs on macOS and Linux.
 - **One runtime dependency** — `fast-xml-parser`. That's it.
-- **Theme choice** — pick one of the five adaptive Stargazing families in Settings.
+- **Theme choice** — one adaptive system theme follows the browser and macOS light/dark appearance.
 - **File-synced state** — Syncthing conflict files (`state.sync-conflict-*.json`) are auto-merged using latest-timestamp-wins per entry.
 - **Safer imports/state** — feed URLs are validated on both manual add and OPML import, and entry IDs are scoped per feed so state cannot bleed across subscriptions.
 
@@ -55,7 +55,7 @@ Tailscale Serve strips the `/feedreader` prefix before proxying to the local ser
 
 ## Data
 
-All runtime data lives in `data/`. The public feed list and themes are versioned; local state is ignored:
+All runtime data lives in `data/`. The feed list and system theme are versioned; local state is ignored:
 
 | File                   | Purpose                                      | Versioned |
 | ---------------------- | -------------------------------------------- | --------- |
@@ -64,7 +64,7 @@ All runtime data lives in `data/`. The public feed list and themes are versioned
 | `cache.json`           | Fetched entries + fetch timestamps           | No        |
 | `config.json`          | Local settings (created on first write)      | No        |
 | `transaction.json`     | Crash-recovery journal for multi-file writes | No        |
-| `themes/*.css`         | Five adaptive Stargazing theme families      | Yes       |
+| `themes/system.css`    | Adaptive system light/dark theme                  | Yes       |
 
 ## Pages
 
@@ -98,6 +98,7 @@ All runtime data lives in `data/`. The public feed list and themes are versioned
 {
   "maxBulkOpen": 20,
   "retention": { "maxEntries": 3000, "maxDays": null },
+  "theme": "system",
   "port": 8787
 }
 ```

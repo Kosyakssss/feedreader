@@ -27,11 +27,7 @@ beforeAll(async () => {
   await writeFile(join(dataDir, 'feeds.json'), '{ "folders": [], "feeds": [] }\n');
   await writeFile(join(dataDir, 'state.json'), '{}\n');
   await writeFile(join(dataDir, 'cache.json'), '{ "entries": [], "lastFetched": {} }\n');
-  await writeFile(join(dataDir, 'themes', 'blue-hour.css'), 'body { color: #0e1115; }\n');
-  await writeFile(join(dataDir, 'themes', 'gallery-plaster.css'), 'body { color: #111110; }\n');
-  await writeFile(join(dataDir, 'themes', 'grey-fruit.css'), 'body { color: #000000; }\n');
-  await writeFile(join(dataDir, 'themes', 'mineral-paper.css'), 'body { color: #0f1111; }\n');
-  await writeFile(join(dataDir, 'themes', 'soft-parchment.css'), 'body { color: #100f0f; }\n');
+  await writeFile(join(dataDir, 'themes', 'system.css'), '/* feedreader-system-theme */\nbody { color: CanvasText; }\n');
 
   port = 41000 + Math.floor(Math.random() * 5000);
   proc = spawn(process.execPath, ['server.ts', '--data', dataDir, '--port', String(port)], {
@@ -103,6 +99,18 @@ describe('server hardening', () => {
       body: JSON.stringify({ entries: {} }),
     });
     expect(api.status).toBe(200);
+  });
+
+  test('serves the system theme by default', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/theme`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('feedreader-system-theme');
+  });
+
+  test('does not expose a theme selector', async () => {
+    const page = await fetch(`http://127.0.0.1:${port}/`);
+    expect(page.status).toBe(200);
+    expect(await page.text()).not.toContain('name="theme"');
   });
 
   test('renders /feedreader links when Tailscale Serve strips the path prefix', async () => {
@@ -232,29 +240,27 @@ describe('server hardening', () => {
     expect(res.status).toBe(400);
   });
 
-  test('accepts every Stargazing theme in /api/config', async () => {
-    for (const theme of ['blue-hour', 'gallery-plaster', 'grey-fruit', 'mineral-paper', 'soft-parchment']) {
-      const res = await fetch(`http://127.0.0.1:${port}/api/config`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ theme }),
-      });
-      expect(res.status).toBe(200);
-      expect((await res.json() as { theme: string }).theme).toBe(theme);
-    }
+  test('accepts the system theme in /api/config', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/config`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ theme: 'system' }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json() as { theme: string }).theme).toBe('system');
   });
 
-  test('serves the active Stargazing theme CSS', async () => {
+  test('serves the active system theme CSS', async () => {
     const update = await fetch(`http://127.0.0.1:${port}/api/config`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ theme: 'soft-parchment' }),
+      body: JSON.stringify({ theme: 'system' }),
     });
     expect(update.status).toBe(200);
 
     const css = await fetch(`http://127.0.0.1:${port}/api/theme`);
     expect(css.status).toBe(200);
-    expect(await css.text()).toContain('#100f0f');
+    expect(await css.text()).toContain('feedreader-system-theme');
   });
 
   test('rejects unavailable theme names in /api/config', async () => {

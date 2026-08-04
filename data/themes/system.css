@@ -1,21 +1,25 @@
 /**
- * @name Stargazing Blue Hour
- * @author Stargazing
- * @description Adaptive Blue Hour light and dark theme
+ * @name Feedreader System
+ * @author Feedreader
+ * @description System light/dark colors with a restrained blue accent
  */
 
+/* feedreader-system-theme */
 :root {
-  --bg: #E9EDF0;
-  --bg-card: #DEE2E5;
-  --bg-hover: #D3D7DA;
-  --bg-nav: color-mix(in srgb, var(--bg) 92%, transparent);
-  --text: #0E1115;
-  --text-muted: #66696E;
-  --text-link: #0E1115;
-  --accent: #205EA6;
-  --accent-hover: #1A4F8C;
-  --border: rgba(0, 0, 0, 0.08);
-  --star: #BC5215;
+  color-scheme: light dark;
+  --bg: Canvas;
+  --bg-card: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+  --bg-hover: color-mix(in srgb, Canvas 90%, CanvasText 10%);
+  --bg-nav: color-mix(in srgb, Canvas 92%, transparent);
+  --text: CanvasText;
+  --text-muted: color-mix(in srgb, CanvasText 62%, Canvas 38%);
+  --text-link: LinkText;
+  --accent: #1769aa;
+  --accent-hover: #0d4f87;
+  --selection: Highlight;
+  --selection-text: HighlightText;
+  --border: color-mix(in srgb, CanvasText 12%, transparent);
+  --star: #a95c00;
   --radius: 0;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
   --font-mono: "SF Mono", ui-monospace, "Cascadia Code", monospace;
@@ -25,23 +29,15 @@
   --spacing-md: 16px;
   --spacing-lg: 24px;
   --spacing-xl: 32px;
-  --shadow: 0 0.5px 0 rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow: 0 0.5px 0 color-mix(in srgb, CanvasText 4%, transparent), 0 1px 3px color-mix(in srgb, CanvasText 8%, transparent);
   --transition: 180ms;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0E1115;
-    --bg-card: #191C20;
-    --bg-hover: #24282C;
-    --bg-nav: color-mix(in srgb, var(--bg) 92%, transparent);
-    --text: #E9EDF0;
-    --text-muted: #7B7F83;
-    --text-link: #E9EDF0;
-    --accent: #4385BE;
-    --accent-hover: #66A0C8;
-    --border: rgba(255, 255, 255, 0.08);
-    --star: #BC5215;
+    --accent: #6ea8df;
+    --accent-hover: #9dc6eb;
+    --star: #e09b52;
     --shadow: none;
   }
 }
@@ -59,8 +55,8 @@ body {
 }
 
 ::selection {
-  background: var(--accent);
-  color: #fff;
+  background: var(--selection);
+  color: var(--selection-text);
 }
 
 /* Nav */
