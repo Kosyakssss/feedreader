@@ -38,12 +38,6 @@
       "folderId": null
     },
     {
-      "id": "f97dd6cf-e784-46ad-8e4f-fa52676f005c",
-      "url": "https://futo.org/blog/index.xml",
-      "label": "FUTO - Blog",
-      "folderId": null
-    },
-    {
       "id": "14e69152-71e5-4964-930d-ac4eb5ec4cd6",
       "url": "https://geohot.github.io/blog/feed.xml",
       "label": "the singularity is nearer",
@@ -239,6 +233,18 @@
       "id": "53b55cb8-bd79-47b7-a5d6-705e036f1ec3",
       "url": "https://type-writer.org/?feed=rss2",
       "label": "type-writer.org",
+      "folderId": null
+    },
+    {
+      "id": "510c5c94-be54-4f66-b56d-469260dd7828",
+      "url": "https://randsinrepose.com/feed/",
+      "label": "randsinrepose.com",
+      "folderId": null
+    },
+    {
+      "id": "bc2d3ecd-722e-43cb-ae47-02f9b9991058",
+      "url": "https://runarcn.no/feed/",
+      "label": "runarcn.no",
       "folderId": null
     }
   ]
