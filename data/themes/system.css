@@ -105,6 +105,12 @@ body {
   letter-spacing: -0.02em;
 }
 
+.refresh-status {
+  color: var(--text-muted);
+  font-size: 0.8em;
+  font-variant-numeric: tabular-nums;
+}
+
 .nav-link {
   color: var(--text-muted);
   text-decoration: none;
@@ -743,6 +749,12 @@ body {
     align-items: center;
     justify-content: center;
     margin-left: auto;
+  }
+
+  .refresh-status {
+    max-width: 42vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .nav-links {

@@ -272,26 +272,36 @@ describe('server hardening', () => {
     expect(res.status).toBe(400);
   });
 
-  test('starts refresh in the background without repeating full snapshots while active', async () => {
+  test('starts refresh with progress and delta fields instead of full snapshots', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/refresh`, { method: 'POST' });
 
     expect(res.status).toBe(202);
     const body = await res.json() as {
       count: number;
+      runId: string;
+      total: number;
+      completed: number;
+      succeeded: number;
+      failed: number;
+      cursor: number;
+      newEntries: unknown[];
+      removedIds: string[];
       refreshing: boolean;
       entries?: unknown[];
       feeds?: { feeds: unknown[]; health: Record<string, unknown> };
     };
     expect(typeof body.count).toBe('number');
     expect(typeof body.refreshing).toBe('boolean');
-    if (body.refreshing) {
-      expect(body.entries).toBeUndefined();
-      expect(body.feeds).toBeUndefined();
-    } else {
-      expect(Array.isArray(body.entries)).toBe(true);
-      expect(Array.isArray(body.feeds?.feeds)).toBe(true);
-      expect(body.feeds?.health).toBeDefined();
-    }
+    expect(typeof body.runId).toBe('string');
+    expect(typeof body.total).toBe('number');
+    expect(typeof body.completed).toBe('number');
+    expect(typeof body.succeeded).toBe('number');
+    expect(typeof body.failed).toBe('number');
+    expect(typeof body.cursor).toBe('number');
+    expect(Array.isArray(body.newEntries)).toBe(true);
+    expect(Array.isArray(body.removedIds)).toBe(true);
+    expect(body.entries).toBeUndefined();
+    expect(body.feeds).toBeUndefined();
   });
 
   test('reports refresh status', async () => {
@@ -300,17 +310,32 @@ describe('server hardening', () => {
     const body = await res.json() as {
       refreshing: boolean;
       count: number;
+      cursor: number;
+      newEntries: unknown[];
+      removedIds: string[];
       entries?: unknown[];
       feeds?: { feeds: unknown[] };
     };
     expect(typeof body.refreshing).toBe('boolean');
     expect(typeof body.count).toBe('number');
-    if (body.refreshing) {
-      expect(body.entries).toBeUndefined();
-      expect(body.feeds).toBeUndefined();
-    } else {
-      expect(Array.isArray(body.entries)).toBe(true);
-      expect(Array.isArray(body.feeds?.feeds)).toBe(true);
-    }
+    expect(typeof body.cursor).toBe('number');
+    expect(Array.isArray(body.newEntries)).toBe(true);
+    expect(Array.isArray(body.removedIds)).toBe(true);
+    expect(body.entries).toBeUndefined();
+    expect(body.feeds).toBeUndefined();
+
+    const caughtUp = await fetch(`http://127.0.0.1:${port}/api/refresh/status?since=${body.cursor}`);
+    expect(caughtUp.status).toBe(200);
+    const caughtUpBody = await caughtUp.json() as { newEntries: unknown[] };
+    expect(caughtUpBody.newEntries).toEqual([]);
+  });
+
+  test('renders persistent loading and refresh status UI', async () => {
+    const page = await fetch(`http://127.0.0.1:${port}/`);
+    const html = await page.text();
+    expect(html).toContain('id="refresh-status"');
+    expect(html).toContain('Loading saved entries…');
+    expect(html).toContain('Checking feeds ');
+    expect(html).toContain("'/api/refresh/status?since=' + refreshCursor");
   });
 });

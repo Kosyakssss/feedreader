@@ -29,6 +29,7 @@ export function renderApp(config: Config, basePath = ''): string {
     gap: var(--spacing-md);
   }
   .nav-links { display: flex; gap: var(--spacing-xs); }
+  .refresh-status { margin-left: auto; white-space: nowrap; }
   .nav-menu-button { display: none; }
   .nav-scrim { position: fixed; inset: 0; z-index: 40; }
   .page { max-width: 720px; margin: 0 auto; padding: var(--spacing-md); }
@@ -79,6 +80,7 @@ export function renderApp(config: Config, basePath = ''): string {
 <body>
 <nav class="nav-bar">
   <a href="${basePath}/" class="nav-logo" data-link>🔖 Feedreader</a>
+  <span class="refresh-status" id="refresh-status" role="status" aria-live="polite"></span>
   <button class="nav-menu-button" type="button" aria-label="Open navigation" aria-expanded="false" data-nav-menu>☰</button>
   <div class="nav-links">
     <a href="${basePath}/" data-link class="nav-link" data-nav="/">Timeline</a>
@@ -133,6 +135,10 @@ let selectionAnchorId = null;
 let selectionDrag = null;
 let suppressNextSelectClick = false;
 let keyboardNavigationActive = false;
+let initialDataLoading = true;
+let refreshStatus = null;
+let refreshRunId = null;
+let refreshCursor = 0;
 
 function esc(s) {
   const d = document.createElement('div');
@@ -192,28 +198,82 @@ async function api(method, path, body) {
 }
 
 async function refreshData() {
-  const r = await api('POST', '/api/refresh');
-  return pollRefresh(r);
+  return pollRefresh(await api('POST', '/api/refresh'));
 }
 
 async function pollRefresh(initial) {
   let latest = initial;
+  applyRefreshStatus(latest);
   while (latest?.refreshing) {
-    if (Array.isArray(latest.entries) && latest.feeds) {
-      entries = latest.entries;
-      feeds = latest.feeds;
-      renderCurrentPage();
-    }
     await new Promise(r => setTimeout(r, 750));
-    latest = await api('GET', '/api/refresh/status');
+    latest = await api('GET', '/api/refresh/status?since=' + refreshCursor);
+    applyRefreshStatus(latest);
   }
-  if (Array.isArray(latest.entries) && latest.feeds) {
-    entries = latest.entries;
-    feeds = latest.feeds;
-    return latest;
-  }
-  [entries, feeds] = await Promise.all([api('GET', '/api/entries'), api('GET', '/api/feeds')]);
+  feeds = await api('GET', '/api/feeds');
+  if (currentPage === '/feeds') renderCurrentPage();
   return latest;
+}
+
+function applyRefreshStatus(status) {
+  if (!status) return;
+  if (status.runId && status.runId !== refreshRunId) {
+    refreshRunId = status.runId;
+    refreshCursor = 0;
+  }
+
+  let entriesChanged = false;
+  const removedIds = new Set(Array.isArray(status.removedIds) ? status.removedIds : []);
+  if (removedIds.size > 0) {
+    const before = entries.length;
+    entries = entries.filter(entry => !removedIds.has(entry.id));
+    entriesChanged = entries.length !== before;
+  }
+
+  if (Array.isArray(status.newEntries) && status.newEntries.length > 0) {
+    const indexes = new Map(entries.map((entry, index) => [entry.id, index]));
+    for (const entry of status.newEntries) {
+      const index = indexes.get(entry.id);
+      if (index === undefined) {
+        indexes.set(entry.id, entries.length);
+        entries.push(entry);
+      } else {
+        entries[index] = entry;
+      }
+      entriesChanged = true;
+    }
+    entries.sort((a, b) => Date.parse(b.published) - Date.parse(a.published));
+  }
+
+  refreshCursor = Math.max(refreshCursor, Number(status.cursor) || 0);
+  refreshStatus = status;
+  if (entriesChanged) renderCurrentPage();
+  else updateRefreshIndicator();
+}
+
+function refreshStatusText() {
+  if (initialDataLoading) return 'Loading saved entries…';
+  if (!refreshStatus) return '';
+  if (refreshStatus.refreshing) {
+    if (!refreshStatus.total && !refreshStatus.completed) return 'Starting refresh…';
+    const progress = refreshStatus.total > 0
+      ? refreshStatus.completed + '/' + refreshStatus.total
+      : String(refreshStatus.completed || 0);
+    return 'Checking feeds ' + progress + (refreshStatus.count ? ' · ' + refreshStatus.count + ' new' : '');
+  }
+  if (refreshStatus.error) return 'Refresh failed';
+  const result = refreshStatus.count ? refreshStatus.count + ' new' : 'Up to date';
+  return refreshStatus.failed ? result + ' · ' + refreshStatus.failed + ' failed' : result;
+}
+
+function updateRefreshIndicator() {
+  const status = document.getElementById('refresh-status');
+  if (status) status.textContent = refreshStatusText();
+  const button = document.querySelector('[data-refresh]');
+  if (button) {
+    const refreshing = !!refreshStatus?.refreshing;
+    button.disabled = initialDataLoading || refreshing;
+    button.textContent = refreshing ? 'Refreshing…' : 'Refresh ↻';
+  }
 }
 
 function getFiltered(source) {
@@ -287,6 +347,7 @@ function entryHtml(entry, i) {
 }
 
 function entryListHtml(source) {
+  if (initialDataLoading) return '<div class="empty-state">Loading saved entries…</div>';
   const filtered = getFiltered(source);
   if (filtered.length === 0) return '<div class="empty-state">No entries</div>';
   const visible = filtered.slice(0, loadLimit);
@@ -310,7 +371,7 @@ function toolbarHtml(source, showActions) {
     html += '<div class="timeline-actions">';
     html += '<button class="btn" data-openall>Open all unread ↗</button>';
     html += '<button class="btn" data-markall>Mark all read ✓</button>';
-    html += '<button class="btn" data-refresh>Refresh ↻</button>';
+    html += '<button class="btn" data-refresh' + (initialDataLoading || refreshStatus?.refreshing ? ' disabled' : '') + '>' + (refreshStatus?.refreshing ? 'Refreshing…' : 'Refresh ↻') + '</button>';
     html += '</div>';
   }
   html += '</div>';
@@ -387,6 +448,7 @@ function renderCurrentPage() {
     document.getElementById('app').innerHTML = route(currentPage);
     updateNav();
     bindPage();
+    updateRefreshIndicator();
   };
   if (document.startViewTransition) document.startViewTransition(update);
   else update();
@@ -406,6 +468,7 @@ function navigate(path, push) {
     document.getElementById('app').innerHTML = route(path);
     updateNav();
     bindPage();
+    updateRefreshIndicator();
   };
   if (document.startViewTransition) document.startViewTransition(update);
   else update();
@@ -679,12 +742,15 @@ function bindPage() {
 
     const refreshBtn = target.closest('[data-refresh]');
     if (refreshBtn) {
-      refreshBtn.disabled = true;
-      refreshBtn.textContent = 'Refreshing…';
-      toast('Refreshing feeds…');
-      const r = await refreshData();
-      toast(r.count + ' new entries');
-      renderCurrentPage();
+      try {
+        const r = await refreshData();
+        if (r.error) toast('Refresh failed: ' + r.error);
+      } catch (err) {
+        refreshStatus = { refreshing: false, error: err.message, count: 0, failed: 0 };
+        toast('Refresh failed: ' + err.message);
+      } finally {
+        updateRefreshIndicator();
+      }
       return;
     }
 
@@ -911,16 +977,22 @@ document.addEventListener('visibilitychange', () => {
 
 // Init
 (async () => {
-  [feeds, entries] = await Promise.all([api('GET', '/api/feeds'), api('GET', '/api/entries')]);
   navigate(internalPath(location.pathname), false);
+  const feedsPromise = api('GET', '/api/feeds');
+  entries = await api('GET', '/api/entries');
+  initialDataLoading = false;
+  renderCurrentPage();
+  feeds = await feedsPromise;
+  if (currentPage === '/feeds' || currentPage.startsWith('/feed/')) renderCurrentPage();
 
   // Auto-refresh feeds after initial load
   try {
-    toast('Refreshing feeds…');
     const r = await refreshData();
-    if (r.count > 0) toast(r.count + ' new entries');
-    renderCurrentPage();
-  } catch {}
+    if (r.error) toast('Refresh failed: ' + r.error);
+  } catch (err) {
+    refreshStatus = { refreshing: false, error: err.message, count: 0, failed: 0 };
+    updateRefreshIndicator();
+  }
 })();
 </script>
 </body>

@@ -20,6 +20,32 @@ const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 let refreshJob: Promise<number> | null = null;
 let lastRefreshResult: { count: number; finishedAt: number; error: string | null } | null = null;
+interface RefreshChange {
+  sequence: number;
+  entry: EnrichedEntry;
+}
+
+interface RefreshProgress {
+  runId: string;
+  startedAt: number;
+  finishedAt: number | null;
+  total: number;
+  completed: number;
+  succeeded: number;
+  failed: number;
+  added: number;
+  error: string | null;
+  changes: RefreshChange[];
+  removedIds: string[];
+}
+
+interface CompletedFeedResult {
+  feed: Feed;
+  result: FeedFetchResult;
+  completedAt: number;
+}
+
+let refreshProgress: RefreshProgress | null = null;
 const startedAt = new Date().toISOString();
 let startupHost = DEFAULT_HOST;
 let startupPort = 8787;
@@ -61,113 +87,157 @@ async function getFeedsWithHealth() {
   return { ...feedsFile, health };
 }
 
-async function refreshFeeds(): Promise<number> {
+async function refreshFeeds(progress: RefreshProgress): Promise<number> {
   await runDataMutation(() => mergeSyncConflicts());
   const [feedsFile, startingCache] = await Promise.all([readFeeds(), readCache()]);
+  const startingState = await readState(startingCache);
   const now = Date.now();
   const feedsToFetch = feedsFile.feeds.filter(feed => {
     const retryAt = startingCache.feedMeta[feed.id]?.nextRetryAfter || 0;
     return retryAt <= now;
   });
-  let added = 0;
+  progress.total = feedsToFetch.length;
+
+  const existing = new Set(startingCache.entries.map(entry => entry.id));
+  const existingSources = new Set(startingCache.entries.flatMap(entry => entry.sourceId ? [`${entry.feedId}\t${entry.sourceId}`] : []));
+  const existingUrls = new Set(startingCache.entries.flatMap(entry => entry.url ? [`${entry.feedId}\t${entry.url}`] : []));
+  const existingNoUrlTitles = new Set(startingCache.entries.flatMap(entry => !entry.url && entry.title ? [`${entry.feedId}\t${entry.title}`] : []));
+  const completedResults: CompletedFeedResult[] = [];
+
   await fetchAllFeeds(feedsToFetch, startingCache.feedMeta, async (feed, result) => {
-    added += await mergeFeedResult(feed, result);
+    completedResults.push({ feed, result, completedAt: Date.now() });
+    progress.completed++;
+    if (result.error) progress.failed++;
+    else progress.succeeded++;
+
+    for (const entry of result.entries) {
+      if (entry.feedId !== feed.id || existing.has(entry.id)) continue;
+      if (entry.sourceId && existingSources.has(`${entry.feedId}\t${entry.sourceId}`)) continue;
+      if (entry.url && existingUrls.has(`${entry.feedId}\t${entry.url}`)) continue;
+      if (!entry.url && entry.title && existingNoUrlTitles.has(`${entry.feedId}\t${entry.title}`)) continue;
+
+      existing.add(entry.id);
+      if (entry.sourceId) existingSources.add(`${entry.feedId}\t${entry.sourceId}`);
+      if (entry.url) existingUrls.add(`${entry.feedId}\t${entry.url}`);
+      if (!entry.url && entry.title) existingNoUrlTitles.add(`${entry.feedId}\t${entry.title}`);
+
+      progress.changes.push({
+        sequence: progress.changes.length + 1,
+        entry: {
+          ...entry,
+          url: safeEntryUrl(entry.url),
+          title: decodeHtmlEntities(entry.title),
+          feedLabel: feed.label,
+          state: startingState[entry.id] || {},
+        },
+      });
+      progress.added++;
+    }
   });
-  await removeDeletedFeedHealth();
-  return added;
+
+  const provisionalIds = new Set(progress.changes.map(change => change.entry.id));
+  const merged = await mergeFeedResults(completedResults, provisionalIds);
+  progress.added = merged.count;
+  progress.removedIds = merged.removedIds;
+  return merged.count;
 }
 
-async function mergeFeedResult(feed: Feed, result: FeedFetchResult): Promise<number> {
+async function mergeFeedResults(completedResults: CompletedFeedResult[], provisionalIds: Set<string>): Promise<{ count: number; removedIds: string[] }> {
   return runDataMutation(async () => {
     const [feedsFile, cache, config] = await Promise.all([
       readFeeds(), readCache(), readConfig(),
     ]);
     const currentFeedIds = new Set(feedsFile.feeds.map(feed => feed.id));
+    const originalIds = new Set(cache.entries.map(entry => entry.id));
     const existing = new Set(cache.entries.map(e => e.id));
     const existingSources = new Set(cache.entries.flatMap(e => e.sourceId ? [`${e.feedId}\t${e.sourceId}`] : []));
     const existingUrls = new Set(cache.entries.flatMap(e => e.url ? [`${e.feedId}\t${e.url}`] : []));
     const existingNoUrlTitles = new Set(cache.entries.flatMap(e => !e.url && e.title ? [`${e.feedId}\t${e.title}`] : []));
     const addedIds: string[] = [];
 
-    for (const entry of result.entries) {
-      if (entry.feedId !== feed.id || !currentFeedIds.has(entry.feedId)) continue;
-      if (existing.has(entry.id)) continue;
-      if (entry.sourceId && existingSources.has(`${entry.feedId}\t${entry.sourceId}`)) continue;
-      if (entry.url && existingUrls.has(`${entry.feedId}\t${entry.url}`)) continue;
-      if (!entry.url && entry.title && existingNoUrlTitles.has(`${entry.feedId}\t${entry.title}`)) continue;
-      cache.entries.push(entry);
-      existing.add(entry.id);
-      if (entry.sourceId) existingSources.add(`${entry.feedId}\t${entry.sourceId}`);
-      if (entry.url) existingUrls.add(`${entry.feedId}\t${entry.url}`);
-      if (!entry.url && entry.title) existingNoUrlTitles.add(`${entry.feedId}\t${entry.title}`);
-      addedIds.push(entry.id);
+    for (const { feed, result, completedAt } of completedResults) {
+      if (!currentFeedIds.has(feed.id)) continue;
+      for (const entry of result.entries) {
+        if (entry.feedId !== feed.id || existing.has(entry.id)) continue;
+        if (entry.sourceId && existingSources.has(`${entry.feedId}\t${entry.sourceId}`)) continue;
+        if (entry.url && existingUrls.has(`${entry.feedId}\t${entry.url}`)) continue;
+        if (!entry.url && entry.title && existingNoUrlTitles.has(`${entry.feedId}\t${entry.title}`)) continue;
+        cache.entries.push(entry);
+        existing.add(entry.id);
+        if (entry.sourceId) existingSources.add(`${entry.feedId}\t${entry.sourceId}`);
+        if (entry.url) existingUrls.add(`${entry.feedId}\t${entry.url}`);
+        if (!entry.url && entry.title) existingNoUrlTitles.add(`${entry.feedId}\t${entry.title}`);
+        addedIds.push(entry.id);
+      }
+
+      cache.lastFetched[feed.id] = completedAt;
+      const priorMeta = cache.feedMeta[feed.id] || {};
+      if (result.error) {
+        const failureCount = Math.min((priorMeta.failureCount || 0) + 1, FAILURE_BACKOFF_MS.length - 1);
+        cache.feedMeta[feed.id] = {
+          ...priorMeta,
+          failureCount,
+          nextRetryAfter: completedAt + FAILURE_BACKOFF_MS[failureCount],
+        };
+        cache.feedErrors[feed.id] = result.error;
+      } else {
+        cache.feedMeta[feed.id] = {
+          ...priorMeta,
+          ...(result.validators || {}),
+          failureCount: 0,
+          nextRetryAfter: 0,
+        };
+        delete cache.feedErrors[feed.id];
+      }
     }
 
-    const now = Date.now();
-    cache.lastFetched[feed.id] = now;
-    const priorMeta = cache.feedMeta[feed.id] || {};
-    if (result.error) {
-      const failureCount = Math.min((priorMeta.failureCount || 0) + 1, FAILURE_BACKOFF_MS.length - 1);
-      cache.feedMeta[feed.id] = {
-        ...priorMeta,
-        failureCount,
-        nextRetryAfter: now + FAILURE_BACKOFF_MS[failureCount],
-      };
-      cache.feedErrors[feed.id] = result.error;
-    } else {
-      cache.feedMeta[feed.id] = {
-        ...priorMeta,
-        ...(result.validators || {}),
-        failureCount: 0,
-        nextRetryAfter: 0,
-      };
-      delete cache.feedErrors[feed.id];
+    for (const id of Object.keys(cache.lastFetched)) {
+      if (!currentFeedIds.has(id)) delete cache.lastFetched[id];
+    }
+    for (const id of Object.keys(cache.feedErrors)) {
+      if (!currentFeedIds.has(id)) delete cache.feedErrors[id];
+    }
+    for (const id of Object.keys(cache.feedMeta)) {
+      if (!currentFeedIds.has(id)) delete cache.feedMeta[id];
     }
 
     const state = await readState(cache);
     const pruned = pruneEntries(cache, state, config);
     await writeDataFiles({ 'cache.json': pruned.cache, 'state.json': pruned.state });
     const retainedIds = new Set(pruned.cache.entries.map(entry => entry.id));
-    return addedIds.filter(id => retainedIds.has(id)).length;
-  });
-}
-
-async function removeDeletedFeedHealth(): Promise<void> {
-  await runDataMutation(async () => {
-    const [feedsFile, cache] = await Promise.all([readFeeds(), readCache()]);
-    const currentFeedIds = new Set(feedsFile.feeds.map(feed => feed.id));
-    let changed = false;
-    for (const id of Object.keys(cache.lastFetched)) {
-      if (!currentFeedIds.has(id)) {
-        delete cache.lastFetched[id];
-        changed = true;
-      }
-    }
-    for (const id of Object.keys(cache.feedErrors)) {
-      if (!currentFeedIds.has(id)) {
-        delete cache.feedErrors[id];
-        changed = true;
-      }
-    }
-    for (const id of Object.keys(cache.feedMeta)) {
-      if (!currentFeedIds.has(id)) {
-        delete cache.feedMeta[id];
-        changed = true;
-      }
-    }
-    if (changed) await writeDataFiles({ 'cache.json': cache });
+    const removedIds = [...new Set([...originalIds, ...provisionalIds])].filter(id => !retainedIds.has(id));
+    return { count: addedIds.filter(id => retainedIds.has(id)).length, removedIds };
   });
 }
 
 function startRefresh(): Promise<number> {
   if (refreshJob) return refreshJob;
-  refreshJob = refreshFeeds()
+  const progress: RefreshProgress = {
+    runId: generateId(),
+    startedAt: Date.now(),
+    finishedAt: null,
+    total: 0,
+    completed: 0,
+    succeeded: 0,
+    failed: 0,
+    added: 0,
+    error: null,
+    changes: [],
+    removedIds: [],
+  };
+  refreshProgress = progress;
+  refreshJob = refreshFeeds(progress)
     .then(count => {
-      lastRefreshResult = { count, finishedAt: Date.now(), error: null };
+      progress.finishedAt = Date.now();
+      lastRefreshResult = { count, finishedAt: progress.finishedAt, error: null };
       return count;
     })
     .catch(error => {
-      lastRefreshResult = { count: 0, finishedAt: Date.now(), error: (error as Error).message || 'Refresh failed' };
+      progress.error = (error as Error).message || 'Refresh failed';
+      progress.finishedAt = Date.now();
+      progress.removedIds = progress.changes.map(change => change.entry.id);
+      progress.added = 0;
+      lastRefreshResult = { count: 0, finishedAt: progress.finishedAt, error: progress.error };
       throw error;
     })
     .finally(() => {
@@ -176,18 +246,24 @@ function startRefresh(): Promise<number> {
   return refreshJob;
 }
 
-async function getRefreshStatus() {
-  const status = {
+function getRefreshStatus(since = 0) {
+  const progress = refreshProgress;
+  const cursor = progress?.changes.length || 0;
+  return {
     refreshing: !!refreshJob,
-    count: lastRefreshResult?.count || 0,
-    error: lastRefreshResult?.error || null,
-    finishedAt: lastRefreshResult?.finishedAt || null,
+    runId: progress?.runId || null,
+    startedAt: progress?.startedAt || null,
+    finishedAt: progress?.finishedAt || lastRefreshResult?.finishedAt || null,
+    total: progress?.total || 0,
+    completed: progress?.completed || 0,
+    succeeded: progress?.succeeded || 0,
+    failed: progress?.failed || 0,
+    count: progress?.added ?? lastRefreshResult?.count ?? 0,
+    error: progress?.error || lastRefreshResult?.error || null,
+    cursor,
+    newEntries: progress?.changes.filter(change => change.sequence > since).map(change => change.entry) || [],
+    removedIds: !refreshJob ? progress?.removedIds || [] : [],
   };
-
-  if (refreshJob) return status;
-
-  const [entries, feeds] = await Promise.all([getEntries(), getFeedsWithHealth()]);
-  return { ...status, entries, feeds };
 }
 
 async function getHealth() {
@@ -344,7 +420,9 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
 
     if (path === '/api/refresh/status' && method === 'GET') {
-      return json(res, await getRefreshStatus());
+      const rawSince = Number(url.searchParams.get('since') || 0);
+      const since = Number.isSafeInteger(rawSince) && rawSince >= 0 ? rawSince : 0;
+      return json(res, getRefreshStatus(since));
     }
 
     if (path === '/api/state' && method === 'POST') {
