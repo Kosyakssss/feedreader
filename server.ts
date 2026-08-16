@@ -15,7 +15,6 @@ const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const DEFAULT_HOST = '127.0.0.1';
 const SERVE_BASE_PATH = '/feedreader';
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-const FAILURE_BACKOFF_MS = [0, 5 * 60_000, 15 * 60_000, 60 * 60_000, 6 * 60 * 60_000];
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 let refreshJob: Promise<number> | null = null;
@@ -35,6 +34,7 @@ interface RefreshProgress {
   failed: number;
   added: number;
   error: string | null;
+  failures: { feedId: string; label: string; error: string }[];
   changes: RefreshChange[];
   removedIds: string[];
 }
@@ -91,11 +91,7 @@ async function refreshFeeds(progress: RefreshProgress): Promise<number> {
   await runDataMutation(() => mergeSyncConflicts());
   const [feedsFile, startingCache] = await Promise.all([readFeeds(), readCache()]);
   const startingState = await readState(startingCache);
-  const now = Date.now();
-  const feedsToFetch = feedsFile.feeds.filter(feed => {
-    const retryAt = startingCache.feedMeta[feed.id]?.nextRetryAfter || 0;
-    return retryAt <= now;
-  });
+  const feedsToFetch = feedsFile.feeds;
   progress.total = feedsToFetch.length;
 
   const existing = new Set(startingCache.entries.map(entry => entry.id));
@@ -107,8 +103,12 @@ async function refreshFeeds(progress: RefreshProgress): Promise<number> {
   await fetchAllFeeds(feedsToFetch, startingCache.feedMeta, async (feed, result) => {
     completedResults.push({ feed, result, completedAt: Date.now() });
     progress.completed++;
-    if (result.error) progress.failed++;
-    else progress.succeeded++;
+    if (result.error) {
+      progress.failed++;
+      progress.failures.push({ feedId: feed.id, label: feed.label, error: result.error });
+    } else {
+      progress.succeeded++;
+    }
 
     for (const entry of result.entries) {
       if (entry.feedId !== feed.id || existing.has(entry.id)) continue;
@@ -173,11 +173,11 @@ async function mergeFeedResults(completedResults: CompletedFeedResult[], provisi
       cache.lastFetched[feed.id] = completedAt;
       const priorMeta = cache.feedMeta[feed.id] || {};
       if (result.error) {
-        const failureCount = Math.min((priorMeta.failureCount || 0) + 1, FAILURE_BACKOFF_MS.length - 1);
+        const failureCount = (priorMeta.failureCount || 0) + 1;
         cache.feedMeta[feed.id] = {
           ...priorMeta,
           failureCount,
-          nextRetryAfter: completedAt + FAILURE_BACKOFF_MS[failureCount],
+          nextRetryAfter: 0,
         };
         cache.feedErrors[feed.id] = result.error;
       } else {
@@ -222,6 +222,7 @@ function startRefresh(): Promise<number> {
     failed: 0,
     added: 0,
     error: null,
+    failures: [],
     changes: [],
     removedIds: [],
   };
@@ -260,6 +261,7 @@ function getRefreshStatus(since = 0) {
     failed: progress?.failed || 0,
     count: progress?.added ?? lastRefreshResult?.count ?? 0,
     error: progress?.error || lastRefreshResult?.error || null,
+    failures: progress?.failures || [],
     cursor,
     newEntries: progress?.changes.filter(change => change.sequence > since).map(change => change.entry) || [],
     removedIds: !refreshJob ? progress?.removedIds || [] : [],

@@ -283,6 +283,7 @@ describe('server hardening', () => {
       completed: number;
       succeeded: number;
       failed: number;
+      failures: Array<{ feedId: string; label: string; error: string }>;
       cursor: number;
       newEntries: unknown[];
       removedIds: string[];
@@ -297,6 +298,7 @@ describe('server hardening', () => {
     expect(typeof body.completed).toBe('number');
     expect(typeof body.succeeded).toBe('number');
     expect(typeof body.failed).toBe('number');
+    expect(Array.isArray(body.failures)).toBe(true);
     expect(typeof body.cursor).toBe('number');
     expect(Array.isArray(body.newEntries)).toBe(true);
     expect(Array.isArray(body.removedIds)).toBe(true);
@@ -313,6 +315,7 @@ describe('server hardening', () => {
       cursor: number;
       newEntries: unknown[];
       removedIds: string[];
+      failures: Array<{ feedId: string; label: string; error: string }>;
       entries?: unknown[];
       feeds?: { feeds: unknown[] };
     };
@@ -321,6 +324,7 @@ describe('server hardening', () => {
     expect(typeof body.cursor).toBe('number');
     expect(Array.isArray(body.newEntries)).toBe(true);
     expect(Array.isArray(body.removedIds)).toBe(true);
+    expect(Array.isArray(body.failures)).toBe(true);
     expect(body.entries).toBeUndefined();
     expect(body.feeds).toBeUndefined();
 

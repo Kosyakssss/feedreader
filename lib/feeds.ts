@@ -6,7 +6,6 @@ import { isPrivateAddress, isSafeExternalUrl } from './security.ts';
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', htmlEntities: true });
 const UA = 'Feedreader/1.0';
-const MAX_FEED_FETCH_CONCURRENCY = 24;
 const FEED_FETCH_TIMEOUT_MS = 8000;
 const MAX_FEED_BYTES = 10 * 1024 * 1024;
 const MAX_DISCOVERY_BYTES = 2 * 1024 * 1024;
@@ -643,7 +642,7 @@ export async function fetchAllFeeds(
     }
   }
 
-  const workerCount = Math.min(MAX_FEED_FETCH_CONCURRENCY, feeds.length);
+  const workerCount = feeds.length;
   await Promise.all(Array.from({ length: workerCount }, worker));
 
   const all: Entry[] = [];

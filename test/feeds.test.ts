@@ -159,7 +159,7 @@ describe('parseOPML', () => {
 });
 
 describe('fetchAllFeeds', () => {
-  test('limits concurrent feed fetches and preserves feed errors', async () => {
+  test('fetches every feed concurrently and preserves feed errors', async () => {
     const originalFetch = globalThis.fetch;
     let active = 0;
     let maxActive = 0;
@@ -197,7 +197,7 @@ describe('fetchAllFeeds', () => {
 
       const result = await fetchAllFeeds(feeds);
 
-      expect(maxActive).toBeLessThanOrEqual(24);
+      expect(maxActive).toBe(feeds.length);
       expect(result.entries.length).toBe(31);
       expect(result.errors['feed-30']).toBe('HTTP 500');
     } finally {

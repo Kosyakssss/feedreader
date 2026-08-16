@@ -262,12 +262,19 @@ function refreshStatusText() {
   }
   if (refreshStatus.error) return 'Refresh failed';
   const result = refreshStatus.count ? refreshStatus.count + ' new' : 'Up to date';
-  return refreshStatus.failed ? result + ' · ' + refreshStatus.failed + ' failed' : result;
+  const failures = Array.isArray(refreshStatus.failures) ? refreshStatus.failures : [];
+  return failures.length
+    ? result + ' · ' + failures.length + ' failed: ' + failures.map(failure => failure.label).join(', ')
+    : result;
 }
 
 function updateRefreshIndicator() {
   const status = document.getElementById('refresh-status');
-  if (status) status.textContent = refreshStatusText();
+  if (status) {
+    status.textContent = refreshStatusText();
+    const failures = Array.isArray(refreshStatus?.failures) ? refreshStatus.failures : [];
+    status.title = failures.map(failure => failure.label + ': ' + failure.error).join('\\n');
+  }
   const button = document.querySelector('[data-refresh]');
   if (button) {
     const refreshing = !!refreshStatus?.refreshing;
