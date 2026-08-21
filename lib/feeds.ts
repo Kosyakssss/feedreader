@@ -202,13 +202,8 @@ function parseZoneOffset(zone: string | undefined): number {
   const namedOffset = rfc822ZoneOffsets[upper];
   if (namedOffset !== undefined) return namedOffset;
 
-  if (/^[A-IK-M]$/.test(upper)) {
-    return upper.charCodeAt(0) - 'A'.charCodeAt(0) + 1;
-  }
-  if (/^[N-Y]$/.test(upper)) {
-    return -(upper.charCodeAt(0) - 'N'.charCodeAt(0) + 1);
-  }
-
+  // RFC 822 military zones (A–I, K–M, N–Y) are obsolete and ambiguous;
+  // RFC 5322 says to treat them as unknown offsets, i.e. UTC.
   return 0;
 }
 

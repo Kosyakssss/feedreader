@@ -79,6 +79,29 @@ describe('parseFeed', () => {
     expect(entries[1]!.published).toBe('2025-09-24T17:09:51.000Z');
   });
 
+  test('treats obsolete RFC 822 military zones as UTC', () => {
+    const xml = `<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <guid>mil-q</guid>
+      <title>Quebec</title>
+      <link>https://example.com/q</link>
+      <pubDate>Wed, 24 Sep 2025 17:09:51 Q</pubDate>
+    </item>
+    <item>
+      <guid>mil-m</guid>
+      <title>Mike</title>
+      <link>https://example.com/m</link>
+      <pubDate>Wed, 24 Sep 2025 17:09:51 M</pubDate>
+    </item>
+  </channel>
+</rss>`;
+    const entries = parseFeed(xml, 'feed-mil');
+    expect(entries[0]!.published).toBe('2025-09-24T17:09:51.000Z');
+    expect(entries[1]!.published).toBe('2025-09-24T17:09:51.000Z');
+  });
+
   test('scopes entry ids by feed', () => {
     const xml = `<?xml version="1.0"?>
 <rss version="2.0">
