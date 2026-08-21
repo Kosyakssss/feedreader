@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'bun:test';
 import { fetchAllFeeds, fetchFeed, probeFeed, parseAtprotoFeedUrl, parseFeedStructured, parseFeedAny, parseFeed, decodeFeedBytes, parseOPML, resolveFeedInput } from '../lib/feeds.ts';
 
 describe('parseFeed', () => {
@@ -474,7 +474,7 @@ describe('ATProto feeds', () => {
     globalThis.fetch = (async () => new Response('<title>No feed here</title>', {
       status: 200,
       headers: { 'content-type': 'text/html' },
-    })) as typeof fetch;
+    })) as unknown as typeof fetch;
 
     try {
       await expect(resolveFeedInput('https://example.com/')).rejects.toThrow('No RSS, Atom, JSON Feed');

@@ -4,14 +4,13 @@
   "scripts": {
     "start": "bun server.ts",
     "unread": "bun scripts/unread.ts",
-    "test": "tsc --noEmit && vitest run"
+    "test": "tsc --noEmit && bun test --isolate"
   },
   "dependencies": {
     "fast-xml-parser": "^5"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
-    "typescript": "^7.0.2",
-    "vitest": "^3"
+    "@types/bun": "^1.4.0",
+    "typescript": "^7.0.2"
   }
 }

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'bun:test';
 import { isPrivateAddress, isSafeExternalUrl, sanitizeThemeName } from '../lib/security.ts';
 
 describe('sanitizeThemeName', () => {
