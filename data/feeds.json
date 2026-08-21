@@ -230,12 +230,6 @@
       "folderId": null
     },
     {
-      "id": "53b55cb8-bd79-47b7-a5d6-705e036f1ec3",
-      "url": "https://type-writer.org/?feed=rss2",
-      "label": "type-writer.org",
-      "folderId": null
-    },
-    {
       "id": "510c5c94-be54-4f66-b56d-469260dd7828",
       "url": "https://randsinrepose.com/feed/",
       "label": "randsinrepose.com",
@@ -245,6 +239,12 @@
       "id": "bc2d3ecd-722e-43cb-ae47-02f9b9991058",
       "url": "https://runarcn.no/feed/",
       "label": "runarcn.no",
+      "folderId": null
+    },
+    {
+      "id": "2c0e4143-fe7e-4675-ac6f-d16227770aff",
+      "url": "https://www.tsoon.com/index.xml",
+      "label": "www.tsoon.com",
       "folderId": null
     }
   ]
