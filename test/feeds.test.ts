@@ -16,11 +16,11 @@ describe('parseFeed', () => {
 </rss>`;
     const entries = parseFeed(xml, 'feed-1');
     expect(entries.length).toBe(1);
-    expect(entries[0].id).toBe('feed-1:post-1');
-    expect(entries[0].sourceId).toBe('post-1');
-    expect(entries[0].url).toBe('https://example.com/post-1');
-    expect(entries[0].title).toBe('Hello RSS');
-    expect(entries[0].feedId).toBe('feed-1');
+    expect(entries[0]!.id).toBe('feed-1:post-1');
+    expect(entries[0]!.sourceId).toBe('post-1');
+    expect(entries[0]!.url).toBe('https://example.com/post-1');
+    expect(entries[0]!.title).toBe('Hello RSS');
+    expect(entries[0]!.feedId).toBe('feed-1');
   });
 
   test('parses Atom entries with alternate links', () => {
@@ -35,9 +35,9 @@ describe('parseFeed', () => {
 </feed>`;
     const entries = parseFeed(xml, 'feed-2');
     expect(entries.length).toBe(1);
-    expect(entries[0].id).toBe('feed-2:atom-1');
-    expect(entries[0].sourceId).toBe('atom-1');
-    expect(entries[0].url).toBe('https://example.com/atom-1');
+    expect(entries[0]!.id).toBe('feed-2:atom-1');
+    expect(entries[0]!.sourceId).toBe('atom-1');
+    expect(entries[0]!.url).toBe('https://example.com/atom-1');
   });
 
   test('decodes HTML entities in titles', () => {
@@ -53,7 +53,7 @@ describe('parseFeed', () => {
 </rss>`;
     const entries = parseFeed(xml, 'feed-3');
     expect(entries.length).toBe(1);
-    expect(entries[0].title).toBe("A Visit To ACMI's Game Worlds & More");
+    expect(entries[0]!.title).toBe("A Visit To ACMI's Game Worlds & More");
   });
 
   test('parses RFC-style dates with nonstandard alphabetic timezones', () => {
@@ -75,8 +75,8 @@ describe('parseFeed', () => {
   </channel>
 </rss>`;
     const entries = parseFeed(xml, 'feed-au');
-    expect(entries[0].published).toBe('2025-12-31T16:00:05.000Z');
-    expect(entries[1].published).toBe('2025-09-24T17:09:51.000Z');
+    expect(entries[0]!.published).toBe('2025-12-31T16:00:05.000Z');
+    expect(entries[1]!.published).toBe('2025-09-24T17:09:51.000Z');
   });
 
   test('scopes entry ids by feed', () => {
@@ -90,8 +90,8 @@ describe('parseFeed', () => {
     </item>
   </channel>
 </rss>`;
-    const left = parseFeed(xml, 'feed-left')[0];
-    const right = parseFeed(xml, 'feed-right')[0];
+    const left = parseFeed(xml, 'feed-left')[0]!;
+    const right = parseFeed(xml, 'feed-right')[0]!;
     expect(left.sourceId).toBe('shared-guid');
     expect(right.sourceId).toBe('shared-guid');
     expect(left.id).not.toBe(right.id);
@@ -108,7 +108,7 @@ describe('parseFeed', () => {
     </item>
   </channel>
 </rss>`;
-    const entry = parseFeed(xml, 'feed-unsafe')[0];
+    const entry = parseFeed(xml, 'feed-unsafe')[0]!;
     expect(entry.url).toBe('');
   });
 
@@ -121,8 +121,8 @@ describe('parseFeed', () => {
     </item>
   </channel>
 </rss>`;
-    const first = parseFeed(xml, 'feed-stable')[0];
-    const second = parseFeed(xml, 'feed-stable')[0];
+    const first = parseFeed(xml, 'feed-stable')[0]!;
+    const second = parseFeed(xml, 'feed-stable')[0]!;
     expect(first.sourceId).toBe('Recently');
     expect(second.id).toBe(first.id);
   });
@@ -141,8 +141,8 @@ describe('parseOPML', () => {
 </opml>`;
     const feeds = parseOPML(xml);
     expect(feeds.length).toBe(2);
-    expect(feeds[0].url).toBe('https://one.example/rss');
-    expect(feeds[1].url).toBe('https://two.example/atom.xml');
+    expect(feeds[0]!.url).toBe('https://one.example/rss');
+    expect(feeds[1]!.url).toBe('https://two.example/atom.xml');
   });
 
   test('decodes HTML entities in feed labels', () => {
@@ -154,7 +154,7 @@ describe('parseOPML', () => {
 </opml>`;
     const feeds = parseOPML(xml);
     expect(feeds.length).toBe(1);
-    expect(feeds[0].label).toBe('Dev & Design');
+    expect(feeds[0]!.label).toBe('Dev & Design');
   });
 });
 

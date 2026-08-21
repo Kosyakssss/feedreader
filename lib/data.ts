@@ -22,9 +22,8 @@ let dataMutationChain: Promise<void> = Promise.resolve();
 export function getDataDir(): string {
   if (!dataDir) {
     const arg = process.argv.indexOf('--data');
-    dataDir = arg !== -1 && process.argv[arg + 1]
-      ? resolve(process.argv[arg + 1])
-      : resolve('data');
+    const argValue = arg !== -1 ? process.argv[arg + 1] : undefined;
+    dataDir = argValue ? resolve(argValue) : resolve('data');
   }
   return dataDir;
 }
@@ -259,8 +258,9 @@ export async function writeDataFiles(files: Partial<Record<DataFilename, unknown
     isDataFilename(filename) ? [[filename, normalizeDataFile(filename, data)] as const] : []
   );
   if (writes.length === 0) return;
-  if (writes.length === 1) {
-    await writeJSONRaw(writes[0][0], writes[0][1]);
+  const [first] = writes;
+  if (first && writes.length === 1) {
+    await writeJSONRaw(first[0], first[1]);
     return;
   }
 

@@ -12,6 +12,8 @@ describe('pruneEntries', () => {
         { id: 'c', sourceId: 'c', feedId: 'f', url: 'https://c', title: 'c', published: new Date(now - 3000).toISOString() },
       ],
       lastFetched: { f: now },
+      feedErrors: {},
+      feedMeta: {},
     };
     const state: StateFile = { a: { read: true }, b: { read: true }, c: { read: true } };
     const config: Config = {
@@ -35,6 +37,8 @@ describe('pruneEntries', () => {
         { id: 'c', sourceId: 'c', feedId: 'f', url: 'https://c', title: 'c', published: new Date(now - 3000).toISOString() },
       ],
       lastFetched: { f: now },
+      feedErrors: {},
+      feedMeta: {},
     };
     const state: StateFile = { a: { read: true }, b: { read: true }, c: { starred: true, starredAt: now } };
     const config: Config = {

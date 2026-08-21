@@ -314,19 +314,19 @@ function headerValue(req: import('node:http').IncomingMessage, name: string): st
 }
 
 function hasJsonContentType(req: import('node:http').IncomingMessage): boolean {
-  const contentType = headerValue(req, 'content-type').split(';', 1)[0].trim().toLowerCase();
+  const contentType = headerValue(req, 'content-type').split(';', 1)[0]?.trim().toLowerCase() ?? '';
   return contentType === 'application/json' || contentType.endsWith('+json');
 }
 
 function requestHost(req: import('node:http').IncomingMessage): string {
-  return headerValue(req, 'x-forwarded-host').split(',', 1)[0].trim()
+  return headerValue(req, 'x-forwarded-host').split(',', 1)[0]?.trim()
     || headerValue(req, 'host')
     || 'localhost';
 }
 
 function requestUrl(req: import('node:http').IncomingMessage): URL {
   const host = requestHost(req);
-  const forwardedProto = headerValue(req, 'x-forwarded-proto').split(',', 1)[0].trim().toLowerCase();
+  const forwardedProto = headerValue(req, 'x-forwarded-proto').split(',', 1)[0]?.trim().toLowerCase() ?? '';
   const proto = forwardedProto === 'https' ? 'https' : 'http';
   return new URL(req.url || '/', `${proto}://${host}`);
 }
@@ -338,7 +338,7 @@ function appPath(path: string): string {
 }
 
 function renderBasePath(req: import('node:http').IncomingMessage, pathname: string): string {
-  const host = requestHost(req).split(':', 1)[0].toLowerCase();
+  const host = requestHost(req).split(':', 1)[0]?.toLowerCase() ?? '';
   if (pathname.startsWith(SERVE_BASE_PATH) || host.endsWith('.ts.net')) return SERVE_BASE_PATH;
   return '';
 }
@@ -696,9 +696,11 @@ function installShutdownHandlers(server: import('node:http').Server) {
 async function main() {
   const config = await readConfig();
   const portArg = process.argv.indexOf('--port');
-  const port = (portArg !== -1 && process.argv[portArg + 1]) ? parseInt(process.argv[portArg + 1]) : config.port;
+  const portRaw = portArg !== -1 ? process.argv[portArg + 1] : undefined;
+  const port = portRaw ? parseInt(portRaw) : config.port;
   const hostArg = process.argv.indexOf('--host');
-  const host = (hostArg !== -1 && process.argv[hostArg + 1]) ? process.argv[hostArg + 1] : DEFAULT_HOST;
+  const hostRaw = hostArg !== -1 ? process.argv[hostArg + 1] : undefined;
+  const host = hostRaw || DEFAULT_HOST;
   startupHost = host;
   startupPort = port;
 

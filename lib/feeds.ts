@@ -150,6 +150,7 @@ function parseFeedDate(input: string): string | null {
   if (!match) return null;
 
   const [, dayText, monthText, yearText, hourText, minuteText, secondText, zoneText] = match;
+  if (!dayText || !monthText || !yearText || !hourText || !minuteText) return null;
   const month = monthNumbers[monthText.toLowerCase()];
   if (month === undefined) return null;
 
@@ -196,7 +197,8 @@ function parseZoneOffset(zone: string | undefined): number {
   }
 
   const upper = zone.toUpperCase();
-  if (upper in rfc822ZoneOffsets) return rfc822ZoneOffsets[upper];
+  const namedOffset = rfc822ZoneOffsets[upper];
+  if (namedOffset !== undefined) return namedOffset;
 
   if (/^[A-IK-M]$/.test(upper)) {
     return upper.charCodeAt(0) - 'A'.charCodeAt(0) + 1;
@@ -264,7 +266,7 @@ function normalizeHandle(input: string): string | null {
 
 function parseAtUri(uri: string): { did: string; collection: string; rkey: string } | null {
   const match = uri.match(/^at:\/\/([^/]+)\/([^/]+)\/([^/]+)$/);
-  if (!match) return null;
+  if (!match?.[1] || !match[2] || !match[3]) return null;
   return { did: match[1], collection: match[2], rkey: match[3] };
 }
 
@@ -309,7 +311,7 @@ function extractLinkedAtUri(html: string, rel: string): string | null {
   const linkRe = /<link\b[^>]*>/gi;
   for (const tag of html.match(linkRe) || []) {
     const relMatch = tag.match(/\brel\s*=\s*["']([^"']+)["']/i);
-    if (!relMatch || !relMatch[1].split(/\s+/).includes(rel)) continue;
+    if (!relMatch?.[1]?.split(/\s+/).includes(rel)) continue;
     const hrefMatch = tag.match(/\bhref\s*=\s*["']([^"']+)["']/i);
     if (hrefMatch?.[1]?.startsWith('at://')) return hrefMatch[1];
   }
@@ -629,15 +631,17 @@ export async function fetchAllFeeds(
   async function worker() {
     while (nextFeedIndex < feeds.length) {
       const index = nextFeedIndex++;
-      results[index] = await Promise.resolve(fetchFeed(feeds[index], meta[feeds[index].id])).then(
+      const feed = feeds[index];
+      if (!feed) break;
+      results[index] = await Promise.resolve(fetchFeed(feed, meta[feed.id])).then(
         value => ({ status: 'fulfilled', value }),
         reason => ({ status: 'rejected', reason }),
       );
       if (onFeedResult) {
         const result = results[index];
-        await onFeedResult(feeds[index], result.status === 'fulfilled'
+        await onFeedResult(feed, result?.status === 'fulfilled'
           ? result.value
-          : { entries: [], error: result.reason?.message || 'Unknown error' });
+          : { entries: [], error: (result?.reason as Error | undefined)?.message || 'Unknown error' });
       }
     }
   }
@@ -650,7 +654,8 @@ export async function fetchAllFeeds(
   const nextMeta: Record<string, FeedCacheMeta> = {};
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
-    const feedId = feeds[i].id;
+    const feedId = feeds[i]?.id;
+    if (!r || !feedId) continue;
     if (r.status === 'fulfilled') {
       all.push(...r.value.entries);
       if (r.value.error) {
@@ -700,7 +705,8 @@ async function resolveDocumentInput(documentUri: string): Promise<ResolvedFeedIn
   if (!parsed || parsed.collection !== ATPROTO_DOCUMENT_COLLECTION) return null;
   const pds = await getPdsEndpoint(parsed.did);
   const record = await getAtprotoRecord(pds, parsed.did, parsed.collection, parsed.rkey);
-  const site = typeof record.value?.site === 'string' ? record.value.site : '';
+  const value = record.value as { site?: unknown } | undefined;
+  const site = typeof value?.site === 'string' ? value.site : '';
   if (site.startsWith('at://')) return await resolvePublicationInput(site);
 
   const profile = await getProfile(parsed.did);
@@ -805,7 +811,7 @@ export async function discoverFeedUrl(pageUrl: string): Promise<string | null> {
     if (matches) {
       for (const m of matches) {
         const href = m.match(/href\s*=\s*["']([^"']+)["']/i);
-        if (href) {
+        if (href?.[1]) {
           const discovered = new URL(href[1], pageUrl).href;
           if (isSafeExternalUrl(discovered).ok) return discovered;
         }

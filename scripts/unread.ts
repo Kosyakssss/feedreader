@@ -3,7 +3,8 @@ import { publishedTime } from '../lib/feeds.ts';
 
 function argValue(name: string): string | null {
   const index = process.argv.indexOf(name);
-  return index !== -1 && process.argv[index + 1] ? process.argv[index + 1] : null;
+  const raw = index !== -1 ? process.argv[index + 1] : undefined;
+  return raw ?? null;
 }
 
 function parseLimit(): number | null {

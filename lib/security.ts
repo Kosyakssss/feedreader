@@ -15,6 +15,7 @@ function isPrivateIPv4(host: string): boolean {
   if (parts.length !== 4 || parts.some(n => Number.isNaN(n) || n < 0 || n > 255)) return true;
 
   const [a, b] = parts;
+  if (a === undefined || b === undefined) return true;
   if (a === 10) return true;
   if (a === 127) return true;
   if (a === 0) return true;
@@ -34,7 +35,9 @@ function parseIPv6Groups(host: string): number[] | null {
     if (lastColon === -1) return null;
     const ipv4 = h.slice(lastColon + 1);
     if (isIP(ipv4) !== 4) return null;
-    const [a, b, c, d] = ipv4.split('.').map(Number);
+    const octets = ipv4.split('.').map(Number);
+    if (octets.length !== 4 || octets.some(n => !Number.isInteger(n))) return null;
+    const [a = -1, b = -1, c = -1, d = -1] = octets;
     h = `${h.slice(0, lastColon)}:${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
   }
 
@@ -68,21 +71,22 @@ function isPrivateIPv6(host: string): boolean {
   const groups = parseIPv6Groups(host);
   if (!groups) return true;
 
+  const [g0 = -1, , , , , g5 = -1, g6 = -1, g7 = -1] = groups;
   if (groups.every(group => group === 0)) return true; // Unspecified
-  if (groups.slice(0, 7).every(group => group === 0) && groups[7] === 1) return true; // Loopback
-  if ((groups[0] & 0xfe00) === 0xfc00) return true; // Unique local fc00::/7
-  if ((groups[0] & 0xffc0) === 0xfe80) return true; // Link-local fe80::/10
-  if ((groups[0] & 0xff00) === 0xff00) return true; // Multicast ff00::/8
+  if (groups.slice(0, 7).every(group => group === 0) && g7 === 1) return true; // Loopback
+  if ((g0 & 0xfe00) === 0xfc00) return true; // Unique local fc00::/7
+  if ((g0 & 0xffc0) === 0xfe80) return true; // Link-local fe80::/10
+  if ((g0 & 0xff00) === 0xff00) return true; // Multicast ff00::/8
 
   const firstFiveZero = groups.slice(0, 5).every(group => group === 0);
-  if (firstFiveZero && groups[5] === 0xffff) {
-    const mapped = `${groups[6] >> 8}.${groups[6] & 0xff}.${groups[7] >> 8}.${groups[7] & 0xff}`;
+  if (firstFiveZero && g5 === 0xffff) {
+    const mapped = `${g6 >> 8}.${g6 & 0xff}.${g7 >> 8}.${g7 & 0xff}`;
     return isPrivateIPv4(mapped);
   }
 
   const firstSixZero = groups.slice(0, 6).every(group => group === 0);
   if (firstSixZero) {
-    const compatible = `${groups[6] >> 8}.${groups[6] & 0xff}.${groups[7] >> 8}.${groups[7] & 0xff}`;
+    const compatible = `${g6 >> 8}.${g6 & 0xff}.${g7 >> 8}.${g7 & 0xff}`;
     return isPrivateIPv4(compatible);
   }
 
