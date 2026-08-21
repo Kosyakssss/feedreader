@@ -426,7 +426,7 @@ async function readResponseText(res: Response, maxBytes: number): Promise<string
   return Buffer.concat(chunks.map(chunk => Buffer.from(chunk))).toString('utf-8');
 }
 
-export type FeedFormat = 'rss' | 'atom' | 'rdf' | 'unrecognized';
+export type FeedFormat = 'rss' | 'atom' | 'rdf' | 'json' | 'unrecognized';
 
 export interface ParsedFeed {
   format: FeedFormat;
@@ -476,6 +476,46 @@ export function parseFeedStructured(xml: string, feedId: string): ParsedFeed {
 
 export function parseFeed(xml: string, feedId: string): Entry[] {
   return parseFeedStructured(xml, feedId).entries;
+}
+
+function tryParseJsonFeed(text: string, feedId: string): ParsedFeed | null {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith('{')) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  const record = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+  const version = typeof record?.version === 'string' ? record.version : undefined;
+  if (!version?.startsWith('https://jsonfeed.org/version/') || !Array.isArray(record?.items)) {
+    return null;
+  }
+
+  const entries: Entry[] = [];
+  for (const raw of record.items as unknown[]) {
+    if (!raw || typeof raw !== 'object') continue;
+    const item = raw as Record<string, unknown>;
+    const id = typeof item.id === 'string' ? item.id : undefined;
+    const url = typeof item.url === 'string' ? item.url : typeof item.external_url === 'string' ? item.external_url : '';
+    const title = typeof item.title === 'string' && item.title ? item.title : 'Untitled';
+    const published = pickDate(
+      typeof item.date_published === 'string' ? item.date_published : undefined,
+      typeof item.date_modified === 'string' ? item.date_modified : undefined,
+    );
+    entries.push(buildEntry(feedId, id ?? url, url, title, published));
+  }
+  return { format: 'json', entries };
+}
+
+/** Parses a response body as a JSON Feed first, then as RSS/Atom/RDF. */
+export function parseFeedAny(text: string, feedId: string): ParsedFeed {
+  const json = tryParseJsonFeed(text, feedId);
+  if (json) return json;
+  return parseFeedStructured(text, feedId);
 }
 
 async function resolveHandle(handle: string): Promise<string> {
@@ -603,7 +643,7 @@ export async function fetchFeed(feed: Feed, meta: FeedCacheMeta = {}): Promise<F
   try {
     const headers: Record<string, string> = {
       'User-Agent': UA,
-      Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml',
+      Accept: 'application/rss+xml, application/atom+xml, application/feed+json, application/json, application/xml, text/xml',
     };
     if (meta.etag) headers['If-None-Match'] = meta.etag;
     if (meta.lastModified) headers['If-Modified-Since'] = meta.lastModified;
@@ -621,8 +661,8 @@ export async function fetchFeed(feed: Feed, meta: FeedCacheMeta = {}): Promise<F
       await discardResponseBody(res);
       return { entries: [], error: `HTTP ${res.status}` };
     }
-    const xml = await readResponseText(res, MAX_FEED_BYTES);
-    const parsed = parseFeedStructured(xml, feed.id);
+    const body = await readResponseText(res, MAX_FEED_BYTES);
+    const parsed = parseFeedAny(body, feed.id);
     if (parsed.format === 'unrecognized') {
       return { entries: [], error: 'Unrecognized feed format', validators };
     }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { fetchAllFeeds, fetchFeed, probeFeed, parseAtprotoFeedUrl, parseFeedStructured, parseFeed, parseOPML, resolveFeedInput } from '../lib/feeds.ts';
+import { fetchAllFeeds, fetchFeed, probeFeed, parseAtprotoFeedUrl, parseFeedStructured, parseFeedAny, parseFeed, parseOPML, resolveFeedInput } from '../lib/feeds.ts';
 
 describe('parseFeed', () => {
   test('parses RSS items', () => {
@@ -202,6 +202,30 @@ describe('parseFeedStructured', () => {
     );
     expect(parsed.format).toBe('rss');
     expect(parsed.entries).toEqual([]);
+  });
+
+  test('parses JSON Feed 1.1 documents', () => {
+    const body = JSON.stringify({
+      version: 'https://jsonfeed.org/version/1.1',
+      title: 'JSON Feed',
+      items: [
+        { id: 'jf-1', url: 'https://example.com/jf-1', title: 'First', date_published: '2025-05-02T12:00:00Z' },
+        { id: 'jf-2', external_url: 'https://example.com/jf-2', content_text: 'No title here' },
+      ],
+    });
+    const parsed = parseFeedAny(body, 'feed-jf');
+    expect(parsed.format).toBe('json');
+    expect(parsed.entries[0]).toMatchObject({ sourceId: 'jf-1', url: 'https://example.com/jf-1', title: 'First' });
+    expect(parsed.entries[0]!.published).toBe('2025-05-02T12:00:00.000Z');
+    expect(parsed.entries[1]!.sourceId).toBe('jf-2');
+    expect(parsed.entries[1]!.url).toBe('https://example.com/jf-2');
+    expect(parsed.entries[1]!.title).toBe('Untitled');
+  });
+
+  test('rejects non-feed JSON as unrecognized', () => {
+    expect(parseFeedAny(JSON.stringify({ items: [] }), 'f').format).toBe('unrecognized');
+    expect(parseFeedAny(JSON.stringify({ version: 'https://example.com/not-jsonfeed' }), 'f').format).toBe('unrecognized');
+    expect(parseFeedAny('{not json', 'f').format).toBe('unrecognized');
   });
 });
 
