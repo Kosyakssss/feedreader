@@ -111,7 +111,6 @@ export function renderApp(config: Config, basePath = ''): string {
       <kbd>x</kbd><span>Toggle select</span>
       <kbd>a</kbd><span>Mark all read</span>
       <kbd>r</kbd><span>Refresh feeds</span>
-      <kbd>/</kbd><span>Search</span>
       <kbd>?</kbd><span>Show shortcuts</span>
       <kbd>Esc</kbd><span>Close / clear</span>
     </div>
@@ -127,7 +126,6 @@ let entries = [];
 let feeds = { folders: [], feeds: [] };
 let selectedIds = new Set();
 let focusedIndex = -1;
-let searchQuery = '';
 let currentFilter = 'all';
 let currentPage = '';
 let loadLimit = 50;
@@ -155,10 +153,6 @@ function timeAgo(iso) {
   if (s < 172800) return 'yesterday';
   if (s < 604800) return Math.floor(s / 86400) + 'd ago';
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-function debounce(fn, ms) {
-  let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
 
 function externalPath(path) {
@@ -287,15 +281,6 @@ function getFiltered(source) {
   let list = source || entries;
   if (currentFilter === 'unread') list = list.filter(e => !e.state?.read);
   if (currentFilter === 'read') list = list.filter(e => e.state?.read);
-  if (searchQuery) {
-    const tokens = searchQuery.toLowerCase().trim().split(/\\s+/).filter(Boolean);
-    if (tokens.length > 0) {
-      list = list.filter(e => {
-        const hay = (e.title + ' ' + e.feedLabel + ' ' + e.url).toLowerCase();
-        return tokens.every(t => hay.includes(t));
-      });
-    }
-  }
   return list;
 }
 
@@ -367,8 +352,7 @@ function entryListHtml(source) {
 
 function toolbarHtml(source, showActions) {
   const c = counts(source);
-  let html = '<input class="search-input" placeholder="Search entries…" value="' + esc(searchQuery) + '">';
-  html += '<div class="toolbar">';
+  let html = '<div class="toolbar">';
   html += '<div class="filter-tabs">';
   html += '<button data-filter="all"' + (currentFilter === 'all' ? ' class="active"' : '') + '>All (' + c.all + ')</button>';
   html += '<button data-filter="unread"' + (currentFilter === 'unread' ? ' class="active"' : '') + '>Unread (' + c.unread + ')</button>';
@@ -392,7 +376,6 @@ function renderTimeline() {
 function renderStarred() {
   const starred = entries.filter(e => e.state?.starred);
   return '<div class="page"><div class="page-header"><h1 class="page-title">Starred</h1></div>'
-    + '<input class="search-input" placeholder="Search starred…" value="' + esc(searchQuery) + '">'
     + '<div id="entry-list">' + entryListHtml(starred) + '</div></div>';
 }
 
@@ -472,7 +455,6 @@ function navigate(path, push) {
   const update = () => {
     currentPage = path;
     loadLimit = 50;
-    searchQuery = '';
     currentFilter = 'all';
     selectedIds.clear();
     selectionAnchorId = null;
@@ -642,12 +624,6 @@ async function markEntries(ids, updates) {
 
 function bindPage() {
   const app = document.getElementById('app');
-
-  const searchInput = app.querySelector('.search-input:not([name])') || app.querySelector('.search-input[placeholder*="Search"]');
-  if (searchInput && !searchInput.getAttribute('name')) {
-    const onSearch = debounce(() => { searchQuery = searchInput.value.trim(); reRenderList(); }, 120);
-    searchInput.addEventListener('input', onSearch);
-  }
 
   if (!app.dataset.clickBound) {
     app.dataset.clickBound = '1';
@@ -915,9 +891,6 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
   } else if (key === 'r') {
     document.querySelector('[data-refresh]')?.click();
-    e.preventDefault();
-  } else if (e.key === '/') {
-    document.querySelector('.search-input')?.focus();
     e.preventDefault();
   } else if (e.key === '?') {
     document.getElementById('shortcuts-overlay').hidden = !document.getElementById('shortcuts-overlay').hidden;
