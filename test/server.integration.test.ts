@@ -30,7 +30,7 @@ beforeAll(async () => {
   await writeFile(join(dataDir, 'themes', 'system.css'), '/* feedreader-system-theme */\nbody { color: CanvasText; }\n');
 
   port = 41000 + Math.floor(Math.random() * 5000);
-  proc = spawn(process.execPath, ['server.ts', '--data', dataDir, '--port', String(port)], {
+  proc = spawn(process.env.FEEDREADER_SERVER_BIN || 'bun', ['server.ts', '--data', dataDir, '--port', String(port)], {
     cwd: dirname(fileURLToPath(new URL('../server.ts', import.meta.url))),
     stdio: 'ignore',
   });

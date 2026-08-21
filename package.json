@@ -2,8 +2,8 @@
   "name": "feedreader",
   "type": "module",
   "scripts": {
-    "start": "node server.ts",
-    "unread": "node scripts/unread.ts",
+    "start": "bun server.ts",
+    "unread": "bun scripts/unread.ts",
     "test": "tsc --noEmit && vitest run"
   },
   "dependencies": {
