@@ -9,6 +9,8 @@ const UA = 'Feedreader/1.0';
 const FEED_FETCH_TIMEOUT_MS = 8000;
 const MAX_FEED_BYTES = 10 * 1024 * 1024;
 const MAX_DISCOVERY_BYTES = 2 * 1024 * 1024;
+/** Parallel feed fetches per refresh. Bounds sockets, memory, and hammering of feed hosts. */
+const FETCH_CONCURRENCY = 8;
 const MAX_REDIRECTS = 5;
 const ATPROTO_APPVIEW = 'https://public.api.bsky.app';
 const ATPROTO_IDENTITY = 'https://bsky.social';
@@ -646,7 +648,7 @@ export async function fetchAllFeeds(
     }
   }
 
-  const workerCount = feeds.length;
+  const workerCount = Math.min(FETCH_CONCURRENCY, feeds.length);
   await Promise.all(Array.from({ length: workerCount }, worker));
 
   const all: Entry[] = [];

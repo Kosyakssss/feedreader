@@ -197,7 +197,7 @@ describe('fetchAllFeeds', () => {
 
       const result = await fetchAllFeeds(feeds);
 
-      expect(maxActive).toBe(feeds.length);
+      expect(maxActive).toBe(Math.min(8, feeds.length));
       expect(result.entries.length).toBe(31);
       expect(result.errors['feed-30']).toBe('HTTP 500');
     } finally {
