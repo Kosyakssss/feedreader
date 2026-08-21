@@ -148,6 +148,88 @@ describe('parseFeed', () => {
     expect(first.sourceId).toBe('Recently');
     expect(second.id).toBe(first.id);
   });
+
+  test('preserves trimmed and scalar-normalized entry identity', () => {
+    const xml = `<?xml version="1.0"?>
+<rss><channel><item>
+  <guid>  001  </guid>
+  <title>  1.0  </title>
+  <link>  https://example.com/scalar  </link>
+</item></channel></rss>`;
+    const entry = parseFeed(xml, 'feed-compat')[0]!;
+    expect(entry.sourceId).toBe('1');
+    expect(entry.id).toBe('feed-compat:1');
+    expect(entry.title).toBe('1');
+    expect(entry.url).toBe('https://example.com/scalar');
+
+    const cases = new Map([
+      ['0X10', '0X10'],
+      ['+0x10', '16'],
+      ['9007199254740993', '9007199254740993'],
+      ['123456789012345678', '123456789012345678'],
+      ['1e2', '100'],
+      ['01e2', '100'],
+      ['00e2', '00e2'],
+      ['1.2300', '1.23'],
+      ['1.0000000000000001', '1.0000000000000001'],
+      ['true', 'true'],
+    ]);
+    for (const [value, expected] of cases) {
+      const parsed = parseFeed(`<rss><channel><item><guid>${value}</guid></item></channel></rss>`, 'f')[0]!;
+      expect(parsed.sourceId).toBe(expected);
+    }
+  });
+
+  test('preserves named, unknown, DTD, and CDATA entity behavior', () => {
+    const withoutDtd = parseFeed(
+      '<rss><channel><item><guid>a</guid><title>A&nbsp;B &mdash; C &bogus;</title></item></channel></rss>',
+      'feed-entities',
+    )[0]!;
+    const externalDtd = parseFeed(
+      '<!DOCTYPE rss SYSTEM "https://example.com/rss.dtd"><rss><channel><item><guid>b</guid><title>A&nbsp;B &mdash; C &bogus;</title></item></channel></rss>',
+      'feed-entities',
+    )[0]!;
+    const internalDtd = parseFeed(
+      '<!DOCTYPE rss [<!ENTITY custom "Internal value">]><rss><channel><item><guid>c</guid><title>&custom;</title></item></channel></rss>',
+      'feed-entities',
+    )[0]!;
+    const cdata = parseFeed(
+      '<rss><channel><item><guid>d</guid><title><![CDATA[A&nbsp;B &mdash; C]]></title></item></channel></rss>',
+      'feed-entities',
+    )[0]!;
+
+    expect(withoutDtd.title).toBe('A B — C &bogus;');
+    expect(externalDtd.title).toBe(withoutDtd.title);
+    expect(internalDtd.title).toBe('Internal value');
+    expect(cdata.title).toBe('A B &mdash; C');
+  });
+
+  test('preserves the full legacy entity map and mixed CDATA text', () => {
+    const names = [
+      'nbsp', 'copy', 'reg', 'trade', 'mdash', 'ndash', 'hellip', 'laquo', 'raquo', 'lsquo', 'rsquo',
+      'ldquo', 'rdquo', 'bull', 'para', 'sect', 'deg', 'frac12', 'frac14', 'frac34', 'cent', 'pound',
+      'curren', 'yen', 'euro', 'dollar', 'fnof', 'inr', 'af', 'birr', 'peso', 'rub', 'won', 'yuan', 'cedil',
+    ];
+    const entry = parseFeed(
+      `<rss><channel><item><guid>map</guid><title>${names.map(name => `&${name};`).join('|')}</title></item></channel></rss>`,
+      'f',
+    )[0]!;
+    expect(entry.title).toBe(' |©|®|™|—|–|…|«|»|‘|’|“|”|•|¶|§|°|½|¼|¾|¢|£|¤|¥|€|$|ƒ|₹|؋|ብር|₱|₽|₩|¥|¸');
+
+    const compact = parseFeed('<rss><channel><item><guid>c1</guid><title>A <![CDATA[B]]> C</title></item></channel></rss>', 'f')[0]!;
+    const padded = parseFeed('<rss><channel><item><guid>c2</guid><title>A <![CDATA[ B ]]> C</title></item></channel></rss>', 'f')[0]!;
+    expect(compact.title).toBe('ABC');
+    expect(padded.title).toBe('A B C');
+  });
+
+  test('handles DTD comments, parameter entities, and Unicode unknown entities', () => {
+    const xml = `<!DOCTYPE rss [
+      <!-- ] > <!ENTITY fake "bad"> -->
+      <!ENTITY % definitions '<!ENTITY custom "Internal">'>
+      %definitions;
+    ]><rss><channel><item><guid>entities</guid><title>&custom; &fake; &é; &日本; &foo·bar;</title></item></channel></rss>`;
+    expect(parseFeed(xml, 'f')[0]!.title).toBe('Internal &fake; &é; &日本; &foo·bar;');
+  });
 });
 
 describe('parseOPML', () => {
@@ -178,6 +260,19 @@ describe('parseOPML', () => {
     expect(feeds.length).toBe(1);
     expect(feeds[0]!.label).toBe('Dev & Design');
   });
+
+  test('trims OPML attribute values', () => {
+    const xml = '<opml><body><outline text="  Feed  " xmlUrl="  https://example.com/feed.xml  "/></body></opml>';
+    expect(parseOPML(xml)).toEqual([{ url: 'https://example.com/feed.xml', label: 'Feed' }]);
+  });
+
+  test('preserves scalar and single-decoded OPML attributes', () => {
+    const xml = '<opml><body><outline text="1.0 &nbsp; &bogus;" xmlUrl="https://example.com/?name=&amp;nbsp;"/></body></opml>';
+    expect(parseOPML(xml)).toEqual([{
+      url: 'https://example.com/?name=&nbsp;',
+      label: '1.0   &bogus;',
+    }]);
+  });
 });
 
 describe('parseFeedStructured', () => {
@@ -187,6 +282,26 @@ describe('parseFeedStructured', () => {
     expect(parseFeedStructured(wrap('<rss version="2.0"><channel><title>t</title></channel></rss>'), 'f').format).toBe('rss');
     expect(parseFeedStructured(wrap('<feed xmlns="http://www.w3.org/2005/Atom"><title>t</title></feed>'), 'f').format).toBe('atom');
     expect(parseFeedStructured(wrap('<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"></rdf:RDF>'), 'f').format).toBe('rdf');
+  });
+
+  test('preserves Atom and RDF attribute semantics', () => {
+    const atom = parseFeed(
+      wrap('<feed><entry><id>atom</id><title>Atom</title><link rel=" alternate " href=" https://example.com/atom "/></entry></feed>'),
+      'feed-atom-attrs',
+    )[0]!;
+    const rdf = parseFeed(
+      wrap('<rdf:RDF><item rdf:about="  rdf-id  "><title>RDF</title><link>https://example.com/rdf</link></item></rdf:RDF>'),
+      'feed-rdf-attrs',
+    )[0]!;
+    expect(atom.url).toBe('https://example.com/atom');
+    expect(rdf.sourceId).toBe('rdf-id');
+
+    const scalarRdf = parseFeed(
+      wrap('<rdf:RDF><item rdf:about="001"><title type="text"> Attribute text </title></item></rdf:RDF>'),
+      'feed-rdf-scalar',
+    )[0]!;
+    expect(scalarRdf.sourceId).toBe('001');
+    expect(scalarRdf.title).toBe('Attribute text');
   });
 
   test('marks non-feed XML as unrecognized even with an XML declaration', () => {
@@ -202,6 +317,15 @@ describe('parseFeedStructured', () => {
     );
     expect(parsed.format).toBe('rss');
     expect(parsed.entries).toEqual([]);
+    expect(parseFeedStructured(wrap('<feed></feed>'), 'f')).toEqual({ format: 'atom', entries: [] });
+    expect(parseFeedStructured(wrap('<rdf:RDF></rdf:RDF>'), 'f')).toEqual({ format: 'rdf', entries: [] });
+  });
+
+  test('rejects malformed and excessively nested XML', () => {
+    expect(parseFeedStructured('<rss><channel>', 'f').format).toBe('unrecognized');
+    const nested = (count: number) => `<rss>${'<x>'.repeat(count)}${'</x>'.repeat(count)}<channel/></rss>`;
+    expect(parseFeedStructured(nested(100), 'f').format).toBe('rss');
+    expect(parseFeedStructured(nested(101), 'f').format).toBe('unrecognized');
   });
 
   test('parses JSON Feed 1.1 documents', () => {

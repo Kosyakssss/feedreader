@@ -1,16 +1,14 @@
 {
   "name": "feedreader",
-  "type": "module",
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "typescript": "^7.0.2"
+  },
   "scripts": {
     "start": "bun server.ts",
     "unread": "bun scripts/unread.ts",
     "test": "tsc --noEmit && bun test --isolate"
   },
-  "dependencies": {
-    "fast-xml-parser": "^5"
-  },
-  "devDependencies": {
-    "@types/bun": "^1.4.0",
-    "typescript": "^7.0.2"
-  }
+  "packageManager": "bun@1.4.0",
+  "type": "module"
 }

@@ -1,10 +1,8 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { XMLParser } from 'fast-xml-parser';
 import type { Entry, Feed, FeedCacheMeta } from './types.ts';
 import { isPrivateAddress, isSafeExternalUrl } from './security.ts';
 
-const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', htmlEntities: true });
 const UA = 'Feedreader/1.0';
 const FEED_FETCH_TIMEOUT_MS = 8000;
 const MAX_FEED_BYTES = 10 * 1024 * 1024;
@@ -20,6 +18,237 @@ const ATPROTO_PUBLICATION_COLLECTION = 'site.standard.publication';
 const MAX_ATPROTO_RECORDS = 1000;
 const DIRECT_FEED_PATH_RE = /\.(xml|rss|atom|json)$/i;
 const DIRECT_FEED_ROUTE_RE = /\/(feed|rss|atom|json)\/?$/i;
+const MAX_XML_DEPTH = 101;
+
+const xmlPredefinedEntities = new Set(['amp', 'lt', 'gt', 'quot', 'apos']);
+
+// fast-xml-parser's active HTML/currency compatibility table. Keeping the
+// same table prevents a parser swap from changing titles and durable IDs.
+const feedHtmlEntities: Record<string, string> = {
+  nbsp: '\u00a0',
+  copy: '\u00a9',
+  reg: '\u00ae',
+  trade: '\u2122',
+  mdash: '\u2014',
+  ndash: '\u2013',
+  hellip: '\u2026',
+  laquo: '\u00ab',
+  raquo: '\u00bb',
+  lsquo: '\u2018',
+  rsquo: '\u2019',
+  ldquo: '\u201c',
+  rdquo: '\u201d',
+  bull: '\u2022',
+  para: '\u00b6',
+  sect: '\u00a7',
+  deg: '\u00b0',
+  frac12: '\u00bd',
+  frac14: '\u00bc',
+  frac34: '\u00be',
+  cent: '\u00a2',
+  pound: '\u00a3',
+  curren: '\u00a4',
+  yen: '\u00a5',
+  euro: '\u20ac',
+  dollar: '$',
+  fnof: '\u0192',
+  inr: '\u20b9',
+  af: '\u060b',
+  birr: '\u1265\u122d',
+  peso: '\u20b1',
+  rub: '\u20bd',
+  won: '\u20a9',
+  yuan: '\u00a5',
+  cedil: '\u00b8',
+};
+
+function markupEnd(xml: string, start: number): number {
+  let quote = '';
+  for (let i = start + 1; i < xml.length; i++) {
+    const char = xml[i]!;
+    if (quote) {
+      if (char === quote) quote = '';
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === '>') {
+      return i + 1;
+    }
+  }
+  return xml.length;
+}
+
+function doctypeEnd(xml: string, start: number): number {
+  let quote = '';
+  let subsetDepth = 0;
+  for (let i = start + 1; i < xml.length; i++) {
+    if (!quote && xml.startsWith('<!--', i)) {
+      const end = xml.indexOf('-->', i + 4);
+      if (end === -1) return xml.length;
+      i = end + 2;
+      continue;
+    }
+    const char = xml[i]!;
+    if (quote) {
+      if (char === quote) quote = '';
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === '[') {
+      subsetDepth++;
+    } else if (char === ']') {
+      subsetDepth = Math.max(0, subsetDepth - 1);
+    } else if (char === '>' && subsetDepth === 0) {
+      return i + 1;
+    }
+  }
+  return xml.length;
+}
+
+function findDoctype(xml: string): string {
+  for (let i = 0; i < xml.length;) {
+    const start = xml.indexOf('<', i);
+    if (start === -1) break;
+    if (xml.startsWith('<!--', start)) {
+      const end = xml.indexOf('-->', start + 4);
+      i = end === -1 ? xml.length : end + 3;
+    } else if (xml.startsWith('<?', start)) {
+      const end = xml.indexOf('?>', start + 2);
+      i = end === -1 ? xml.length : end + 2;
+    } else if (/^<!DOCTYPE\b/i.test(xml.slice(start, start + 10))) {
+      return xml.slice(start, doctypeEnd(xml, start));
+    } else {
+      break;
+    }
+  }
+  return '';
+}
+
+function declaredXmlEntities(xml: string): Set<string> {
+  const names = new Set<string>();
+  const parameters = new Map<string, string>();
+  const pending: string[] = [];
+  const seenParameters = new Set<string>();
+
+  function scanDtd(text: string): void {
+    for (let i = 0; i < text.length;) {
+      if (text.startsWith('<!--', i)) {
+        const end = text.indexOf('-->', i + 4);
+        i = end === -1 ? text.length : end + 3;
+        continue;
+      }
+      if (/^<!ENTITY\b/i.test(text.slice(i, i + 9))) {
+        const end = markupEnd(text, i);
+        const declaration = text.slice(i, end);
+        const parameter = /^<!ENTITY\s+%\s*([^\s]+)\s+(["'])([\s\S]*?)\2\s*>$/i.exec(declaration);
+        if (parameter?.[1] && parameter[3] !== undefined) parameters.set(parameter[1], parameter[3]);
+        const general = /^<!ENTITY\s+(?!%)\s*([^\s]+)\s/i.exec(declaration);
+        if (general?.[1]) names.add(general[1]);
+        i = end;
+        continue;
+      }
+      const reference = /^%([^\s;]+);/.exec(text.slice(i));
+      if (reference?.[1]) pending.push(reference[1]);
+      i += reference?.[0].length || 1;
+    }
+  }
+
+  const doctype = findDoctype(xml);
+  if (!doctype) return names;
+  scanDtd(doctype);
+  while (pending.length) {
+    const name = pending.shift()!;
+    if (seenParameters.has(name)) continue;
+    seenParameters.add(name);
+    const value = parameters.get(name);
+    if (value !== undefined) scanDtd(value);
+  }
+  return names;
+}
+
+function rewriteEntityReferences(value: string, declared: Set<string>): string {
+  return value.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[:_\p{L}\p{Nl}][:_\-.·\p{L}\p{Nl}\p{N}\p{M}\p{Pc}]*);/gu, (match, name: string) => {
+    if (name.startsWith('#') || xmlPredefinedEntities.has(name) || declared.has(name)) return match;
+    const replacement = feedHtmlEntities[name];
+    return replacement ?? `&amp;${name};`;
+  });
+}
+
+function rewriteTagAttributes(tag: string, declared: Set<string>): string {
+  let output = '';
+  let quote = '';
+  let segmentStart = 0;
+  for (let i = 0; i < tag.length; i++) {
+    const char = tag[i]!;
+    if (!quote && (char === '"' || char === "'")) {
+      output += tag.slice(segmentStart, i + 1);
+      quote = char;
+      segmentStart = i + 1;
+    } else if (quote && char === quote) {
+      output += rewriteEntityReferences(tag.slice(segmentStart, i), declared) + char;
+      quote = '';
+      segmentStart = i + 1;
+    }
+  }
+  return output + tag.slice(segmentStart);
+}
+
+/**
+ * Bun.XML is intentionally strict about undeclared XML entities. Feeds often
+ * contain HTML entities anyway, so rewrite only text and attribute contexts.
+ * Markup declarations and CDATA stay untouched to preserve literal content.
+ */
+function prepareXmlForBun(xml: string): string {
+  const declared = declaredXmlEntities(xml);
+  let output = '';
+  let index = 0;
+  let depth = 0;
+  while (index < xml.length) {
+    const tagStart = xml.indexOf('<', index);
+    if (tagStart === -1) {
+      output += rewriteEntityReferences(xml.slice(index).trim(), declared);
+      break;
+    }
+    output += rewriteEntityReferences(xml.slice(index, tagStart).trim(), declared);
+
+    let tagEnd: number;
+    if (xml.startsWith('<!--', tagStart)) {
+      const end = xml.indexOf('-->', tagStart + 4);
+      tagEnd = end === -1 ? xml.length : end + 3;
+      output += xml.slice(tagStart, tagEnd);
+    } else if (xml.startsWith('<![CDATA[', tagStart)) {
+      const end = xml.indexOf(']]>', tagStart + 9);
+      tagEnd = end === -1 ? xml.length : end + 3;
+      output += xml.slice(tagStart, tagEnd);
+    } else if (xml.startsWith('<?', tagStart)) {
+      const end = xml.indexOf('?>', tagStart + 2);
+      tagEnd = end === -1 ? xml.length : end + 2;
+      output += xml.slice(tagStart, tagEnd);
+    } else if (/^<!DOCTYPE\b/i.test(xml.slice(tagStart, tagStart + 10))) {
+      tagEnd = doctypeEnd(xml, tagStart);
+      output += xml.slice(tagStart, tagEnd);
+    } else if (xml.startsWith('<!', tagStart)) {
+      tagEnd = markupEnd(xml, tagStart);
+      output += xml.slice(tagStart, tagEnd);
+    } else {
+      tagEnd = markupEnd(xml, tagStart);
+      const tag = xml.slice(tagStart, tagEnd);
+      if (/^<\//.test(tag)) {
+        depth = Math.max(0, depth - 1);
+      } else if (!/\/\s*>$/.test(tag)) {
+        depth++;
+        if (depth > MAX_XML_DEPTH) throw new Error('Maximum nested tags exceeded');
+      }
+      output += rewriteTagAttributes(tag, declared);
+    }
+    index = tagEnd;
+  }
+  return output;
+}
+
+function parseXml(xml: string): any {
+  return Bun.XML.parse(prepareXmlForBun(xml));
+}
 
 export interface FeedFetchResult {
   entries: Entry[];
@@ -97,11 +326,72 @@ export function decodeHtmlEntities(input: string): string {
   });
 }
 
+function trimNumericZeros(value: string): string {
+  if (!value.includes('.')) return value;
+  value = value.replace(/0+$/, '');
+  if (value === '.') return '0';
+  if (value.startsWith('.')) return '0' + value;
+  if (value.endsWith('.')) return value.slice(0, -1);
+  return value;
+}
+
+function legacyNumericValue(value: string): string | number {
+  if (!value) return value;
+  if (value === '0') return 0;
+  if (/^[-+]?0x[a-fA-F0-9]+$/.test(value)) return Number.parseInt(value, 16);
+  if (!isFinite(value as unknown as number)) return value;
+
+  if (value.includes('e') || value.includes('E')) {
+    const notation = /^([-+])?(0*)(\d*(\.\d*)?[eE][-+]?\d+)$/.exec(value);
+    if (!notation) return value;
+    const sign = notation[1] || '';
+    const leadingZeros = notation[2] || '';
+    const expression = notation[3]!;
+    const eChar = expression.includes('e') ? 'e' : 'E';
+    const adjacent = value[leadingZeros.length + (sign ? 1 : 0)] === eChar;
+    if (leadingZeros.length > 1 && adjacent) return value;
+    if (leadingZeros.length === 1 && (expression.startsWith(`.${eChar}`) || expression[0] === eChar)) return Number(value);
+    if (leadingZeros.length > 0) return adjacent ? value : Number(sign + expression);
+    return Number(value);
+  }
+
+  const match = /^([-+])?(0*)([0-9]*(\.[0-9]*)?)$/.exec(value);
+  if (!match) return value;
+  const sign = match[1] || '';
+  const leadingZeros = match[2] || '';
+  const withoutZeros = trimNumericZeros(match[3]!);
+  const numeric = Number(value);
+  const parsed = String(numeric);
+  if (numeric === 0) return numeric;
+  if (/[eE]/.test(parsed)) return numeric;
+  if (value.includes('.')) {
+    return parsed === withoutZeros || parsed === sign + withoutZeros ? numeric : value;
+  }
+  const candidate = leadingZeros ? withoutZeros : value;
+  return candidate === parsed || sign + candidate === parsed || candidate === sign + parsed ? numeric : value;
+}
+
+function legacyXmlScalar(input: string): string | number | boolean {
+  const value = decodeHtmlEntities(input);
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return legacyNumericValue(value);
+}
+
+function normalizeXmlScalar(input: string): string {
+  return String(legacyXmlScalar(input));
+}
+
+function pickAttribute(value: unknown, decodeAgain = false): string {
+  if (value === undefined || value === null) return '';
+  const text = String(value).trim();
+  return decodeAgain ? decodeHtmlEntities(text) : text;
+}
+
 function pickText(value: any): string {
-  if (typeof value === 'string') return decodeHtmlEntities(value);
+  if (typeof value === 'string') return normalizeXmlScalar(value);
   if (value && typeof value === 'object') {
-    if (typeof value['#text'] === 'string') return decodeHtmlEntities(value['#text']);
-    if (typeof value.__cdata === 'string') return decodeHtmlEntities(value.__cdata);
+    if (typeof value['#text'] === 'string') return normalizeXmlScalar(value['#text']);
   }
   if (value === undefined || value === null) return '';
   return decodeHtmlEntities(String(value));
@@ -142,9 +432,10 @@ const rfc822ZoneOffsets: Record<string, number> = {
   PDT: -7 * 60,
 };
 
-function parseFeedDate(input: string): string | null {
-  const direct = new Date(input);
+function parseFeedDate(input: string | number | boolean): string | null {
+  const direct = new Date(input as string | number);
   if (!isNaN(direct.getTime())) return direct.toISOString();
+  if (typeof input !== 'string') return null;
 
   const match = input.trim().match(
     /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+)?(\d{1,2})\s+([A-Za-z]{3})\s+(\d{2,4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s+([A-Za-z]{1,5}|[+-]\d{2}:?\d{2}))?$/i,
@@ -207,10 +498,10 @@ function parseZoneOffset(zone: string | undefined): number {
   return 0;
 }
 
-function pickDate(...candidates: (string | undefined)[]): string {
+function pickDate(...candidates: unknown[]): string {
   for (const c of candidates) {
     if (!c) continue;
-    const parsed = parseFeedDate(c);
+    const parsed = parseFeedDate(typeof c === 'string' ? legacyXmlScalar(c) : c as number | boolean);
     if (parsed) return parsed;
   }
   return new Date().toISOString();
@@ -222,13 +513,13 @@ export function publishedTime(entry: Pick<Entry, 'published'>): number {
 }
 
 function pickLink(link: any): string {
-  if (typeof link === 'string') return link;
+  if (typeof link === 'string') return pickText(link);
   if (Array.isArray(link)) {
-    const alt = link.find((l: any) => l['@_rel'] === 'alternate');
+    const alt = link.find((l: any) => pickAttribute(l['@rel']) === 'alternate');
     const first = alt || link[0];
-    return first?.['@_href'] || first || '';
+    return pickAttribute(first?.['@href'] || first || '');
   }
-  return link?.['@_href'] || '';
+  return pickAttribute(link?.['@href'] || '');
 }
 
 function safeEntryUrl(rawUrl: string): string {
@@ -466,10 +757,15 @@ export interface ParsedFeed {
 }
 
 export function parseFeedStructured(xml: string, feedId: string): ParsedFeed {
-  const doc = parser.parse(xml);
   const entries: Entry[] = [];
+  let doc: any;
+  try {
+    doc = parseXml(xml);
+  } catch {
+    return { format: 'unrecognized', entries };
+  }
 
-  if (doc?.rss) {
+  if (doc && Object.hasOwn(doc, 'rss')) {
     const rssItems = toArray(doc.rss.channel?.item);
     for (const item of rssItems) {
       const url = pickLink(item.link);
@@ -480,7 +776,7 @@ export function parseFeedStructured(xml: string, feedId: string): ParsedFeed {
     return { format: 'rss', entries };
   }
 
-  if (doc?.feed) {
+  if (doc && Object.hasOwn(doc, 'feed')) {
     const atomEntries = toArray(doc.feed.entry);
     for (const entry of atomEntries) {
       const url = pickLink(entry.link);
@@ -492,13 +788,13 @@ export function parseFeedStructured(xml: string, feedId: string): ParsedFeed {
   }
 
   // RDF/RSS 1.0
-  if (doc?.['rdf:RDF']) {
+  if (doc && Object.hasOwn(doc, 'rdf:RDF')) {
     const rdfItems = toArray(doc['rdf:RDF'].item);
     for (const item of rdfItems) {
       const url = pickLink(item.link);
       const title = pickText(item.title) || 'Untitled';
       const published = pickDate(item['dc:date'], item.pubDate);
-      entries.push(buildEntry(feedId, pickText(item['@_rdf:about'] || url), url, title, published));
+      entries.push(buildEntry(feedId, pickAttribute(item['@rdf:about'], true) || url, url, title, published));
     }
     return { format: 'rdf', entries };
   }
@@ -771,13 +1067,16 @@ export async function fetchAllFeeds(
 }
 
 export function parseOPML(xml: string): { url: string; label: string }[] {
-  const doc = parser.parse(xml);
+  const doc = parseXml(xml);
   const feeds: { url: string; label: string }[] = [];
 
   function walk(outlines: any) {
     for (const o of toArray(outlines)) {
-      if (o['@_xmlUrl']) {
-        feeds.push({ url: o['@_xmlUrl'], label: pickText(o['@_title'] || o['@_text'] || o['@_xmlUrl']) });
+      if (o['@xmlUrl']) {
+        feeds.push({
+          url: pickAttribute(o['@xmlUrl']),
+          label: pickAttribute(o['@title'] || o['@text'] || o['@xmlUrl'], true),
+        });
       }
       if (o.outline) walk(o.outline);
     }
