@@ -414,7 +414,14 @@ function renderFeeds() {
     const unread = entries.filter(e => e.feedId === f.id && !e.state?.read).length;
     const h = feeds.health?.[f.id];
     const lastFetch = h?.lastFetched ? timeAgo(new Date(h.lastFetched).toISOString()) : 'never';
-    const healthStatus = h?.error ? '<span class="feed-error" title="' + esc(h.error) + '">Error</span>' : '<span class="feed-ok">Updated ' + lastFetch + '</span>';
+    let healthStatus;
+    if (h?.error) {
+      healthStatus = '<span class="feed-error" title="' + esc(h.error) + '">Error</span>';
+    } else if ((h?.entryCount ?? 0) === 0 && lastFetch !== 'never') {
+      healthStatus = '<span class="feed-ok">Updated ' + lastFetch + ' · 0 items</span>';
+    } else {
+      healthStatus = '<span class="feed-ok">Updated ' + lastFetch + '</span>';
+    }
     html += '<div class="feed-item"><div class="feed-info">'
       + '<div class="feed-label-row"><a href="' + externalPath('/feed/' + esc(f.id)) + '" data-link class="feed-label">' + esc(f.label) + '</a>' + healthStatus + '</div>'
       + '<div class="feed-meta">' + esc(f.url) + '</div></div>'

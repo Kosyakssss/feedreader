@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { fetchAllFeeds, fetchFeed, parseAtprotoFeedUrl, parseFeed, parseOPML, resolveFeedInput } from '../lib/feeds.ts';
+import { fetchAllFeeds, fetchFeed, parseAtprotoFeedUrl, parseFeedStructured, parseFeed, parseOPML, resolveFeedInput } from '../lib/feeds.ts';
 
 describe('parseFeed', () => {
   test('parses RSS items', () => {
@@ -79,8 +79,7 @@ describe('parseFeed', () => {
     expect(entries[1]!.published).toBe('2025-09-24T17:09:51.000Z');
   });
 
-  test('treats obsolete RFC 822 military zones as UTC', () => {
-    const xml = `<?xml version="1.0"?>
+  test('treats obsolete RFC 822 military zones as UTC', () => {    const xml = `<?xml version="1.0"?>
 <rss version="2.0">
   <channel>
     <item>
@@ -178,6 +177,31 @@ describe('parseOPML', () => {
     const feeds = parseOPML(xml);
     expect(feeds.length).toBe(1);
     expect(feeds[0]!.label).toBe('Dev & Design');
+  });
+});
+
+describe('parseFeedStructured', () => {
+  const wrap = (body: string) => `<?xml version="1.0"?>\n${body}`;
+
+  test('identifies rss, atom, and rdf formats', () => {
+    expect(parseFeedStructured(wrap('<rss version="2.0"><channel><title>t</title></channel></rss>'), 'f').format).toBe('rss');
+    expect(parseFeedStructured(wrap('<feed xmlns="http://www.w3.org/2005/Atom"><title>t</title></feed>'), 'f').format).toBe('atom');
+    expect(parseFeedStructured(wrap('<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"></rdf:RDF>'), 'f').format).toBe('rdf');
+  });
+
+  test('marks non-feed XML as unrecognized even with an XML declaration', () => {
+    const parsed = parseFeedStructured('<?xml version="1.0"?><foo><bar>hello</bar></foo>', 'f');
+    expect(parsed.format).toBe('unrecognized');
+    expect(parsed.entries).toEqual([]);
+  });
+
+  test('accepts a recognized root with zero items as an empty feed', () => {
+    const parsed = parseFeedStructured(
+      wrap('<rss version="2.0"><channel><title>Fine but empty</title></channel></rss>'),
+      'f',
+    );
+    expect(parsed.format).toBe('rss');
+    expect(parsed.entries).toEqual([]);
   });
 });
 

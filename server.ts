@@ -103,11 +103,16 @@ async function getEntries(feedFilter?: string): Promise<EnrichedEntry[]> {
 
 async function getFeedsWithHealth() {
   const [feedsFile, cache] = await Promise.all([readFeeds(), readCache()]);
-  const health: Record<string, { lastFetched: number | null; error: string | null }> = {};
+  const entryCounts: Record<string, number> = {};
+  for (const entry of cache.entries) {
+    entryCounts[entry.feedId] = (entryCounts[entry.feedId] ?? 0) + 1;
+  }
+  const health: Record<string, { lastFetched: number | null; error: string | null; entryCount: number }> = {};
   for (const f of feedsFile.feeds) {
     health[f.id] = {
       lastFetched: cache.lastFetched[f.id] || null,
       error: cache.feedErrors?.[f.id] || null,
+      entryCount: entryCounts[f.id] ?? 0,
     };
   }
   return { ...feedsFile, health };

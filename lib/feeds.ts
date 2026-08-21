@@ -426,36 +426,56 @@ async function readResponseText(res: Response, maxBytes: number): Promise<string
   return Buffer.concat(chunks.map(chunk => Buffer.from(chunk))).toString('utf-8');
 }
 
-export function parseFeed(xml: string, feedId: string): Entry[] {
+export type FeedFormat = 'rss' | 'atom' | 'rdf' | 'unrecognized';
+
+export interface ParsedFeed {
+  format: FeedFormat;
+  entries: Entry[];
+}
+
+export function parseFeedStructured(xml: string, feedId: string): ParsedFeed {
   const doc = parser.parse(xml);
   const entries: Entry[] = [];
 
-  const rssItems = toArray(doc?.rss?.channel?.item);
-  for (const item of rssItems) {
-    const url = pickLink(item.link);
-    const title = pickText(item.title) || 'Untitled';
-    const published = pickDate(item.pubDate, item['dc:date']);
-    entries.push(buildEntry(feedId, pickText(item.guid?.['#text'] || item.guid || url), url, title, published));
+  if (doc?.rss) {
+    const rssItems = toArray(doc.rss.channel?.item);
+    for (const item of rssItems) {
+      const url = pickLink(item.link);
+      const title = pickText(item.title) || 'Untitled';
+      const published = pickDate(item.pubDate, item['dc:date']);
+      entries.push(buildEntry(feedId, pickText(item.guid?.['#text'] || item.guid || url), url, title, published));
+    }
+    return { format: 'rss', entries };
   }
 
-  const atomEntries = toArray(doc?.feed?.entry);
-  for (const entry of atomEntries) {
-    const url = pickLink(entry.link);
-    const title = pickText(entry.title?.['#text'] || entry.title) || 'Untitled';
-    const published = pickDate(entry.published, entry.updated);
-    entries.push(buildEntry(feedId, pickText(entry.id || url), url, title, published));
+  if (doc?.feed) {
+    const atomEntries = toArray(doc.feed.entry);
+    for (const entry of atomEntries) {
+      const url = pickLink(entry.link);
+      const title = pickText(entry.title?.['#text'] || entry.title) || 'Untitled';
+      const published = pickDate(entry.published, entry.updated);
+      entries.push(buildEntry(feedId, pickText(entry.id || url), url, title, published));
+    }
+    return { format: 'atom', entries };
   }
 
   // RDF/RSS 1.0
-  const rdfItems = toArray(doc?.['rdf:RDF']?.item);
-  for (const item of rdfItems) {
-    const url = pickLink(item.link);
-    const title = pickText(item.title) || 'Untitled';
-    const published = pickDate(item['dc:date'], item.pubDate);
-    entries.push(buildEntry(feedId, pickText(item['@_rdf:about'] || url), url, title, published));
+  if (doc?.['rdf:RDF']) {
+    const rdfItems = toArray(doc['rdf:RDF'].item);
+    for (const item of rdfItems) {
+      const url = pickLink(item.link);
+      const title = pickText(item.title) || 'Untitled';
+      const published = pickDate(item['dc:date'], item.pubDate);
+      entries.push(buildEntry(feedId, pickText(item['@_rdf:about'] || url), url, title, published));
+    }
+    return { format: 'rdf', entries };
   }
 
-  return entries;
+  return { format: 'unrecognized', entries };
+}
+
+export function parseFeed(xml: string, feedId: string): Entry[] {
+  return parseFeedStructured(xml, feedId).entries;
 }
 
 async function resolveHandle(handle: string): Promise<string> {
@@ -602,7 +622,11 @@ export async function fetchFeed(feed: Feed, meta: FeedCacheMeta = {}): Promise<F
       return { entries: [], error: `HTTP ${res.status}` };
     }
     const xml = await readResponseText(res, MAX_FEED_BYTES);
-    return { entries: parseFeed(xml, feed.id), validators };
+    const parsed = parseFeedStructured(xml, feed.id);
+    if (parsed.format === 'unrecognized') {
+      return { entries: [], error: 'Unrecognized feed format', validators };
+    }
+    return { entries: parsed.entries, validators };
   } catch (e) {
     const msg = (e as Error).message || 'Unknown error';
     console.error(`Failed to fetch ${feed.label} (${feed.url}):`, msg);
