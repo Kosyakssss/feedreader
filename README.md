@@ -6,8 +6,8 @@ A local-first RSS/Atom reader that runs in the browser. Portable, pretty, lightw
 
 - **Local-first** — everything lives on disk (`data/` folder). Sync via Syncthing, iCloud, or just copy the folder. No accounts, no cloud.
 - **Minimal reading in-app** — entries open original links. The app is a _launcher_, not a reader.
-- **Portable server** — runs on Node.js using standard APIs on macOS and Linux.
-- **One runtime dependency** — `fast-xml-parser`. That's it.
+- **Portable server** — runs on Bun 1.4 or newer on macOS and Linux.
+- **No runtime dependencies** — HTTP, static files, and XML parsing use Bun APIs.
 - **Theme choice** — one adaptive system theme follows the browser and macOS light/dark appearance.
 - **File-synced state** — Syncthing conflict files (`state.sync-conflict-*.json`) are auto-merged using latest-timestamp-wins per entry.
 - **Safer imports/state** — feed URLs are validated on both manual add and OPML import, and entry IDs are scoped per feed so state cannot bleed across subscriptions.
@@ -15,8 +15,8 @@ A local-first RSS/Atom reader that runs in the browser. Portable, pretty, lightw
 ## Running
 
 ```sh
-npm install
-npm start
+bun install
+bun start
 ```
 
 Open `http://localhost:8787`. Override the port with `--port 3000` or in `data/config.json`.
@@ -29,7 +29,7 @@ The server only accepts requests whose raw `Host` header matches localhost (on i
 Point to a custom data directory:
 
 ```sh
-npm start -- --data /path/to/data
+bun start -- --data /path/to/data
 ```
 
 Only run one feedreader process per data directory. Writes are atomic
@@ -52,8 +52,8 @@ scripts/feedreader-launch-agent.sh status
 scripts/feedreader-launch-agent.sh restart
 scripts/feedreader-launch-agent.sh stop
 scripts/feedreader-launch-agent.sh uninstall
-npm run unread
-npm run unread -- --limit 20
+bun run unread
+bun run unread -- --limit 20
 ```
 
 The LaunchAgent runs `server.ts` from this checkout at login and writes logs to `~/Library/Logs/feedreader/`.

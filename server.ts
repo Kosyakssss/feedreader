@@ -1,5 +1,3 @@
-import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,6 +18,7 @@ const DEFAULT_HOST = '127.0.0.1';
 const SERVE_BASE_PATH = '/feedreader';
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const SHUTDOWN_TIMEOUT_MS = 10_000;
+const APP_JS = Bun.file(join(dirname(fileURLToPath(import.meta.url)), 'public', 'app.js'));
 
 let allowedHosts = new Set<string>();
 let allowedOrigins = new Set<string>();
@@ -37,9 +36,9 @@ function configureTrust(port: number, trustedOrigins: readonly string[]): void {
   }
 }
 
-function assertTrustedHost(req: import('node:http').IncomingMessage): void {
-  const hostHeader = req.headers.host;
-  if (typeof hostHeader !== 'string' || hostHeader.trim() === '') {
+function assertTrustedHost(req: Request): void {
+  const hostHeader = req.headers.get('host');
+  if (!hostHeader?.trim()) {
     throw new HttpError(403, 'Missing Host header');
   }
   if (!allowedHosts.has(hostHeader.trim().toLowerCase())) {
@@ -315,56 +314,45 @@ async function getHealth() {
   };
 }
 
-function parseBody(req: import('node:http').IncomingMessage, res?: import('node:http').ServerResponse): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const contentLength = Number(req.headers['content-length'] || 0);
-    if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
-      reject(new HttpError(413, 'Request body too large'));
-      return;
+async function parseBody(req: Request): Promise<string> {
+  const contentLength = Number(req.headers.get('content-length') || 0);
+  let tooLarge = Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES;
+  let total = 0;
+  let text = '';
+  const decoder = new TextDecoder();
+
+  if (req.body) {
+    for await (const chunk of req.body) {
+      total += chunk.byteLength;
+      if (total > MAX_BODY_BYTES) tooLarge = true;
+      if (!tooLarge) text += decoder.decode(chunk, { stream: true });
     }
-
-    const chunks: Buffer[] = [];
-    let total = 0;
-    let aborted = false;
-    req.on('data', c => {
-      if (aborted) return;
-      chunks.push(c);
-      total += c.length;
-      if (total > MAX_BODY_BYTES) {
-        aborted = true;
-        req.pause();
-        reject(new HttpError(413, 'Request body too large'));
-        // Tear the socket down only after the 413 response has flushed,
-        // so clients see the status instead of ECONNRESET.
-        res?.once('finish', () => req.destroy());
-      }
-    });
-    req.on('end', () => { if (!aborted) resolve(Buffer.concat(chunks).toString()); });
-    req.on('error', reject);
-  });
+  }
+  if (tooLarge) throw new HttpError(413, 'Request body too large');
+  return text + decoder.decode();
 }
 
-function headerValue(req: import('node:http').IncomingMessage, name: string): string {
-  const value = req.headers[name.toLowerCase()];
-  return Array.isArray(value) ? value[0] || '' : value || '';
+function headerValue(req: Request, name: string): string {
+  return req.headers.get(name) || '';
 }
 
-function hasJsonContentType(req: import('node:http').IncomingMessage): boolean {
+function hasJsonContentType(req: Request): boolean {
   const contentType = headerValue(req, 'content-type').split(';', 1)[0]?.trim().toLowerCase() ?? '';
   return contentType === 'application/json' || contentType.endsWith('+json');
 }
 
-function requestHost(req: import('node:http').IncomingMessage): string {
+function requestHost(req: Request): string {
   return headerValue(req, 'x-forwarded-host').split(',', 1)[0]?.trim()
     || headerValue(req, 'host')
     || 'localhost';
 }
 
-function requestUrl(req: import('node:http').IncomingMessage): URL {
+function requestUrl(req: Request): URL {
   const host = requestHost(req);
   const forwardedProto = headerValue(req, 'x-forwarded-proto').split(',', 1)[0]?.trim().toLowerCase() ?? '';
   const proto = forwardedProto === 'https' ? 'https' : 'http';
-  return new URL(req.url || '/', `${proto}://${host}`);
+  const incoming = new URL(req.url);
+  return new URL(incoming.pathname + incoming.search, `${proto}://${host}`);
 }
 
 function appPath(path: string): string {
@@ -373,17 +361,17 @@ function appPath(path: string): string {
   return path;
 }
 
-function renderBasePath(req: import('node:http').IncomingMessage, pathname: string): string {
+function renderBasePath(req: Request, pathname: string): string {
   const host = requestHost(req).split(':', 1)[0]?.toLowerCase() ?? '';
   if (pathname.startsWith(SERVE_BASE_PATH) || host.endsWith('.ts.net')) return SERVE_BASE_PATH;
   return '';
 }
 
-async function parseJSONBody(req: import('node:http').IncomingMessage, res?: import('node:http').ServerResponse): Promise<any> {
+async function parseJSONBody(req: Request): Promise<any> {
   if (!hasJsonContentType(req)) {
     throw new HttpError(415, 'Content-Type must be application/json');
   }
-  const raw = await parseBody(req, res);
+  const raw = await parseBody(req);
   try {
     return JSON.parse(raw);
   } catch {
@@ -397,16 +385,46 @@ function parseExternalUrlOrThrow(rawUrl: string): URL {
   return safe.url;
 }
 
-function json(res: import('node:http').ServerResponse, data: unknown, status = 200) {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(data));
+function json(data: unknown, status = 200): Response {
+  return Response.json(data, { status });
 }
 
-function err(res: import('node:http').ServerResponse, msg: string, status = 500) {
-  json(res, { error: msg }, status);
+function err(msg: string, status = 500): Response {
+  return json({ error: msg }, status);
 }
 
-function assertTrustedRequest(req: import('node:http').IncomingMessage): void {
+function appJsResponse(req: Request): Response {
+  const size = APP_JS.size;
+  const lastModified = new Date(APP_JS.lastModified);
+  const etag = `"${size.toString(16)}-${APP_JS.lastModified.toString(16)}"`;
+  const headers = new Headers({
+    'accept-ranges': 'bytes',
+    'content-type': 'text/javascript; charset=utf-8',
+    etag,
+    'last-modified': lastModified.toUTCString(),
+  });
+
+  if (req.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers });
+  const modifiedSince = req.headers.get('if-modified-since');
+  if (modifiedSince && lastModified.getTime() <= new Date(modifiedSince).getTime()) {
+    return new Response(null, { status: 304, headers });
+  }
+
+  const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get('range') || '');
+  if (!range) return new Response(APP_JS, { headers });
+  const rawStart = range[1] ? Number(range[1]) : null;
+  const rawEnd = range[2] ? Number(range[2]) : null;
+  const start = rawStart ?? Math.max(0, size - (rawEnd ?? 0));
+  const end = rawStart === null ? size - 1 : Math.min(rawEnd ?? size - 1, size - 1);
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= size) {
+    headers.set('content-range', `bytes */${size}`);
+    return new Response(null, { status: 416, headers });
+  }
+  headers.set('content-range', `bytes ${start}-${end}/${size}`);
+  return new Response(APP_JS.slice(start, end + 1), { status: 206, headers });
+}
+
+function assertTrustedRequest(req: Request): void {
   const secFetchSite = headerValue(req, 'sec-fetch-site').toLowerCase();
   if (secFetchSite && secFetchSite !== 'same-origin' && secFetchSite !== 'same-site' && secFetchSite !== 'none') {
     throw new HttpError(403, 'Cross-origin requests are not allowed');
@@ -431,37 +449,37 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
-async function handleRequest(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
+async function handleRequest(req: Request, server: Bun.Server<undefined>): Promise<Response> {
   try {
     assertTrustedHost(req);
     const url = requestUrl(req);
     const path = appPath(url.pathname);
-    const method = req.method || 'GET';
+    const method = req.method;
 
     if (MUTATING_METHODS.has(method)) assertTrustedRequest(req);
 
     if (path === '/api/health' && method === 'GET') {
-      return json(res, await getHealth());
+      return json(await getHealth());
     }
 
     if (path === '/api/entries' && method === 'GET') {
       const feed = url.searchParams.get('feed') || undefined;
-      return json(res, await getEntries(feed));
+      return json(await getEntries(feed));
     }
 
     if (path === '/api/refresh' && method === 'POST') {
       startRefresh().catch(error => console.error('Refresh error:', error));
-      return json(res, await getRefreshStatus(), 202);
+      return json(await getRefreshStatus(), 202);
     }
 
     if (path === '/api/refresh/status' && method === 'GET') {
       const rawSince = Number(url.searchParams.get('since') || 0);
       const since = Number.isSafeInteger(rawSince) && rawSince >= 0 ? rawSince : 0;
-      return json(res, getRefreshStatus(since));
+      return json(getRefreshStatus(since));
     }
 
     if (path === '/api/state' && method === 'POST') {
-      const body = await parseJSONBody(req, res);
+      const body = await parseJSONBody(req);
       if (!body || typeof body !== 'object' || !body.entries || typeof body.entries !== 'object' || Array.isArray(body.entries)) {
         throw new HttpError(400, 'Invalid state payload');
       }
@@ -476,18 +494,19 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         }
         return state;
       }));
-      return json(res, { ok: true });
+      return json({ ok: true });
     }
 
     if (path === '/api/feeds' && method === 'GET') {
-      return json(res, await getFeedsWithHealth());
+      return json(await getFeedsWithHealth());
     }
 
     if (path === '/api/feeds' && method === 'POST') {
-      const body = await parseJSONBody(req, res);
+      const body = await parseJSONBody(req);
       if (!body || typeof body !== 'object' || typeof body.url !== 'string') {
         throw new HttpError(400, 'Invalid feed payload');
       }
+      server.timeout(req, 120);
       const resolved = await resolveFeedInput(body.url).catch(error => {
         throw new HttpError(400, (error as Error).message || 'Could not resolve feed');
       });
@@ -513,7 +532,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         await writeDataFiles({ 'feeds.json': feedsFile });
         return feed;
       });
-      return json(res, newFeed, 201);
+      return json(newFeed, 201);
     }
 
     if (path.startsWith('/api/feeds/') && method === 'DELETE') {
@@ -530,13 +549,13 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         for (const rid of removedIds) delete state[rid];
         await writeDataFiles({ 'feeds.json': feedsFile, 'cache.json': cache, 'state.json': state });
       });
-      return json(res, { ok: true });
+      return json({ ok: true });
     }
 
     if (path === '/api/feeds/import' && method === 'POST') {
-      const raw = await parseBody(req, res);
+      const raw = await parseBody(req);
       let opmlText = raw;
-      const boundary = req.headers['content-type']?.match(/boundary=(.+)/)?.[1];
+      const boundary = req.headers.get('content-type')?.match(/boundary=(.+)/)?.[1];
       if (boundary) {
         const parts = raw.split('--' + boundary);
         for (const part of parts) {
@@ -575,7 +594,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         await writeDataFiles({ 'feeds.json': feedsFile });
         return count;
       });
-      return json(res, { added, skipped: imported.length - added });
+      return json({ added, skipped: imported.length - added });
     }
 
     if (path === '/api/feeds/export' && method === 'GET') {
@@ -585,19 +604,18 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         opml += `  <outline type="rss" text="${escapeHtml(f.label)}" title="${escapeHtml(f.label)}" xmlUrl="${escapeHtml(f.url)}" />\n`;
       }
       opml += '</body>\n</opml>';
-      res.writeHead(200, {
-        'Content-Type': 'text/xml; charset=utf-8',
-        'Content-Disposition': 'attachment; filename="feedreader.opml"',
-      });
-      return res.end(opml);
+      return new Response(opml, { headers: {
+        'content-type': 'text/xml; charset=utf-8',
+        'content-disposition': 'attachment; filename="feedreader.opml"',
+      }});
     }
 
     if (path === '/api/config' && method === 'GET') {
-      return json(res, await readConfig());
+      return json(await readConfig());
     }
 
     if (path === '/api/config' && method === 'PUT') {
-      const body = await parseJSONBody(req, res);
+      const body = await parseJSONBody(req);
       if (!body || typeof body !== 'object') throw new HttpError(400, 'Invalid config payload');
 
       const patch: any = {};
@@ -645,21 +663,18 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       }
 
       const updated = await runDataMutation(() => writeConfig(patch));
-      return json(res, updated);
+      return json(updated);
     }
 
     if (path === '/api/theme' && method === 'GET') {
       const config = await readConfig();
       const themeName = config.theme || 'system';
       const css = await readThemeCSS(themeName);
-      res.writeHead(200, { 'Content-Type': 'text/css' });
-      return res.end(css);
+      return new Response(css, { headers: { 'content-type': 'text/css' } });
     }
 
     if (path === '/app.js' && method === 'GET') {
-      const js = await readFile(join(dirname(fileURLToPath(import.meta.url)), 'public', 'app.js'), 'utf-8');
-      res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' });
-      return res.end(js);
+      return appJsResponse(req);
     }
 
     if (path.startsWith('/api/')) {
@@ -667,42 +682,24 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       const known = ['/api/health', '/api/entries', '/api/refresh', '/api/refresh/status', '/api/state',
         '/api/feeds', '/api/feeds/import', '/api/feeds/export', '/api/config', '/api/theme'];
       const isKnownResource = known.includes(path) || /^\/api\/feeds\/[^/]+$/.test(path);
-      return err(res, isKnownResource ? 'Method not allowed' : 'Not found', isKnownResource ? 405 : 404);
+      return err(isKnownResource ? 'Method not allowed' : 'Not found', isKnownResource ? 405 : 404);
     }
 
     // SPA: serve the app for all non-API routes
-    const config = await readConfig();
     const html = renderApp(renderBasePath(req, url.pathname));
-    res.writeHead(200, {
-      'Content-Type': 'text/html; charset=utf-8',
-      'Content-Security-Policy':
+    return new Response(html, { headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'content-security-policy':
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'",
-    });
-    res.end(html);
+    }});
 
   } catch (e) {
     if (e instanceof HttpError) {
-      return err(res, e.message, e.status);
+      return err(e.message, e.status);
     }
     console.error('Request error:', e);
-    err(res, (e as Error).message);
+    return err((e as Error).message);
   }
-}
-
-function listen(server: import('node:http').Server, port: number, host: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const onError = (error: Error) => {
-      server.off('listening', onListening);
-      reject(error);
-    };
-    const onListening = () => {
-      server.off('error', onError);
-      resolve();
-    };
-    server.once('error', onError);
-    server.once('listening', onListening);
-    server.listen(port, host);
-  });
 }
 
 function describeListenError(error: unknown, host: string, port: number): string {
@@ -716,9 +713,9 @@ function describeListenError(error: unknown, host: string, port: number): string
   return (error as Error).message || String(error);
 }
 
-function installShutdownHandlers(server: import('node:http').Server) {
+function installShutdownHandlers(server: Bun.Server<undefined>) {
   let shuttingDown = false;
-  const shutdown = (signal: string) => {
+  const shutdown = async (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`Received ${signal}; shutting down Feedreader`);
@@ -729,24 +726,26 @@ function installShutdownHandlers(server: import('node:http').Server) {
     }, SHUTDOWN_TIMEOUT_MS);
     forceExit.unref?.();
 
-    server.close(error => {
-      void (async () => {
-        if (refreshJob) await refreshJob.catch(() => undefined);
-        clearTimeout(forceExit);
-        if (error) {
-          console.error('Error while closing Feedreader:', error);
-          process.exit(1);
-        }
-        process.exit(0);
-      })();
-    });
+    try {
+      const stopped = server.stop();
+      if (refreshJob) await refreshJob.catch(() => undefined);
+      await stopped;
+      clearTimeout(forceExit);
+      process.exit(0);
+    } catch (error) {
+      console.error('Error while closing Feedreader:', error);
+      process.exit(1);
+    }
   };
 
-  process.once('SIGINT', () => shutdown('SIGINT'));
-  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => void shutdown('SIGINT'));
+  process.once('SIGTERM', () => void shutdown('SIGTERM'));
 }
 
 async function main() {
+  if (!Bun.semver.satisfies(Bun.version, '>=1.4.0')) {
+    throw new Error(`Bun 1.4.0 or newer is required; found ${Bun.version}`);
+  }
   const config = await readConfig();
   const portArg = process.argv.indexOf('--port');
   const portRaw = portArg !== -1 ? process.argv[portArg + 1] : undefined;
@@ -760,13 +759,18 @@ async function main() {
 
   await mergeSyncConflicts();
 
-  const server = createServer(handleRequest);
-  server.requestTimeout = 30_000;
-  server.headersTimeout = 10_000;
-  server.keepAliveTimeout = 5_000;
-
-  await listen(server, port, host);
-  server.on('error', error => console.error('Server error:', error));
+  const server = Bun.serve({
+    hostname: host,
+    port,
+    reusePort: false,
+    idleTimeout: 10,
+    development: false,
+    fetch: handleRequest,
+    error(error) {
+      console.error('Server error:', error);
+      return err('Internal server error');
+    },
+  });
   installShutdownHandlers(server);
 
   const displayHost = host === DEFAULT_HOST ? 'localhost' : host;

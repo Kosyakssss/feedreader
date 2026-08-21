@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import http from 'node:http';
+import net from 'node:net';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -423,4 +424,54 @@ describe('server hardening', () => {
     const underServe = await fetch(`http://127.0.0.1:${port}/feedreader/app.js`);
     expect(underServe.status).toBe(200);
   });
+
+  test('serves app.js through Bun.file with conditional and range handling', async () => {
+    const full = await fetch(`http://127.0.0.1:${port}/app.js`);
+    expect(full.status).toBe(200);
+    const etag = full.headers.get('etag');
+    expect(etag).toBeTruthy();
+
+    const conditional = await fetch(`http://127.0.0.1:${port}/app.js`, {
+      headers: { 'if-none-match': etag! },
+    });
+    expect(conditional.status).toBe(304);
+
+    const range = await fetch(`http://127.0.0.1:${port}/app.js`, {
+      headers: { range: 'bytes=0-15' },
+    });
+    expect(range.status).toBe(206);
+    expect(range.headers.get('content-range')).toMatch(/^bytes 0-15\//);
+    expect((await range.arrayBuffer()).byteLength).toBe(16);
+  });
+
+  test('validates raw Host before serving app.js', async () => {
+    const res = await rawRequest({ method: 'GET', path: '/app.js', headers: { host: `evil.com:${port}` } });
+    expect(res.status).toBe(403);
+  });
+
+  test('closes stalled headers and chunked bodies after the idle timeout', async () => {
+    const waitForClose = (initial: string) => new Promise<number>((resolve, reject) => {
+      const started = Date.now();
+      const socket = net.createConnection({ host: '127.0.0.1', port }, () => socket.write(initial));
+      const timer = setTimeout(() => {
+        socket.destroy();
+        reject(new Error('Stalled connection exceeded the server idle timeout'));
+      }, 13_000);
+      socket.once('close', () => {
+        clearTimeout(timer);
+        resolve(Date.now() - started);
+      });
+      socket.once('error', error => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+
+    const [headerMs, bodyMs] = await Promise.all([
+      waitForClose(`GET / HTTP/1.1\r\nHost: 127.0.0.1:${port}`),
+      waitForClose(`POST /api/state HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n1\r\n{\r\n`),
+    ]);
+    expect(headerMs).toBeLessThan(13_000);
+    expect(bodyMs).toBeLessThan(13_000);
+  }, 15_000);
 });
