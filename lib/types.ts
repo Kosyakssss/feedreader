@@ -63,5 +63,4 @@ export interface FeedCacheMeta {
   etag?: string;
   lastModified?: string;
   failureCount?: number;
-  nextRetryAfter?: number;
 }

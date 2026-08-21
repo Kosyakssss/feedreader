@@ -84,9 +84,6 @@ function normalizeFeedMeta(value: unknown): Record<string, FeedCacheMeta> {
     if (typeof entry.failureCount === 'number' && Number.isInteger(entry.failureCount) && entry.failureCount > 0) {
       meta.failureCount = entry.failureCount;
     }
-    if (typeof entry.nextRetryAfter === 'number' && Number.isFinite(entry.nextRetryAfter) && entry.nextRetryAfter > 0) {
-      meta.nextRetryAfter = entry.nextRetryAfter;
-    }
     if (Object.keys(meta).length) out[key] = meta;
   }
   return out;

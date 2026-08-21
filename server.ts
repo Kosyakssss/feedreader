@@ -208,7 +208,6 @@ async function mergeFeedResults(completedResults: CompletedFeedResult[], provisi
         cache.feedMeta[feed.id] = {
           ...priorMeta,
           failureCount,
-          nextRetryAfter: 0,
         };
         cache.feedErrors[feed.id] = result.error;
       } else {
@@ -216,7 +215,6 @@ async function mergeFeedResults(completedResults: CompletedFeedResult[], provisi
           ...priorMeta,
           ...(result.validators || {}),
           failureCount: 0,
-          nextRetryAfter: 0,
         };
         delete cache.feedErrors[feed.id];
       }

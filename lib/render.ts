@@ -973,22 +973,6 @@ document.body.addEventListener('click', (e) => {
 // Popstate
 window.addEventListener('popstate', () => navigate(internalPath(location.pathname), false));
 
-async function syncExternalTheme() {
-  try {
-    const latest = await api('GET', '/api/config');
-    if (latest.theme === CONFIG.theme) return;
-    CONFIG.theme = latest.theme;
-    const themeLink = document.getElementById('theme-link');
-    if (themeLink) themeLink.href = BASE_PATH + '/api/theme?t=' + Date.now();
-    if (currentPage === '/settings') renderCurrentPage();
-  } catch {}
-}
-
-setInterval(syncExternalTheme, 2000);
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) void syncExternalTheme();
-});
-
 // Init
 (async () => {
   navigate(internalPath(location.pathname), false);
