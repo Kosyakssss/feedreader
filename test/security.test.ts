@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { isSafeExternalUrl, sanitizeThemeName } from '../lib/security.ts';
+import { isPrivateAddress, isSafeExternalUrl, sanitizeThemeName } from '../lib/security.ts';
 
 describe('sanitizeThemeName', () => {
   test('accepts safe names', () => {
@@ -39,5 +39,16 @@ describe('isSafeExternalUrl', () => {
     expect(isSafeExternalUrl('http://[fc00::1]').ok).toBe(false);
     expect(isSafeExternalUrl('http://[::ffff:7f00:1]').ok).toBe(false);
     expect(isSafeExternalUrl('http://[::ffff:a00:1]').ok).toBe(false);
+  });
+
+  test('flags IPv6 transition mechanisms embedding private IPv4', () => {
+    // NAT64 well-known prefix wrapping loopback
+    expect(isPrivateAddress('[64:ff9b::127.0.0.1]')).toBe(true);
+    // 6to4 embedding a private address (10.1.2.3 = a01:203)
+    expect(isPrivateAddress('[2002:a01:203::1]')).toBe(true);
+    // Teredo-obfuscated private address (192.168.0.1 = c0a8:0001 ^ ffff = 3f57:fffe)
+    expect(isPrivateAddress('[2001:0:ffff:ffff::3f57:fffe]')).toBe(true);
+    // Plain public IPv6 must not be flagged.
+    expect(isPrivateAddress('[2606:4700:4700::1111]')).toBe(false);
   });
 });

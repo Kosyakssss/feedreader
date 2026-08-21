@@ -71,12 +71,26 @@ function isPrivateIPv6(host: string): boolean {
   const groups = parseIPv6Groups(host);
   if (!groups) return true;
 
-  const [g0 = -1, , , , , g5 = -1, g6 = -1, g7 = -1] = groups;
+  const [g0 = -1, g1 = -1, g2 = -1, , , g5 = -1, g6 = -1, g7 = -1] = groups;
   if (groups.every(group => group === 0)) return true; // Unspecified
   if (groups.slice(0, 7).every(group => group === 0) && g7 === 1) return true; // Loopback
   if ((g0 & 0xfe00) === 0xfc00) return true; // Unique local fc00::/7
   if ((g0 & 0xffc0) === 0xfe80) return true; // Link-local fe80::/10
   if ((g0 & 0xff00) === 0xff00) return true; // Multicast ff00::/8
+
+  // IPv4-embedded transition mechanisms resolve to private IPv4 space.
+  if (g0 === 0x0064 && g1 === 0xff9b) { // NAT64 well-known prefix 64:ff9b::/96
+    const mapped = `${g6 >> 8}.${g6 & 0xff}.${g7 >> 8}.${g7 & 0xff}`;
+    return isPrivateIPv4(mapped);
+  }
+  if (g0 === 0x2002) { // 6to4 2002::/16 — IPv4 sits in g1:g2
+    const embedded = `${(g1 >> 8)}.${g1 & 0xff}.${(g2 >> 8)}.${g2 & 0xff}`;
+    return isPrivateIPv4(embedded);
+  }
+  if (g0 === 0x2001 && g1 === 0) { // Teredo 2001::/32 — obfuscated client IPv4 in g6:g7
+    const mapped = `${(g6 ^ 0xffff) >> 8}.${(g6 ^ 0xffff) & 0xff}.${(g7 ^ 0xffff) >> 8}.${(g7 ^ 0xffff) & 0xff}`;
+    return isPrivateIPv4(mapped);
+  }
 
   const firstFiveZero = groups.slice(0, 5).every(group => group === 0);
   if (firstFiveZero && g5 === 0xffff) {

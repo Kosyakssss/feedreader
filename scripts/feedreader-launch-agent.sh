@@ -18,13 +18,13 @@ usage() {
     echo "Usage: scripts/feedreader-launch-agent.sh install|uninstall|start|stop|restart|status|plist"
 }
 
-find_node() {
-    if command -v node >/dev/null 2>&1; then
-        command -v node
-    elif [ -x /opt/homebrew/bin/node ]; then
-        printf '%s\n' /opt/homebrew/bin/node
+find_bun() {
+    if command -v bun >/dev/null 2>&1; then
+        command -v bun
+    elif [ -x /opt/homebrew/bin/bun ]; then
+        printf '%s\n' /opt/homebrew/bin/bun
     else
-        echo 'node is not installed or not on PATH' >&2
+        echo "bun is not installed or not on PATH" >&2
         return 1
     fi
 }
@@ -82,12 +82,12 @@ stop_tailscale_serve() {
 }
 
 write_plist() {
-    node_bin=$(find_node) || return 1
+    bun_bin=$(find_bun) || return 1
     mkdir -p "$(dirname "$plist")" "$log_dir"
     tmp=$(mktemp "${TMPDIR:-/tmp}/feedreader-launch-agent.XXXXXX")
     trap 'rm -f "$tmp"' EXIT HUP INT TERM
 
-    node_xml=$(xml_escape "$node_bin")
+    bun_xml=$(xml_escape "$bun_bin")
     server_xml=$(xml_escape "$project_dir/server.ts")
     project_xml=$(xml_escape "$project_dir")
     stdout_xml=$(xml_escape "$log_dir/stdout.log")
@@ -103,7 +103,7 @@ write_plist() {
   <string>$label</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$node_xml</string>
+    <string>$bun_xml</string>
     <string>$server_xml</string>
   </array>
   <key>WorkingDirectory</key>
