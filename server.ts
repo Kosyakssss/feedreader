@@ -1,4 +1,7 @@
 import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   readFeeds, readState, updateState, readConfig, writeConfig,
@@ -653,6 +656,12 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       return res.end(css);
     }
 
+    if (path === '/app.js' && method === 'GET') {
+      const js = await readFile(join(dirname(fileURLToPath(import.meta.url)), 'public', 'app.js'), 'utf-8');
+      res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' });
+      return res.end(js);
+    }
+
     if (path.startsWith('/api/')) {
       // Known API resources respond 405 (not 404) on wrong methods.
       const known = ['/api/health', '/api/entries', '/api/refresh', '/api/refresh/status', '/api/state',
@@ -663,8 +672,12 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
 
     // SPA: serve the app for all non-API routes
     const config = await readConfig();
-    const html = renderApp(config, renderBasePath(req, url.pathname));
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    const html = renderApp(renderBasePath(req, url.pathname));
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy':
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'",
+    });
     res.end(html);
 
   } catch (e) {

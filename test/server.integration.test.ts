@@ -156,7 +156,7 @@ describe('server hardening', () => {
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain('href="/feedreader/api/theme"');
-    expect(html).toContain('const BASE_PATH = "/feedreader"');
+    expect(html).toContain('<script src="/feedreader/app.js" defer></script>');
 
     const api = await fetch(`http://127.0.0.1:${port}/feedreader/api/state`, {
       method: 'POST',
@@ -190,7 +190,7 @@ describe('server hardening', () => {
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain('href="/feedreader/api/theme"');
-    expect(html).toContain('const BASE_PATH = "/feedreader"');
+    expect(html).toContain('<script src="/feedreader/app.js" defer></script>');
   });
 
   test('requires JSON content type for JSON endpoints', async () => {
@@ -408,8 +408,19 @@ describe('server hardening', () => {
     const page = await fetch(`http://127.0.0.1:${port}/`);
     const html = await page.text();
     expect(html).toContain('id="refresh-status"');
-    expect(html).toContain('Loading saved entries…');
-    expect(html).toContain('Checking feeds ');
-    expect(html).toContain("'/api/refresh/status?since=' + refreshCursor");
+    const app = await (await fetch(`http://127.0.0.1:${port}/app.js`)).text();
+    expect(app).toContain('Loading saved entries…');
+    expect(app).toContain('Checking feeds ');
+    expect(app).toContain("'/api/refresh/status?since=' + refreshCursor");
+  });
+
+  test('serves app.js with a strict CSP on the document', async () => {
+    const page = await fetch(`http://127.0.0.1:${port}/`);
+    expect(page.headers.get('content-security-policy')).toContain("script-src 'self'");
+    const script = await fetch(`http://127.0.0.1:${port}/app.js`);
+    expect(script.status).toBe(200);
+    expect(script.headers.get('content-type')).toContain('text/javascript');
+    const underServe = await fetch(`http://127.0.0.1:${port}/feedreader/app.js`);
+    expect(underServe.status).toBe(200);
   });
 });
