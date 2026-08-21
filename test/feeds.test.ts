@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { fetchAllFeeds, fetchFeed, parseAtprotoFeedUrl, parseFeedStructured, parseFeed, parseOPML, resolveFeedInput } from '../lib/feeds.ts';
+import { fetchAllFeeds, fetchFeed, probeFeed, parseAtprotoFeedUrl, parseFeedStructured, parseFeed, parseOPML, resolveFeedInput } from '../lib/feeds.ts';
 
 describe('parseFeed', () => {
   test('parses RSS items', () => {
@@ -202,6 +202,43 @@ describe('parseFeedStructured', () => {
     );
     expect(parsed.format).toBe('rss');
     expect(parsed.entries).toEqual([]);
+  });
+});
+
+describe('probeFeed', () => {
+  const feedXml = (url: string) => `<?xml version="1.0"?>
+<rss version="2.0"><channel><item><guid>g</guid><title>t</title><link>${url}</link></item></channel></rss>`;
+
+  function withFetch(handler: (url: string) => Promise<Response>): () => void {
+    const original = globalThis.fetch;
+    globalThis.fetch = handler as typeof fetch;
+    return () => { globalThis.fetch = original; };
+  }
+
+  test('reports ok with entry count for a readable feed', async () => {
+    const restore = withFetch(async url => new Response(feedXml(String(url)), { status: 200 }));
+    try {
+      const probe = await probeFeed('https://93.184.216.34/ok.xml', 'OK');
+      expect(probe).toEqual({ ok: true, entryCount: 1 });
+    } finally { restore(); }
+  });
+
+  test('rejects garbage served at a feed URL', async () => {
+    const restore = withFetch(async () => new Response('<?xml version="1.0"?><html><body>nope</body></html>', { status: 200 }));
+    try {
+      const probe = await probeFeed('https://93.184.216.34/garbage.xml', 'Garbage');
+      expect(probe.ok).toBe(false);
+      expect(probe.error).toBe('Unrecognized feed format');
+    } finally { restore(); }
+  });
+
+  test('propagates HTTP failures', async () => {
+    const restore = withFetch(async () => new Response('nope', { status: 500 }));
+    try {
+      const probe = await probeFeed('https://93.184.216.34/broken.xml', 'Broken');
+      expect(probe.ok).toBe(false);
+      expect(probe.error).toBe('HTTP 500');
+    } finally { restore(); }
   });
 });
 

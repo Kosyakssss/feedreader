@@ -5,7 +5,7 @@ import {
   readCache, mergeSyncConflicts, pruneEntries,
   readThemeCSS, generateId, getDataDir, runDataMutation, writeDataFiles,
 } from './lib/data.ts';
-import { fetchAllFeeds, parseOPML, decodeHtmlEntities, publishedTime, resolveFeedInput } from './lib/feeds.ts';
+import { fetchAllFeeds, parseOPML, decodeHtmlEntities, probeFeed, publishedTime, resolveFeedInput } from './lib/feeds.ts';
 import type { FeedFetchResult } from './lib/feeds.ts';
 import { renderApp } from './lib/render.ts';
 import type { EnrichedEntry, Feed } from './lib/types.ts';
@@ -487,6 +487,12 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         throw new HttpError(400, (error as Error).message || 'Could not resolve feed');
       });
       const feedUrl = resolved.url;
+      const probe = await probeFeed(feedUrl, resolved.label).catch((error: unknown) => {
+        throw new HttpError(400, `Feed could not be read: ${(error as Error)?.message || 'unknown error'}`);
+      });
+      if (!probe.ok) {
+        throw new HttpError(400, `Feed could not be read: ${probe.error}`);
+      }
       const newFeed = await runDataMutation(async () => {
         const feedsFile = await readFeeds();
         if (feedsFile.feeds.some(f => f.url === feedUrl)) {

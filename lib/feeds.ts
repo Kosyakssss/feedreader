@@ -641,6 +641,12 @@ function pickValidators(res: Response, fallback: FeedCacheMeta): Pick<FeedCacheM
   };
 }
 
+export async function probeFeed(url: string, label: string): Promise<{ ok: boolean; error?: string; entryCount: number }> {
+  const result = await fetchFeed({ id: 'probe', url, label, folderId: null });
+  if (result.error) return { ok: false, error: result.error, entryCount: 0 };
+  return { ok: true, entryCount: result.entries.length };
+}
+
 export async function fetchAllFeeds(
   feeds: Feed[],
   meta: Record<string, FeedCacheMeta> = {},
