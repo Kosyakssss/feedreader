@@ -423,7 +423,35 @@ async function readResponseText(res: Response, maxBytes: number): Promise<string
     chunks.push(value);
   }
 
-  return Buffer.concat(chunks.map(chunk => Buffer.from(chunk))).toString('utf-8');
+  return decodeFeedBytes(Buffer.concat(chunks.map(chunk => Buffer.from(chunk))), res.headers.get('content-type'));
+}
+
+/**
+ * Decodes feed bytes honoring BOMs, Content-Type charsets, and the XML
+ * declaration's encoding attribute. Legacy ISO-8859-1/windows-1252 feeds
+ * otherwise get silently mojibake'd. Falls back to UTF-8 everywhere.
+ */
+export function decodeFeedBytes(bytes: Buffer, contentType?: string | null): string {
+  // Byte-order marks win over everything.
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return decodeWith('utf-8', bytes.subarray(3));
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) return decodeWith('utf-16le', bytes.subarray(2));
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) return decodeWith('utf-16be', bytes.subarray(2));
+
+  const charsetFromHeader = /charset=([\w-]+)/i.exec(contentType ?? '')?.[1];
+  const declared = /^(<\?xml[^>]*?)\?>/i.exec(bytes.subarray(0, 512).toString('latin1'))?.[1];
+  const charsetFromXml = /\bencoding\s*=\s*["']([\w-]+)["']/i.exec(declared ?? '')?.[1];
+
+  for (const label of [charsetFromXml, charsetFromHeader]) {
+    if (!label) continue;
+    try {
+      return decodeWith(label, bytes);
+    } catch {}
+  }
+  return decodeWith('utf-8', bytes);
+}
+
+function decodeWith(label: string, bytes: Buffer): string {
+  return new TextDecoder(label, { fatal: false }).decode(bytes);
 }
 
 export type FeedFormat = 'rss' | 'atom' | 'rdf' | 'json' | 'unrecognized';

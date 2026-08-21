@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { fetchAllFeeds, fetchFeed, probeFeed, parseAtprotoFeedUrl, parseFeedStructured, parseFeedAny, parseFeed, parseOPML, resolveFeedInput } from '../lib/feeds.ts';
+import { fetchAllFeeds, fetchFeed, probeFeed, parseAtprotoFeedUrl, parseFeedStructured, parseFeedAny, parseFeed, decodeFeedBytes, parseOPML, resolveFeedInput } from '../lib/feeds.ts';
 
 describe('parseFeed', () => {
   test('parses RSS items', () => {
@@ -226,6 +226,30 @@ describe('parseFeedStructured', () => {
     expect(parseFeedAny(JSON.stringify({ items: [] }), 'f').format).toBe('unrecognized');
     expect(parseFeedAny(JSON.stringify({ version: 'https://example.com/not-jsonfeed' }), 'f').format).toBe('unrecognized');
     expect(parseFeedAny('{not json', 'f').format).toBe('unrecognized');
+  });
+});
+
+describe('decodeFeedBytes', () => {
+  test('decodes ISO-8859-1 feeds via the XML declaration', () => {
+    const xml = '<?xml version="1.0" encoding="ISO-8859-1"?><rss><channel><item><title>Café</title></item></channel></rss>';
+    const bytes = Buffer.from(xml, 'latin1');
+    expect(decodeFeedBytes(bytes)).toContain('Café');
+  });
+
+  test('honors charset from Content-Type when the declaration is absent', () => {
+    const body = '<title>Café</title>';
+    const bytes = Buffer.from(body, 'latin1');
+    expect(decodeFeedBytes(bytes, 'application/xml; charset=iso-8859-1')).toBe('<title>Café</title>');
+  });
+
+  test('strips a UTF-8 BOM and defaults to UTF-8', () => {
+    const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('<title>ok</title>', 'utf8')]);
+    expect(decodeFeedBytes(bytes)).toBe('<title>ok</title>');
+  });
+
+  test('maps windows-1252 punctuation correctly', () => {
+    const xml = '<?xml version="1.0" encoding="windows-1252"?><title>\x93quoted\x94 \x91dash\x92</title>';
+    expect(decodeFeedBytes(Buffer.from(xml, 'latin1'))).toContain('<title>“quoted” ‘dash’</title>');
   });
 });
 
