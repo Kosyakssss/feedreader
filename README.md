@@ -24,6 +24,8 @@ The server binds to `127.0.0.1` by default; pass `--host 0.0.0.0` only if you in
 
 For private access from trusted devices, install Tailscale on both devices and use the macOS LaunchAgent helper below. It keeps feedreader bound to localhost and publishes `http://127.0.0.1:8787` at `/feedreader` with Tailscale Serve inside your tailnet. Open it from another tailnet device at `https://<mac-name>.<tailnet>.ts.net/feedreader`.
 
+The server only accepts requests whose raw `Host` header matches localhost (on its port) or an origin listed in `trustedOrigins` in `data/config.json` — e.g. `"trustedOrigins": ["https://airm1.toyger-tautara.ts.net"]`. Add your Serve hostname there before using the tailnet URL; mutations from browsers also require that origin to match the request's `Origin`. `X-Forwarded-*` headers are never used for these trust decisions. Changes require a restart.
+
 Point to a custom data directory:
 
 ```sh

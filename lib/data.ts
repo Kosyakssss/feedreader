@@ -10,6 +10,7 @@ const DEFAULT_CONFIG: Config = {
   retention: { maxEntries: 3000, maxDays: null },
   theme: 'system',
   port: 8787,
+  trustedOrigins: [],
 };
 
 const TRANSACTION_FILE = 'transaction.json';
@@ -177,6 +178,20 @@ function normalizeConfig(value: unknown): Config {
     config.theme = 'system';
   } else if (typeof value.theme === 'string' && value.theme === 'system') {
     config.theme = value.theme;
+  }
+  if (Array.isArray(value.trustedOrigins)) {
+    const origins: string[] = [];
+    for (const entry of value.trustedOrigins) {
+      if (typeof entry !== 'string') continue;
+      const normalized = entry.trim().toLowerCase().replace(/\/+$/, '');
+      try {
+        const parsed = new URL(normalized);
+        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') continue;
+        origins.push(parsed.origin);
+      } catch {}
+      if (origins.length >= 16) break;
+    }
+    config.trustedOrigins = origins;
   }
   if (isRecord(value.retention)) {
     const maxEntries = value.retention.maxEntries;

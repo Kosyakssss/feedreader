@@ -17,6 +17,32 @@ const SERVE_BASE_PATH = '/feedreader';
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
+let allowedHosts = new Set<string>();
+let allowedOrigins = new Set<string>();
+
+function configureTrust(port: number, trustedOrigins: readonly string[]): void {
+  allowedHosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`]);
+  allowedOrigins = new Set([`http://localhost:${port}`, `http://127.0.0.1:${port}`, `http://[::1]:${port}`]);
+  for (const origin of trustedOrigins) {
+    try {
+      const parsed = new URL(origin);
+      const portSuffix = parsed.port ? `:${parsed.port}` : '';
+      allowedHosts.add(`${parsed.hostname}${portSuffix}`);
+      allowedOrigins.add(parsed.origin);
+    } catch {}
+  }
+}
+
+function assertTrustedHost(req: import('node:http').IncomingMessage): void {
+  const hostHeader = req.headers.host;
+  if (typeof hostHeader !== 'string' || hostHeader.trim() === '') {
+    throw new HttpError(403, 'Missing Host header');
+  }
+  if (!allowedHosts.has(hostHeader.trim().toLowerCase())) {
+    throw new HttpError(403, 'Unrecognized Host header');
+  }
+}
+
 let refreshJob: Promise<number> | null = null;
 let lastRefreshResult: { count: number; finishedAt: number; error: string | null } | null = null;
 interface RefreshChange {
@@ -370,22 +396,18 @@ function err(res: import('node:http').ServerResponse, msg: string, status = 500)
   json(res, { error: msg }, status);
 }
 
-function assertTrustedRequest(req: import('node:http').IncomingMessage, url: URL): void {
+function assertTrustedRequest(req: import('node:http').IncomingMessage): void {
   const secFetchSite = headerValue(req, 'sec-fetch-site').toLowerCase();
   if (secFetchSite && secFetchSite !== 'same-origin' && secFetchSite !== 'same-site' && secFetchSite !== 'none') {
     throw new HttpError(403, 'Cross-origin requests are not allowed');
   }
 
+  // Exact-match against the configured origin allowlist. Never reconstruct
+  // "our" origin from request headers: that let reflected Host/XFH values
+  // authorize DNS-rebinding attacks.
   const origin = headerValue(req, 'origin');
   if (!origin) return;
-
-  let parsed: URL;
-  try {
-    parsed = new URL(origin);
-  } catch {
-    throw new HttpError(403, 'Invalid request origin');
-  }
-  if (parsed.origin !== url.origin) {
+  if (!allowedOrigins.has(origin.trim().toLowerCase())) {
     throw new HttpError(403, 'Cross-origin requests are not allowed');
   }
 }
@@ -401,11 +423,12 @@ function escapeHtml(value: string): string {
 
 async function handleRequest(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
   try {
+    assertTrustedHost(req);
     const url = requestUrl(req);
     const path = appPath(url.pathname);
     const method = req.method || 'GET';
 
-    if (MUTATING_METHODS.has(method)) assertTrustedRequest(req, url);
+    if (MUTATING_METHODS.has(method)) assertTrustedRequest(req);
 
     if (path === '/api/health' && method === 'GET') {
       return json(res, await getHealth());
@@ -701,6 +724,7 @@ async function main() {
   const hostArg = process.argv.indexOf('--host');
   const hostRaw = hostArg !== -1 ? process.argv[hostArg + 1] : undefined;
   const host = hostRaw || DEFAULT_HOST;
+  configureTrust(port, config.trustedOrigins);
   startupHost = host;
   startupPort = port;
 

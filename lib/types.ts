@@ -43,6 +43,8 @@ export interface Config {
   };
   theme: string | null;
   port: number;
+  /** Extra origins (e.g. https://machine.ts.net) allowed to mutate and to reach the server. File-only; requires restart. */
+  trustedOrigins: string[];
 }
 
 export interface CacheFile {

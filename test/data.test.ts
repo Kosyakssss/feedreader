@@ -21,6 +21,7 @@ describe('pruneEntries', () => {
       theme: null,
       port: 8787,
       retention: { maxEntries: 2, maxDays: null },
+      trustedOrigins: [],
     };
 
     const out = pruneEntries(cache, state, config);
@@ -46,6 +47,7 @@ describe('pruneEntries', () => {
       theme: null,
       port: 8787,
       retention: { maxEntries: 2, maxDays: null },
+      trustedOrigins: [],
     };
 
     const out = pruneEntries(cache, state, config);

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import http from 'node:http';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -21,12 +22,27 @@ async function waitForServerReady(baseUrl: string): Promise<void> {
   throw new Error('Server did not become ready');
 }
 
+function rawRequest(options: { method: string; path: string; headers: Record<string, string> }): Promise<{ status: number }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: '127.0.0.1', port, setHost: false, ...options },
+      res => {
+        res.resume();
+        res.once('end', () => resolve({ status: res.statusCode ?? 0 }));
+      },
+    );
+    req.once('error', reject);
+    req.end();
+  });
+}
+
 beforeAll(async () => {
   dataDir = await mkdtemp(join(tmpdir(), 'feedreader-test-'));
   await mkdir(join(dataDir, 'themes'), { recursive: true });
   await writeFile(join(dataDir, 'feeds.json'), '{ "folders": [], "feeds": [] }\n');
   await writeFile(join(dataDir, 'state.json'), '{}\n');
   await writeFile(join(dataDir, 'cache.json'), '{ "entries": [], "lastFetched": {} }\n');
+  await writeFile(join(dataDir, 'config.json'), '{ "trustedOrigins": ["https://airm1.example.ts.net"] }\n');
   await writeFile(join(dataDir, 'themes', 'system.css'), '/* feedreader-system-theme */\nbody { color: CanvasText; }\n');
 
   port = 41000 + Math.floor(Math.random() * 5000);
@@ -65,6 +81,38 @@ describe('server hardening', () => {
       headers: { origin: 'https://evil.example' },
     });
     expect(res.status).toBe(403);
+  });
+
+  test('rejects requests with an unrecognized Host header', async () => {
+    const res = await rawRequest({ method: 'GET', path: '/api/feeds', headers: { host: `evil.com:${port}` } });
+    expect(res.status).toBe(403);
+  });
+
+  test('rejects rebinding-style reflected-host mutations', async () => {
+    const res = await rawRequest({
+      method: 'POST',
+      path: '/api/refresh',
+      headers: { host: `evil.com:${port}`, origin: `http://evil.com:${port}` },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test('ignores x-forwarded-host for trust decisions', async () => {
+    const res = await rawRequest({
+      method: 'POST',
+      path: '/api/refresh',
+      headers: { host: `127.0.0.1:${port}`, 'x-forwarded-host': 'evil.com', origin: 'http://evil.com' },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test('accepts mutations from a configured trusted origin', async () => {
+    const res = await rawRequest({
+      method: 'POST',
+      path: '/api/refresh',
+      headers: { host: 'airm1.example.ts.net', origin: 'https://airm1.example.ts.net' },
+    });
+    expect(res.status).toBe(202);
   });
 
   test('accepts same-origin mutating requests through an HTTPS reverse proxy', async () => {
