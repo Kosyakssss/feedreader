@@ -313,7 +313,7 @@ async function getHealth() {
   };
 }
 
-function parseBody(req: import('node:http').IncomingMessage): Promise<string> {
+function parseBody(req: import('node:http').IncomingMessage, res?: import('node:http').ServerResponse): Promise<string> {
   return new Promise((resolve, reject) => {
     const contentLength = Number(req.headers['content-length'] || 0);
     if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
@@ -330,8 +330,11 @@ function parseBody(req: import('node:http').IncomingMessage): Promise<string> {
       total += c.length;
       if (total > MAX_BODY_BYTES) {
         aborted = true;
+        req.pause();
         reject(new HttpError(413, 'Request body too large'));
-        req.destroy();
+        // Tear the socket down only after the 413 response has flushed,
+        // so clients see the status instead of ECONNRESET.
+        res?.once('finish', () => req.destroy());
       }
     });
     req.on('end', () => { if (!aborted) resolve(Buffer.concat(chunks).toString()); });
@@ -374,11 +377,11 @@ function renderBasePath(req: import('node:http').IncomingMessage, pathname: stri
   return '';
 }
 
-async function parseJSONBody(req: import('node:http').IncomingMessage): Promise<any> {
+async function parseJSONBody(req: import('node:http').IncomingMessage, res?: import('node:http').ServerResponse): Promise<any> {
   if (!hasJsonContentType(req)) {
     throw new HttpError(415, 'Content-Type must be application/json');
   }
-  const raw = await parseBody(req);
+  const raw = await parseBody(req, res);
   try {
     return JSON.parse(raw);
   } catch {
@@ -456,7 +459,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
 
     if (path === '/api/state' && method === 'POST') {
-      const body = await parseJSONBody(req);
+      const body = await parseJSONBody(req, res);
       if (!body || typeof body !== 'object' || !body.entries || typeof body.entries !== 'object' || Array.isArray(body.entries)) {
         throw new HttpError(400, 'Invalid state payload');
       }
@@ -479,7 +482,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
 
     if (path === '/api/feeds' && method === 'POST') {
-      const body = await parseJSONBody(req);
+      const body = await parseJSONBody(req, res);
       if (!body || typeof body !== 'object' || typeof body.url !== 'string') {
         throw new HttpError(400, 'Invalid feed payload');
       }
@@ -529,7 +532,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
 
     if (path === '/api/feeds/import' && method === 'POST') {
-      const raw = await parseBody(req);
+      const raw = await parseBody(req, res);
       let opmlText = raw;
       const boundary = req.headers['content-type']?.match(/boundary=(.+)/)?.[1];
       if (boundary) {
@@ -592,7 +595,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
 
     if (path === '/api/config' && method === 'PUT') {
-      const body = await parseJSONBody(req);
+      const body = await parseJSONBody(req, res);
       if (!body || typeof body !== 'object') throw new HttpError(400, 'Invalid config payload');
 
       const patch: any = {};

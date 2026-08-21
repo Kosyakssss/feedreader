@@ -83,6 +83,23 @@ describe('server hardening', () => {
     expect(res.status).toBe(403);
   });
 
+  test('responds with 413 (not a reset) for oversized streaming bodies', async () => {
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = http.request(
+        { host: '127.0.0.1', port, method: 'POST', path: '/api/state', setHost: false,
+          headers: { host: `127.0.0.1:${port}`, 'content-type': 'application/json' } },
+        res => {
+          res.resume();
+          res.once('end', () => resolve(res.statusCode ?? 0));
+        },
+      );
+      req.once('error', reject);
+      // No Content-Length header: the body streams and trips the byte cap mid-flight.
+      req.end('{"entries":{' + 'x'.repeat(3 * 1024 * 1024) + '}}');
+    });
+    expect(status).toBe(413);
+  });
+
   test('rejects requests with an unrecognized Host header', async () => {
     const res = await rawRequest({ method: 'GET', path: '/api/feeds', headers: { host: `evil.com:${port}` } });
     expect(res.status).toBe(403);
