@@ -13,6 +13,18 @@ const DEFAULT_CONFIG: Config = {
   trustedOrigins: [],
 };
 
+/** Single source of truth for config value ranges (shared with the PUT /api/config validator). */
+export const CONFIG_LIMITS = {
+  maxBulkOpen: { min: 1, max: 500 },
+  port: { min: 1, max: 65535 },
+  maxEntries: { min: 100, max: 100000 },
+  maxDays: { min: 1, max: 36500 },
+} as const;
+
+export function inLimit(value: number, limit: { min: number; max: number }): boolean {
+  return Number.isInteger(value) && value >= limit.min && value <= limit.max;
+}
+
 const TRANSACTION_FILE = 'transaction.json';
 type DataFilename = 'feeds.json' | 'state.json' | 'cache.json' | 'config.json';
 
@@ -164,11 +176,11 @@ function normalizeConfig(value: unknown): Config {
   if (!isRecord(value)) return config;
 
   const maxBulkOpen = value.maxBulkOpen;
-  if (typeof maxBulkOpen === 'number' && Number.isInteger(maxBulkOpen) && maxBulkOpen >= 1 && maxBulkOpen <= 500) {
+  if (typeof maxBulkOpen === 'number' && inLimit(maxBulkOpen, CONFIG_LIMITS.maxBulkOpen)) {
     config.maxBulkOpen = maxBulkOpen;
   }
   const port = value.port;
-  if (typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535) {
+  if (typeof port === 'number' && inLimit(port, CONFIG_LIMITS.port)) {
     config.port = port;
   }
   if (value.theme === null || value.theme === '') {
@@ -193,12 +205,12 @@ function normalizeConfig(value: unknown): Config {
   if (isRecord(value.retention)) {
     const maxEntries = value.retention.maxEntries;
     const maxDays = value.retention.maxDays;
-    if (typeof maxEntries === 'number' && Number.isInteger(maxEntries) && maxEntries >= 100 && maxEntries <= 100000) {
+    if (typeof maxEntries === 'number' && inLimit(maxEntries, CONFIG_LIMITS.maxEntries)) {
       config.retention.maxEntries = maxEntries;
     }
     if (maxDays === null) {
       config.retention.maxDays = null;
-    } else if (typeof maxDays === 'number' && Number.isInteger(maxDays) && maxDays >= 1 && maxDays <= 36500) {
+    } else if (typeof maxDays === 'number' && inLimit(maxDays, CONFIG_LIMITS.maxDays)) {
       config.retention.maxDays = maxDays;
     }
   }
@@ -293,6 +305,9 @@ export async function runDataMutation<T>(operation: () => Promise<T>): Promise<T
   return result;
 }
 
+// Latest-timestamp-wins merge for sync conflicts and re-reads. Correct only
+// because every writer (POST /api/state, refresh, prune) stamps readAt /
+// starredAt; hand-edited state files without timestamps lose every conflict.
 function mergeStateEntry(existing: EntryState | undefined, incoming: EntryState): EntryState {
   const next: EntryState = existing ? { ...existing } : {};
 

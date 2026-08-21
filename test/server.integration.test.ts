@@ -100,6 +100,11 @@ describe('server hardening', () => {
     expect(status).toBe(413);
   });
 
+  test('answers 405 for known API resources hit with the wrong method', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/feeds`, { method: 'DELETE' });
+    expect(res.status).toBe(405);
+  });
+
   test('rejects requests with an unrecognized Host header', async () => {
     const res = await rawRequest({ method: 'GET', path: '/api/feeds', headers: { host: `evil.com:${port}` } });
     expect(res.status).toBe(403);

@@ -5,6 +5,7 @@ import {
   readCache, mergeSyncConflicts, pruneEntries,
   readThemeCSS, generateId, getDataDir, runDataMutation, writeDataFiles,
 } from './lib/data.ts';
+import { CONFIG_LIMITS, inLimit } from './lib/data.ts';
 import { fetchAllFeeds, parseOPML, decodeHtmlEntities, probeFeed, publishedTime, resolveFeedInput } from './lib/feeds.ts';
 import type { FeedFetchResult } from './lib/feeds.ts';
 import { renderApp } from './lib/render.ts';
@@ -598,13 +599,13 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
 
       const patch: any = {};
       if ('maxBulkOpen' in body) {
-        if (!Number.isInteger(body.maxBulkOpen) || body.maxBulkOpen < 1 || body.maxBulkOpen > 500) {
+        if (typeof body.maxBulkOpen !== 'number' || !inLimit(body.maxBulkOpen, CONFIG_LIMITS.maxBulkOpen)) {
           throw new HttpError(400, 'Invalid maxBulkOpen');
         }
         patch.maxBulkOpen = body.maxBulkOpen;
       }
       if ('port' in body) {
-        if (!Number.isInteger(body.port) || body.port < 1 || body.port > 65535) {
+        if (typeof body.port !== 'number' || !inLimit(body.port, CONFIG_LIMITS.port)) {
           throw new HttpError(400, 'Invalid port');
         }
         patch.port = body.port;
@@ -626,13 +627,13 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         if (!r || typeof r !== 'object') throw new HttpError(400, 'Invalid retention config');
         const retentionPatch: any = {};
         if ('maxEntries' in r) {
-          if (!Number.isInteger(r.maxEntries) || r.maxEntries < 100 || r.maxEntries > 100000) {
+          if (typeof r.maxEntries !== 'number' || !inLimit(r.maxEntries, CONFIG_LIMITS.maxEntries)) {
             throw new HttpError(400, 'Invalid retention.maxEntries');
           }
           retentionPatch.maxEntries = r.maxEntries;
         }
         if ('maxDays' in r) {
-          if (r.maxDays !== null && (!Number.isInteger(r.maxDays) || r.maxDays < 1 || r.maxDays > 36500)) {
+          if (r.maxDays !== null && (typeof r.maxDays !== 'number' || !inLimit(r.maxDays, CONFIG_LIMITS.maxDays))) {
             throw new HttpError(400, 'Invalid retention.maxDays');
           }
           retentionPatch.maxDays = r.maxDays;
@@ -653,7 +654,11 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
 
     if (path.startsWith('/api/')) {
-      return err(res, 'Not found', 404);
+      // Known API resources respond 405 (not 404) on wrong methods.
+      const known = ['/api/health', '/api/entries', '/api/refresh', '/api/refresh/status', '/api/state',
+        '/api/feeds', '/api/feeds/import', '/api/feeds/export', '/api/config', '/api/theme'];
+      const isKnownResource = known.includes(path) || /^\/api\/feeds\/[^/]+$/.test(path);
+      return err(res, isKnownResource ? 'Method not allowed' : 'Not found', isKnownResource ? 405 : 404);
     }
 
     // SPA: serve the app for all non-API routes

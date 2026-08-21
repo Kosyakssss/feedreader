@@ -32,6 +32,11 @@ Point to a custom data directory:
 npm start -- --data /path/to/data
 ```
 
+Only run one feedreader process per data directory. Writes are atomic
+per-file with last-writer-wins semantics, so two live processes sharing a
+directory can interleave and silently lose state (the port only prevents
+address conflicts, not data races).
+
 ## macOS startup
 
 Install Feedreader as a user LaunchAgent:
@@ -80,8 +85,7 @@ All runtime data lives in `data/`. The feed list and system theme are versioned;
 
 ## Features
 
-- **Keyboard-driven**: `j`/`k` navigate, `o` open, `m` toggle read, `s` toggle star, `x` select, `a` mark all read, `r` refresh, `/` search, `?` shortcuts overlay
-- **Search**: instant, client-side, case-insensitive substring match on title + feed label
+- **Keyboard-driven**: `j`/`k` navigate, `o` open, `m` toggle read, `s` toggle star, `x` select, `a` mark all read, `r` refresh, `?` shortcuts overlay
 - **Bulk actions**: open all unread (tab cap configurable, default 20), mark read/starred, select multiple with `x`, shift-click, or drag-selecting the checkbox lane
 - **Feed auto-discovery**: fetches HTML, looks for `<link rel="alternate">`, tries common paths
 - **OPML import**: paste or upload OPML to add feeds in bulk; unsafe/local URLs are skipped

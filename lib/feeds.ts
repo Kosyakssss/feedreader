@@ -238,6 +238,10 @@ function safeEntryUrl(rawUrl: string): string {
 
 function buildEntry(feedId: string, rawSourceId: string, url: string, title: string, published: string): Entry {
   const safeUrl = safeEntryUrl(url);
+  // Identity fallback chain ends at title on purpose. Items with no guid,
+  // URL, or title have no stable identity at all: index- or content-based
+  // IDs would churn read/star state when feeds reorder or edit. Truly
+  // information-free duplicates collapse to one entry by design.
   const sourceId = rawSourceId || safeUrl || title;
   return {
     id: createEntryId(feedId, sourceId),
