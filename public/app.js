@@ -292,10 +292,11 @@ function renderFeeds() {
       healthStatus = '<span class="feed-ok">Updated ' + lastFetch + '</span>';
     }
     html += '<div class="feed-item"><div class="feed-info">'
-      + '<div class="feed-label-row"><a href="' + externalPath('/feed/' + esc(f.id)) + '" data-link class="feed-label">' + esc(f.label) + '</a>' + healthStatus + '</div>'
+      + '<div class="feed-label-row"><a href="' + externalPath('/feed/' + esc(f.id)) + '" data-link class="feed-label">' + esc(f.label) + '</a></div>'
       + '<div class="feed-meta">' + esc(f.url) + '</div></div>'
-      + '<div class="feed-actions">'
+      + '<div class="feed-actions"><div class="feed-status">'
       + (unread > 0 ? '<span class="feed-unread-badge">' + unread + '</span>' : '')
+      + healthStatus + '</div>'
       + '<button class="btn btn-feed-delete" data-delete-feed="' + esc(f.id) + '" title="Remove feed">✕</button>'
       + '</div></div>';
   }

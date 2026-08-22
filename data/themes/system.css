@@ -500,6 +500,13 @@ body {
   justify-content: space-between;
 }
 
+.feed-status {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--spacing-xs);
+}
+
 .feed-meta {
   font-size: 0.8em;
   color: var(--text-muted);
