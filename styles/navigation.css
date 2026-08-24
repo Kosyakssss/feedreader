@@ -7,6 +7,9 @@
 }
 
 .nav-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-weight: 600;
   color: var(--text);
   text-decoration: none;
@@ -16,11 +19,11 @@
 
 .refresh-status {
   --refresh-segment-width: 18px;
-  --refresh-inline-padding: 8px;
+  --refresh-inline-padding: 0px;
   appearance: none;
   position: relative;
   display: flex;
-  width: 104px;
+  width: 96px;
   align-self: stretch;
   align-items: center;
   justify-content: flex-end;
@@ -56,7 +59,7 @@
   border-radius: 999px;
   background: var(--border);
   transform-origin: center;
-  transition: width 240ms cubic-bezier(0.16, 1, 0.3, 1), opacity 160ms ease, background-color 120ms ease;
+  transition: width 240ms cubic-bezier(0.16, 1, 0.3, 1), opacity 160ms ease;
 }
 
 .refresh-bar::before {
@@ -65,14 +68,13 @@
   border-radius: inherit;
   background: var(--text-muted);
   content: "";
-  opacity: 0;
   transform: scaleX(0);
   transform-origin: left center;
+  transition: background-color 140ms ease;
 }
 
 .refresh-bar.is-active::before {
   animation: refresh-bar-scan 320ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  opacity: 1;
 }
 
 @keyframes refresh-bar-scan {
@@ -80,34 +82,32 @@
 }
 
 .refresh-bar.is-filled {
+  background: var(--border);
+}
+
+.refresh-bar.is-filled::before,
+.refresh-status[data-phase="complete"] .refresh-bar.is-filled::before,
+.refresh-status[data-phase="complete-collapsed"] .refresh-bar:first-child::before {
   background: var(--accent);
+  transform: scaleX(1);
 }
 
-.refresh-bar.is-filled::before {
-  opacity: 0;
-}
-
-.refresh-status[data-phase="complete"] .refresh-bar.is-filled,
-.refresh-status[data-phase="complete-collapsed"] .refresh-bar:first-child {
-  background: var(--accent);
-}
-
-.refresh-status[data-phase="warning"] .refresh-bar.is-filled,
-.refresh-status[data-phase="warning-collapsed"] .refresh-bar:first-child {
+.refresh-status[data-phase="warning"] .refresh-bar.is-filled::before,
+.refresh-status[data-phase="warning-collapsed"] .refresh-bar:first-child::before {
   background: var(--warning, #ad8301);
 }
 
-.refresh-status[data-phase="failed"] .refresh-bar.is-filled,
-.refresh-status[data-phase="failed-collapsed"] .refresh-bar:first-child {
+.refresh-status[data-phase="failed"] .refresh-bar.is-filled::before,
+.refresh-status[data-phase="failed-collapsed"] .refresh-bar:first-child::before {
   background: var(--danger);
 }
 
-.refresh-status:is([data-phase="idle"], [data-phase="loading"], [data-phase$="-collapsed"]) .refresh-graphic {
+.refresh-status:is([data-phase="idle"], [data-phase="loading"], [data-phase="resetting"], [data-phase$="-collapsed"]) .refresh-graphic {
   width: var(--refresh-segment-width);
   gap: 0;
 }
 
-.refresh-status:is([data-phase="idle"], [data-phase="loading"], [data-phase$="-collapsed"]) .refresh-bar:not(:first-child) {
+.refresh-status:is([data-phase="idle"], [data-phase="loading"], [data-phase="resetting"], [data-phase$="-collapsed"]) .refresh-bar:not(:first-child) {
   width: 0;
   opacity: 0;
 }
@@ -115,6 +115,13 @@
 .refresh-status[data-phase="idle"] .refresh-bar:first-child,
 .refresh-status[data-phase="loading"] .refresh-bar:first-child {
   background: var(--border);
+}
+
+.refresh-status.is-refresh-resetting .refresh-graphic,
+.refresh-status.is-refresh-resetting .refresh-bar,
+.refresh-status.is-refresh-resetting .refresh-bar::before {
+  animation: none;
+  transition: none;
 }
 
 .refresh-label {
@@ -143,6 +150,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .refresh-graphic,
+  .refresh-bar,
+  .refresh-bar::before,
+  .refresh-label {
+    transition: none;
+  }
+
   .refresh-bar.is-active::before {
     animation: none;
     transform: scaleX(1);
@@ -191,6 +205,17 @@
   min-height: 34px;
   min-width: 40px;
   transition: background var(--transition), transform 100ms ease, opacity var(--transition);
+}
+
+.nav-logo-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+
+.nav-menu-button .ui-icon {
+  width: 18px;
+  height: 18px;
 }
 
 .nav-menu-button:active {

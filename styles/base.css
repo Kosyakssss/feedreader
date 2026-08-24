@@ -15,6 +15,20 @@ body {
   color: var(--selection-text);
 }
 
+.icon-sprite {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ui-icon {
+  display: block;
+  width: 1em;
+  height: 1em;
+  flex: none;
+  overflow: visible;
+}
+
 /* Page title */
 .page-title {
   font-size: 1.3em;

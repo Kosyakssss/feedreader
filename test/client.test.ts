@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
+import { exceedsSelectionDragThreshold } from '../client/interactions.ts';
 import { activeRefreshSegment, filledRefreshSegments } from '../client/refresh-progress.ts';
 import { mergeRefreshEntries } from '../client/state.ts';
+import { renderApp } from '../lib/render.ts';
 import type { EnrichedEntry } from '../lib/types.ts';
 
 describe('refresh progress segments', () => {
@@ -61,6 +63,28 @@ describe('refresh entry reconciliation', () => {
 
     expect(result.entries).toEqual([updated]);
     expect(result.newIds.size).toBe(0);
+  });
+});
+
+describe('selection gesture threshold', () => {
+  test('keeps stationary and incidental movement on the native click path', () => {
+    expect(exceedsSelectionDragThreshold(20, 20, 20, 20)).toBe(false);
+    expect(exceedsSelectionDragThreshold(20, 20, 25, 23)).toBe(false);
+  });
+
+  test('enters drag selection only after deliberate movement', () => {
+    expect(exceedsSelectionDragThreshold(20, 20, 26, 20)).toBe(true);
+    expect(exceedsSelectionDragThreshold(20, 20, 25, 24)).toBe(true);
+  });
+});
+
+describe('code-native interface icons', () => {
+  test('renders the shared SVG symbols without platform text glyphs', () => {
+    const html = renderApp('/feedreader');
+    expect(html).toContain('id="icon-menu"');
+    expect(html).toContain('href="#icon-bookmark"');
+    expect(html).not.toContain('☰');
+    expect(html).not.toContain('🔖');
   });
 });
 

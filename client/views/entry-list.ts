@@ -2,6 +2,7 @@ import type { EnrichedEntry } from '../../lib/types.ts';
 import { animateEntryChanges } from '../motion/entries.ts';
 import { safeHttpUrl, timeAgo } from '../state.ts';
 import { button, element } from './dom.ts';
+import { icon, setIcon } from './icons.ts';
 
 export interface EntryListOptions {
   loading: boolean;
@@ -118,11 +119,13 @@ export class EntryListView {
     content.append(titleSlot, metadata);
 
     const actions = element('div', 'entry-actions');
-    const star = button('★', 'btn-icon btn-star');
+    const star = button('', 'btn-icon btn-star');
+    star.append(icon('star'));
     star.dataset.star = entry.id;
     star.title = 'Star';
     star.setAttribute('aria-label', 'Star entry');
-    const mark = button('●', 'btn-icon btn-mark');
+    const mark = button('', 'btn-icon btn-mark');
+    mark.append(icon('circle-filled'));
     mark.dataset.mark = entry.id;
     actions.append(star, mark);
 
@@ -175,6 +178,7 @@ export class EntryListView {
     if (star) {
       star.dataset.star = entry.id;
       star.classList.toggle('starred', starred);
+      setIcon(star, starred ? 'star-filled' : 'star');
       star.setAttribute('aria-pressed', String(starred));
       star.title = starred ? 'Unstar' : 'Star';
       star.setAttribute('aria-label', starred ? 'Unstar entry' : 'Star entry');
@@ -182,7 +186,7 @@ export class EntryListView {
     const mark = row.querySelector<HTMLButtonElement>('.btn-mark');
     if (mark) {
       mark.dataset.mark = entry.id;
-      mark.textContent = read ? '○' : '●';
+      setIcon(mark, read ? 'circle' : 'circle-filled');
       mark.title = read ? 'Mark unread' : 'Mark read';
       mark.setAttribute('aria-label', mark.title);
       mark.setAttribute('aria-pressed', String(read));

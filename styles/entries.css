@@ -99,17 +99,13 @@
   border-radius: 0;
   cursor: pointer;
   position: relative;
-  transition: background var(--transition), border-color var(--transition), opacity 100ms ease;
+  transition: background var(--transition), border-color var(--transition);
   flex-shrink: 0;
-  touch-action: none;
+  touch-action: manipulation;
 }
 
 .entry-checkbox input[type="checkbox"]:hover {
   border-color: var(--accent);
-}
-
-.entry-checkbox input[type="checkbox"]:active {
-  opacity: 0.75;
 }
 
 .entry-checkbox input[type="checkbox"]:checked {

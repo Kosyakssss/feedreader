@@ -132,6 +132,11 @@ export class ShellView {
     this.displayedSegments = 0;
     this.segmentStartedAt = performance.now();
     this.latestStatus = status;
+    this.refreshRoot.classList.add('is-refresh-resetting');
+    this.refreshRoot.dataset.phase = 'resetting';
+    this.bars.forEach(bar => bar.classList.remove('is-filled', 'is-active'));
+    void this.refreshGraphic.offsetWidth;
+    this.refreshRoot.classList.remove('is-refresh-resetting');
   }
 
   private advanceVisualProgress(): void {

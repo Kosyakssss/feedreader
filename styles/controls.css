@@ -68,6 +68,10 @@
 
 /* Buttons — iOS-style with press feedback */
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   background: var(--bg-card);
   border: 0.5px solid var(--border);
   color: var(--accent);
@@ -110,6 +114,9 @@
 }
 
 .btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   cursor: pointer;
@@ -119,6 +126,16 @@
   border-radius: 0;
   transition: color var(--transition), background var(--transition), transform 120ms ease;
   line-height: 1;
+}
+
+.btn-icon .ui-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.button-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .btn-icon:hover {

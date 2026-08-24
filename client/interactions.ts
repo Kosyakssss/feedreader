@@ -1,36 +1,70 @@
 import type { FeedreaderApp } from './app.ts';
 import { internalPath } from './router.ts';
 
+const SELECTION_DRAG_THRESHOLD = 6;
+
+interface PendingSelectionDrag {
+  checkbox: HTMLInputElement;
+  id: string;
+  index: number;
+  pointerId: number;
+  startX: number;
+  startY: number;
+}
+
 export function bindInteractions(app: FeedreaderApp): void {
   const root = document.querySelector<HTMLElement>('#app');
   if (!root) throw new Error('Application root is missing');
+  let pendingSelectionDrag: PendingSelectionDrag | null = null;
+  let dragCapture: HTMLInputElement | null = null;
 
   root.addEventListener('pointerdown', event => {
-    if (event.button !== 0 || event.shiftKey) return;
+    if (event.button !== 0 || event.shiftKey || event.pointerType !== 'mouse') return;
     const target = event.target instanceof Element ? event.target : null;
     const checkbox = target?.closest('.entry-checkbox')?.querySelector<HTMLInputElement>('[data-select]');
     const row = checkbox?.closest<HTMLElement>('.entry-card');
     const index = Number.parseInt(row?.dataset.idx ?? '', 10);
     if (!checkbox?.dataset.select || !Number.isInteger(index)) return;
-    event.preventDefault();
-    app.beginDragSelection(checkbox.dataset.select, index, event.pointerId);
-    root.setPointerCapture?.(event.pointerId);
+    pendingSelectionDrag = {
+      checkbox,
+      id: checkbox.dataset.select,
+      index,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
   });
 
-  root.addEventListener('pointermove', event => {
+  document.addEventListener('pointermove', event => {
+    const pending = pendingSelectionDrag;
+    if (pending?.pointerId === event.pointerId) {
+      if ((event.buttons & 1) === 0) {
+        pendingSelectionDrag = null;
+        return;
+      }
+      if (!exceedsSelectionDragThreshold(pending.startX, pending.startY, event.clientX, event.clientY)) return;
+      event.preventDefault();
+      pendingSelectionDrag = null;
+      dragCapture = pending.checkbox;
+      app.beginDragSelection(pending.id, pending.index, event.pointerId);
+      dragCapture.setPointerCapture?.(event.pointerId);
+    }
+
     const drag = app.state.selectionDrag;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
     const pointed = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('.entry-card');
     app.continueDragSelection(Number.parseInt(pointed?.dataset.idx ?? '', 10));
-  });
+  }, { passive: false });
 
   const endDrag = (event: PointerEvent) => {
+    if (pendingSelectionDrag?.pointerId === event.pointerId) pendingSelectionDrag = null;
     if (!app.endDragSelection(event.pointerId)) return;
-    root.releasePointerCapture?.(event.pointerId);
+    if (dragCapture?.hasPointerCapture?.(event.pointerId)) dragCapture.releasePointerCapture(event.pointerId);
+    dragCapture = null;
   };
-  root.addEventListener('pointerup', endDrag);
-  root.addEventListener('pointercancel', endDrag);
+  document.addEventListener('pointerup', endDrag);
+  document.addEventListener('pointercancel', endDrag);
 
   root.addEventListener('click', event => {
     const target = event.target instanceof Element ? event.target : null;
@@ -134,6 +168,15 @@ export function bindInteractions(app: FeedreaderApp): void {
   document.addEventListener('pointerdown', event => app.dismissKeyboardNavigation(event.pointerType), true);
   document.addEventListener('pointermove', event => app.dismissKeyboardNavigation(event.pointerType), { capture: true, passive: true });
   addEventListener('popstate', () => app.navigate(internalPath(location.pathname), false));
+}
+
+export function exceedsSelectionDragThreshold(
+  startX: number,
+  startY: number,
+  currentX: number,
+  currentY: number,
+): boolean {
+  return Math.hypot(currentX - startX, currentY - startY) >= SELECTION_DRAG_THRESHOLD;
 }
 
 function handleKeydown(app: FeedreaderApp, event: KeyboardEvent): void {

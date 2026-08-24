@@ -25,10 +25,12 @@
   }
 
   .refresh-status {
-    --refresh-segment-width: 14px;
-    width: 104px;
+    --refresh-segment-width: 28px;
+    --refresh-inline-padding: 4px;
+    width: 140px;
     flex: none;
     margin-left: 0;
+    margin-right: 8px;
   }
 
   .refresh-label {
@@ -91,6 +93,15 @@
   .entry-checkbox input[type="checkbox"] {
     width: 18px;
     height: 18px;
+  }
+
+  .entry-checkbox {
+    width: 44px;
+    height: 44px;
+    margin: -13px;
+    padding: 13px;
+    cursor: pointer;
+    justify-content: center;
   }
 
   .filter-tabs button {

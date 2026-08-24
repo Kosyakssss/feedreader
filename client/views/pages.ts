@@ -10,6 +10,7 @@ import {
 } from '../state.ts';
 import { button, element } from './dom.ts';
 import { EntryListView } from './entry-list.ts';
+import { appendTrailingIcon, icon } from './icons.ts';
 
 export interface PageUpdateOptions {
   animate?: boolean;
@@ -84,7 +85,6 @@ export class PageView {
     toolbar.querySelectorAll<HTMLButtonElement>('[data-refresh]').forEach(refresh => {
       const refreshing = !!state.refreshStatus?.refreshing;
       refresh.disabled = state.initialDataLoading || refreshing;
-      refresh.textContent = 'Refresh ↻';
       refresh.setAttribute('aria-label', refreshing ? 'Refreshing feeds' : 'Refresh feeds');
       if (refreshing) refresh.setAttribute('aria-busy', 'true');
       else refresh.removeAttribute('aria-busy');
@@ -122,11 +122,14 @@ function buildToolbar(state: AppState, showActions: boolean): HTMLElement {
 
   if (showActions) {
     const actions = element('div', 'timeline-actions');
-    const open = button('Open all unread ↗');
+    const open = button('Open all unread');
+    appendTrailingIcon(open, 'external-link');
     open.dataset.openall = '';
-    const mark = button('Mark all read ✓');
+    const mark = button('Mark all read');
+    appendTrailingIcon(mark, 'check');
     mark.dataset.markall = '';
-    const refresh = button('Refresh ↻');
+    const refresh = button('Refresh');
+    appendTrailingIcon(refresh, 'refresh');
     refresh.dataset.refresh = '';
     refresh.disabled = state.initialDataLoading || !!state.refreshStatus?.refreshing;
     refresh.setAttribute('aria-label', state.refreshStatus?.refreshing ? 'Refreshing feeds' : 'Refresh feeds');
@@ -200,7 +203,8 @@ function buildFeedRow(state: AppState, feed: Feed): HTMLElement {
   } else {
     status.append(element('span', 'feed-ok', `Updated ${lastFetch}${health?.entryCount === 0 && lastFetch !== 'never' ? ' · 0 items' : ''}`));
   }
-  const remove = button('✕', 'btn btn-feed-delete');
+  const remove = button('', 'btn btn-feed-delete');
+  remove.append(icon('close'));
   remove.dataset.deleteFeed = feed.id;
   remove.dataset.feedLabel = feed.label;
   remove.title = 'Remove feed';

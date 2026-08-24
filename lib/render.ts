@@ -1,3 +1,5 @@
+import { faviconDataUri, renderIcon, renderIconSprite } from './icons.ts';
+
 export function renderApp(basePath = '', assetVersion = ''): string {
   const assetQuery = assetVersion ? `?v=${encodeURIComponent(assetVersion)}` : '';
   return `<!DOCTYPE html>
@@ -5,7 +7,7 @@ export function renderApp(basePath = '', assetVersion = ''): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔖</text></svg>">
+<link rel="icon" href="${faviconDataUri()}">
 <title>Feedreader</title>
 <meta name="description" content="A personal feed reader">
 <meta name="application-name" content="Feedreader">
@@ -15,8 +17,9 @@ export function renderApp(basePath = '', assetVersion = ''): string {
 <link rel="stylesheet" href="${basePath}/app.css${assetQuery}">
 </head>
 <body>
+${renderIconSprite()}
 <nav class="nav-bar">
-  <a href="${basePath}/" class="nav-logo" data-link>🔖 Feedreader</a>
+  <a href="${basePath}/" class="nav-logo" data-link>${renderIcon('bookmark', 'ui-icon nav-logo-icon')}<span>Feedreader</span></a>
   <button class="refresh-status" id="refresh-status" type="button" data-refresh-status data-phase="loading" aria-label="Loading saved entries" aria-expanded="false">
     <span class="refresh-label" data-refresh-label></span>
     <span class="refresh-graphic" data-refresh-graphic aria-hidden="true">
@@ -27,7 +30,7 @@ export function renderApp(basePath = '', assetVersion = ''): string {
     </span>
     <span class="visually-hidden" data-refresh-live role="status" aria-live="polite"></span>
   </button>
-  <button class="nav-menu-button" type="button" aria-label="Open navigation" aria-expanded="false" data-nav-menu>☰</button>
+  <button class="nav-menu-button" type="button" aria-label="Open navigation" aria-expanded="false" data-nav-menu>${renderIcon('menu')}</button>
   <div class="nav-links">
     <a href="${basePath}/" data-link class="nav-link" data-nav="/">Timeline</a>
     <a href="${basePath}/starred" data-link class="nav-link" data-nav="/starred">Starred</a>
@@ -41,8 +44,8 @@ export function renderApp(basePath = '', assetVersion = ''): string {
   <span class="bulk-count" id="bulk-count"></span>
   <button class="btn" id="bulk-read" data-bulk="read">Mark read</button>
   <button class="btn" id="bulk-unread" data-bulk="unread">Mark unread</button>
-  <button class="btn" id="bulk-open" data-bulk="open">Open ↗</button>
-  <button class="btn" id="bulk-star" data-bulk="star">★ Star</button>
+  <button class="btn" id="bulk-open" data-bulk="open">Open${renderIcon('external-link', 'ui-icon button-icon')}</button>
+  <button class="btn" id="bulk-star" data-bulk="star">${renderIcon('star', 'ui-icon button-icon')}Star</button>
   <button class="btn" id="bulk-cancel" data-bulk="cancel">Cancel</button>
 </div>
 <div id="shortcuts-overlay" class="shortcuts-overlay" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title" hidden>

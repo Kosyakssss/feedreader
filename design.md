@@ -352,7 +352,10 @@ The entry checkbox is the explicit selection affordance. The surrounding selecti
 
 - Tap/click toggles one entry.
 - Shift-click selects or deselects the contiguous visible range from the last anchor.
-- Pointer drag beginning in the lane paints one selection state across rows.
+- A stationary press completes the browser's ordinary checkbox click sequence and toggles exactly once; it is never captured or rerendered on pointer-down.
+- Fine-pointer drag begins only after 6px of deliberate movement in the lane, then paints one selection state across rows.
+- Touch keeps native tap and vertical-scroll behavior. Touch drag does not enter selection-paint mode without a future explicit selection mode.
+- The compact selection label provides a 44×44px native hit surface around the unchanged visible checkbox without shifting row content.
 - Dragging outside the lane after capture may continue across rows; ordinary scrolling or text selection elsewhere must not start selection.
 - Checked, unchecked, pressed, focus-visible, and mixed bulk states have complete visuals.
 
@@ -434,11 +437,11 @@ This is the signature micro-interaction.
 
 Four segments are the default. They represent quartiles of total feed work, not four specific feeds.
 
-At regular width, each track is approximately 18×4px with a 4px gap. At compact width, each is approximately 14×4px. The graphic therefore stays legible without dominating the top bar. Tracks and fills use a full capsule radius; fills originate at the inline start so direction follows the document language.
+At regular width, each track is approximately 18×4px with a 4px gap. At compact width, each is approximately 28×4px so both running and collapsed states remain legible at phone scale. The entire hit region stays aligned to the navigation end, immediately before the compact menu trigger. Tracks and fills use a full capsule radius; fills originate at the inline start so direction follows the document language.
 
 #### Progress mapping
 
-For confirmed progress `p = completed / total`, the number of filled segments is `floor(p × 4)`, clamped to `0…4`. Completion always fills all four. Every segment is binary: it has no partially filled, clipped, or scaled state. Use tabular `completed/total` text when displayed. A feed completion that crosses a quartile advances the graphic immediately. Newly delivered entries may update the list independently.
+For confirmed progress `p = completed / total`, the number of filled segments is `floor(p × 4)`, clamped to `0…4`. Completion always fills all four. Every confirmed segment is binary: it is either entirely empty or entirely filled. The one active segment may use a transient dark scan from inline start to end to show current work; that scan is motion, not fractional feed progress. At confirmation, the same fill layer stays present and recolors in place, so no empty frame appears between scan and result. Use tabular `completed/total` text when displayed. A feed completion that crosses a quartile advances the graphic immediately. Newly delivered entries may update the list independently.
 
 #### State machine
 
@@ -447,7 +450,7 @@ For confirmed progress `p = completed / total`, the number of filled segments is
 | Saved data loading | One neutral capsule | Loading saved entries… | No fake progress |
 | Idle before refresh | One quiet collapsed capsule | Nothing, or last result on demand | Does not animate |
 | Starting | Capsule unfolds into four empty tracks | Starting refresh… | 180–240ms expansion |
-| Running | Whole tracks switch from empty to full at confirmed quartiles | Checking feeds `n/total` · `x new` | No partial segment and no progress interpolation |
+| Running | Confirmed tracks are full; the next track carries one dark start-to-end scan | Checking feeds `n/total` · `x new` | No fractional progress mapping and no layer reset between scan and confirmation |
 | Complete, no new items | Four full accent tracks become success, settle, then merge into one | Up to date | Hold full state briefly before collapse |
 | Complete with new items | Same completion, with a restrained count emphasis | `x new` | Count remains visible long enough to read |
 | Partially failed | Completed graphic resolves to warning rather than success | Checked · `n` failed, optionally preceded by `x new` | Detail lists failed feed names and errors |
