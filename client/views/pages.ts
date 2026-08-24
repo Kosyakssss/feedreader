@@ -82,8 +82,12 @@ export class PageView {
       filter.setAttribute('aria-pressed', String(active));
     });
     toolbar.querySelectorAll<HTMLButtonElement>('[data-refresh]').forEach(refresh => {
-      refresh.disabled = state.initialDataLoading || !!state.refreshStatus?.refreshing;
-      refresh.textContent = state.refreshStatus?.refreshing ? 'Refreshing…' : 'Refresh ↻';
+      const refreshing = !!state.refreshStatus?.refreshing;
+      refresh.disabled = state.initialDataLoading || refreshing;
+      refresh.textContent = 'Refresh ↻';
+      refresh.setAttribute('aria-label', refreshing ? 'Refreshing feeds' : 'Refresh feeds');
+      if (refreshing) refresh.setAttribute('aria-busy', 'true');
+      else refresh.removeAttribute('aria-busy');
     });
   }
 }
@@ -122,9 +126,11 @@ function buildToolbar(state: AppState, showActions: boolean): HTMLElement {
     open.dataset.openall = '';
     const mark = button('Mark all read ✓');
     mark.dataset.markall = '';
-    const refresh = button(state.refreshStatus?.refreshing ? 'Refreshing…' : 'Refresh ↻');
+    const refresh = button('Refresh ↻');
     refresh.dataset.refresh = '';
     refresh.disabled = state.initialDataLoading || !!state.refreshStatus?.refreshing;
+    refresh.setAttribute('aria-label', state.refreshStatus?.refreshing ? 'Refreshing feeds' : 'Refresh feeds');
+    if (state.refreshStatus?.refreshing) refresh.setAttribute('aria-busy', 'true');
     actions.append(open, mark, refresh);
     toolbar.append(actions);
   }
@@ -205,7 +211,7 @@ function buildFeedRow(state: AppState, feed: Feed): HTMLElement {
 }
 
 function buildSettingsPage(state: AppState): HTMLElement {
-  const page = element('div', 'page');
+  const page = element('div', 'page settings-page');
   page.dataset.page = 'settings';
   const form = element('form', 'settings-form');
   form.id = 'settings-form';

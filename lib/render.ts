@@ -1,4 +1,5 @@
-export function renderApp(basePath = ''): string {
+export function renderApp(basePath = '', assetVersion = ''): string {
+  const assetQuery = assetVersion ? `?v=${encodeURIComponent(assetVersion)}` : '';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -11,19 +12,19 @@ export function renderApp(basePath = ''): string {
 <meta property="og:title" content="Feedreader">
 <meta property="og:site_name" content="Feedreader">
 <link rel="stylesheet" href="${basePath}/api/theme" id="theme-link">
-<link rel="stylesheet" href="${basePath}/app.css">
+<link rel="stylesheet" href="${basePath}/app.css${assetQuery}">
 </head>
 <body>
 <nav class="nav-bar">
   <a href="${basePath}/" class="nav-logo" data-link>🔖 Feedreader</a>
-  <div class="refresh-status" id="refresh-status" data-phase="loading">
+  <div class="refresh-status" id="refresh-status" data-phase="loading" tabindex="0" aria-label="Loading saved entries">
+    <span class="refresh-label" data-refresh-label></span>
     <span class="refresh-graphic" data-refresh-graphic aria-hidden="true">
       <span class="refresh-bar"></span>
       <span class="refresh-bar"></span>
       <span class="refresh-bar"></span>
       <span class="refresh-bar"></span>
     </span>
-    <span class="refresh-label" data-refresh-label>Loading saved entries…</span>
     <span class="visually-hidden" data-refresh-live role="status" aria-live="polite"></span>
   </div>
   <button class="nav-menu-button" type="button" aria-label="Open navigation" aria-expanded="false" data-nav-menu>☰</button>
@@ -64,7 +65,7 @@ export function renderApp(basePath = ''): string {
 </div>
 <div class="toast-container" id="toast-container"></div>
 
-<script src="${basePath}/app.js" type="module"></script>
+<script src="${basePath}/app.js${assetQuery}" type="module"></script>
 </body>
 </html>`;
 }

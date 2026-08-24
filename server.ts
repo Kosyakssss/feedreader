@@ -404,6 +404,11 @@ function clientAssetResponse(req: Request, kind: keyof ClientAssets): Response {
   );
 }
 
+function clientAssetVersion(): string {
+  if (!clientAssets) return '';
+  return `${clientAssets.script.etag}:${clientAssets.style.etag}`.replace(/[^a-zA-Z0-9_-]/g, '');
+}
+
 async function entriesResponse(req: Request, feed?: string): Promise<Response> {
   if (feed) return encodedJsonResponse(req, await getEntries(feed));
   const fingerprint = await dataFingerprint(['cache.json', 'state.json', 'feeds.json']);
@@ -698,8 +703,9 @@ async function handleRequest(req: Request, server: Bun.Server<undefined>): Promi
     }
 
     // SPA: serve the app for all non-API routes
-    const html = renderApp(renderBasePath(req, url.pathname));
+    const html = renderApp(renderBasePath(req, url.pathname), clientAssetVersion());
     return new Response(html, { headers: {
+      'cache-control': 'no-cache',
       'content-type': 'text/html; charset=utf-8',
       'content-security-policy':
         "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'",

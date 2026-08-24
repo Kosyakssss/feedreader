@@ -47,6 +47,8 @@ body {
   max-width: 720px;
   margin: 0 auto;
   padding: var(--spacing-md);
+  container-name: page;
+  container-type: inline-size;
 }
 
 .search-input {
@@ -56,11 +58,10 @@ body {
 }
 
 .toolbar {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--spacing-sm);
-  row-gap: var(--spacing-xs);
   margin-bottom: var(--spacing-sm);
 }
 
@@ -72,7 +73,7 @@ body {
 .timeline-actions {
   display: flex;
   gap: var(--spacing-xs);
-  margin-left: auto;
+  justify-self: end;
 }
 
 .entry-list {
@@ -189,9 +190,17 @@ body {
 
 .settings-form {
   display: flex;
+  width: 100%;
   max-width: 400px;
+  margin-inline: auto;
   flex-direction: column;
   gap: var(--spacing-md);
+}
+
+.settings-page .page-header {
+  width: 100%;
+  max-width: 400px;
+  margin-inline: auto;
 }
 
 .settings-field {

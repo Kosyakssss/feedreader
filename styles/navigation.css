@@ -16,11 +16,12 @@
 
 .refresh-status {
   --refresh-segment-width: 18px;
+  position: relative;
   display: flex;
-  min-width: 18px;
+  min-width: var(--refresh-segment-width);
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 0;
   color: var(--text-muted);
   font-size: 0.8em;
   font-variant-numeric: tabular-nums;
@@ -37,6 +38,8 @@
 }
 
 .refresh-bar {
+  position: relative;
+  overflow: hidden;
   width: var(--refresh-segment-width);
   height: 4px;
   flex: none;
@@ -46,12 +49,37 @@
   transition: width 240ms cubic-bezier(0.16, 1, 0.3, 1), opacity 160ms ease, background-color 120ms ease;
 }
 
+.refresh-bar::before {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--text-muted);
+  content: "";
+  opacity: 0;
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+.refresh-bar.is-active::before {
+  animation: refresh-bar-scan 700ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  opacity: 1;
+}
+
+@keyframes refresh-bar-scan {
+  to { transform: scaleX(1); }
+}
+
 .refresh-bar.is-filled {
   background: var(--accent);
 }
 
-.refresh-status[data-phase="complete"] .refresh-bar.is-filled {
-  background: var(--success);
+.refresh-bar.is-filled::before {
+  opacity: 0;
+}
+
+.refresh-status[data-phase="complete"] .refresh-bar.is-filled,
+.refresh-status[data-phase="complete-collapsed"] .refresh-bar:first-child {
+  background: var(--accent);
 }
 
 .refresh-status[data-phase="warning"] .refresh-bar.is-filled,
@@ -64,12 +92,12 @@
   background: var(--danger);
 }
 
-.refresh-status:is([data-phase="idle"], [data-phase="loading"], [data-phase="failed-collapsed"], [data-phase="warning-collapsed"]) .refresh-graphic {
+.refresh-status:is([data-phase="idle"], [data-phase="loading"], [data-phase$="-collapsed"]) .refresh-graphic {
   width: var(--refresh-segment-width);
   gap: 0;
 }
 
-.refresh-status:is([data-phase="idle"], [data-phase="loading"], [data-phase="failed-collapsed"], [data-phase="warning-collapsed"]) .refresh-bar:not(:first-child) {
+.refresh-status:is([data-phase="idle"], [data-phase="loading"], [data-phase$="-collapsed"]) .refresh-bar:not(:first-child) {
   width: 0;
   opacity: 0;
 }
@@ -80,9 +108,30 @@
 }
 
 .refresh-label {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 7px);
+  width: max-content;
+  max-width: 12rem;
   overflow: hidden;
+  opacity: 0;
   text-overflow: ellipsis;
+  pointer-events: none;
+  transform: translate(3px, -50%);
+  transition: opacity 140ms ease, transform 240ms cubic-bezier(0.16, 1, 0.3, 1);
   white-space: nowrap;
+}
+
+.refresh-status[data-phase$="-collapsed"]:is(:hover, :focus) .refresh-label {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .refresh-bar.is-active::before {
+    animation: none;
+    transform: scaleX(1);
+  }
 }
 
 .visually-hidden {

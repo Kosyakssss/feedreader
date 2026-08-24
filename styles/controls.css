@@ -89,6 +89,12 @@
   opacity: 0.8;
 }
 
+.btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+  transform: none;
+}
+
 .btn-primary {
   background: var(--accent);
   border-color: transparent;

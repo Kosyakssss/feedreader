@@ -6,6 +6,8 @@
   }
 
   .nav-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     padding: var(--spacing-xs) var(--spacing-sm);
   }
 
@@ -17,11 +19,14 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    margin-left: auto;
+    justify-self: end;
+    margin-left: 0;
   }
 
   .refresh-status {
     --refresh-segment-width: 14px;
+    justify-self: center;
+    margin-left: 0;
     max-width: 42vw;
   }
 
@@ -96,31 +101,10 @@
     height: 18px;
   }
 
-  .toolbar {
-    gap: var(--spacing-xs);
-  }
-
-  .filter-tabs {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    width: 100%;
-  }
-
   .filter-tabs button {
     background: var(--bg-card);
     border: 0.5px solid var(--border);
     padding: 6px var(--spacing-sm);
-    text-align: center;
-  }
-
-  .timeline-actions {
-    flex-wrap: wrap;
-    margin-left: 0;
-    width: 100%;
-  }
-
-  .timeline-actions .btn {
-    flex: 1;
     text-align: center;
   }
 
@@ -225,5 +209,29 @@
 
   .toast {
     width: 100%;
+  }
+}
+
+@container page (max-width: 620px) {
+  .toolbar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--spacing-xs);
+  }
+
+  .filter-tabs,
+  .timeline-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .timeline-actions {
+    justify-self: stretch;
+  }
+
+  .filter-tabs button,
+  .timeline-actions .btn {
+    min-width: 0;
+    text-align: center;
   }
 }

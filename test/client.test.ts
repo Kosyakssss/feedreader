@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { filledRefreshSegments } from '../client/refresh-progress.ts';
+import { activeRefreshSegment, filledRefreshSegments } from '../client/refresh-progress.ts';
 import { mergeRefreshEntries } from '../client/state.ts';
 import type { EnrichedEntry } from '../lib/types.ts';
 
@@ -30,6 +30,15 @@ describe('refresh progress segments', () => {
     expect(filledRefreshSegments(12, 10)).toEqual([true, true, true, true]);
     expect(filledRefreshSegments(-1, 10)).toEqual([false, false, false, false]);
     expect(filledRefreshSegments(1, 0)).toEqual([false, false, false, false]);
+  });
+
+  test('animates only the next incomplete segment', () => {
+    expect(activeRefreshSegment(0, 10)).toBe(0);
+    expect(activeRefreshSegment(3, 10)).toBe(1);
+    expect(activeRefreshSegment(5, 10)).toBe(2);
+    expect(activeRefreshSegment(8, 10)).toBe(3);
+    expect(activeRefreshSegment(10, 10)).toBeNull();
+    expect(activeRefreshSegment(0, 0)).toBeNull();
   });
 });
 

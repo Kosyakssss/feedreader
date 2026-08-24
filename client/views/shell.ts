@@ -1,9 +1,8 @@
 import type { AppState, RefreshStatus } from '../state.ts';
-import { filledRefreshSegments } from '../refresh-progress.ts';
+import { activeRefreshSegment, filledRefreshSegments } from '../refresh-progress.ts';
 import { requiredElement } from './dom.ts';
 
 const COMPLETE_HOLD_MS = 700;
-const RESULT_TEXT_HOLD_MS = 2500;
 
 export class ShellView {
   private readonly refreshRoot = requiredElement<HTMLElement>('#refresh-status');
@@ -15,7 +14,6 @@ export class ShellView {
   private readonly bulkCount = requiredElement<HTMLElement>('#bulk-count');
   private readonly shortcuts = requiredElement<HTMLElement>('#shortcuts-overlay');
   private collapseTimer: number | null = null;
-  private resultTimer: number | null = null;
   private lastRunning = false;
   private lastRunId: string | null = null;
 
@@ -94,9 +92,14 @@ export class ShellView {
       this.refreshGraphic.setAttribute('aria-valuemax', String(status.total || 0));
       this.refreshGraphic.setAttribute('aria-valuenow', String(status.completed || 0));
       const filled = filledRefreshSegments(status.completed, status.total);
-      this.bars.forEach((bar, index) => bar.classList.toggle('is-filled', filled[index] ?? false));
+      const active = activeRefreshSegment(status.completed, status.total);
+      this.bars.forEach((bar, index) => {
+        bar.classList.toggle('is-filled', filled[index] ?? false);
+        bar.classList.toggle('is-active', index === active);
+      });
       const text = refreshText(status);
-      this.refreshLabel.textContent = text;
+      this.refreshLabel.textContent = '';
+      this.refreshRoot.setAttribute('aria-label', text);
       this.refreshLive.textContent = text;
       this.refreshRoot.title = failureTitle(status);
       this.lastRunning = true;
@@ -105,26 +108,25 @@ export class ShellView {
 
     if (this.lastRunning || isNewRun) {
       this.lastRunning = false;
-      this.refreshRoot.dataset.phase = status.error ? 'failed' : status.failures.length ? 'warning' : 'complete';
+      const outcome = refreshOutcome(status);
+      this.refreshRoot.dataset.phase = outcome;
       this.refreshGraphic.removeAttribute('role');
       this.refreshGraphic.removeAttribute('aria-valuemin');
       this.refreshGraphic.removeAttribute('aria-valuemax');
       this.refreshGraphic.removeAttribute('aria-valuenow');
       this.refreshGraphic.setAttribute('aria-hidden', 'true');
-      const finalSegments = status.error
-        ? filledRefreshSegments(status.completed, status.total)
-        : this.bars.map(() => true);
-      this.bars.forEach((bar, index) => bar.classList.toggle('is-filled', finalSegments[index] ?? false));
+      this.bars.forEach(bar => {
+        bar.classList.add('is-filled');
+        bar.classList.remove('is-active');
+      });
       const text = refreshText(status);
-      this.refreshLabel.textContent = text;
+      this.refreshLabel.textContent = collapsedRefreshText(status);
+      this.refreshRoot.setAttribute('aria-label', collapsedRefreshText(status));
       this.refreshLive.textContent = text;
       this.refreshRoot.title = failureTitle(status);
       this.collapseTimer = window.setTimeout(() => {
-        this.refreshRoot.dataset.phase = status.error ? 'failed-collapsed' : status.failures.length ? 'warning-collapsed' : 'idle';
+        this.refreshRoot.dataset.phase = `${outcome}-collapsed`;
       }, COMPLETE_HOLD_MS);
-      if (!status.error && status.failures.length === 0) {
-        this.resultTimer = window.setTimeout(() => { this.refreshLabel.textContent = ''; }, RESULT_TEXT_HOLD_MS);
-      }
       return;
     }
 
@@ -135,16 +137,27 @@ export class ShellView {
     this.clearTimers();
     this.refreshRoot.dataset.phase = phase;
     this.refreshLabel.textContent = text;
+    this.refreshRoot.setAttribute('aria-label', text || 'Feed refresh status');
     this.refreshLive.textContent = text;
-    this.bars.forEach(bar => bar.classList.remove('is-filled'));
+    this.bars.forEach(bar => bar.classList.remove('is-filled', 'is-active'));
   }
 
   private clearTimers(): void {
     if (this.collapseTimer !== null) window.clearTimeout(this.collapseTimer);
-    if (this.resultTimer !== null) window.clearTimeout(this.resultTimer);
     this.collapseTimer = null;
-    this.resultTimer = null;
   }
+}
+
+function refreshOutcome(status: RefreshStatus): 'complete' | 'warning' | 'failed' {
+  if (status.error || (status.total > 0 && status.failed >= status.total)) return 'failed';
+  return status.failed > 0 || status.failures.length > 0 ? 'warning' : 'complete';
+}
+
+function collapsedRefreshText(status: RefreshStatus): string {
+  const failed = Math.max(status.failed, status.failures.length);
+  if (status.error || (status.total > 0 && failed >= status.total)) return 'All feeds failed';
+  if (failed > 0) return `${failed} ${failed === 1 ? 'feed' : 'feeds'} failing`;
+  return 'All refreshed';
 }
 
 function refreshText(status: RefreshStatus): string {

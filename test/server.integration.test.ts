@@ -157,8 +157,8 @@ describe('server hardening', () => {
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain('href="/feedreader/api/theme"');
-    expect(html).toContain('href="/feedreader/app.css"');
-    expect(html).toContain('<script src="/feedreader/app.js" type="module"></script>');
+    expect(html).toContain('href="/feedreader/app.css?v=');
+    expect(html).toContain('<script src="/feedreader/app.js?v=');
 
     const api = await fetch(`http://127.0.0.1:${port}/feedreader/api/state`, {
       method: 'POST',
@@ -192,8 +192,8 @@ describe('server hardening', () => {
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain('href="/feedreader/api/theme"');
-    expect(html).toContain('href="/feedreader/app.css"');
-    expect(html).toContain('<script src="/feedreader/app.js" type="module"></script>');
+    expect(html).toContain('href="/feedreader/app.css?v=');
+    expect(html).toContain('<script src="/feedreader/app.js?v=');
   });
 
   test('requires JSON content type for JSON endpoints', async () => {
