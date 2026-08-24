@@ -67,9 +67,7 @@ export class FeedreaderApp {
     this.state.focusedEntryId = null;
     this.state.keyboardNavigationActive = false;
     this.shell.setNavigationOpen(false);
-    const update = () => this.render({ rebuild: true });
-    if (document.startViewTransition) document.startViewTransition(update);
-    else update();
+    this.render({ rebuild: true });
     if (push) pushRoute(path);
   }
 

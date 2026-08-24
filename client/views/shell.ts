@@ -4,6 +4,8 @@ import { requiredElement } from './dom.ts';
 
 const SEGMENT_SCAN_MS = 320;
 const COMPLETE_HOLD_MS = 700;
+const TOAST_VISIBLE_MS = 2500;
+const TOAST_EXIT_MS = 180;
 const COMPACT_LAYOUT_QUERY = '(max-width: 699px)';
 
 export class ShellView {
@@ -45,7 +47,8 @@ export class ShellView {
     toast.className = 'toast';
     toast.textContent = message;
     requiredElement('#toast-container').append(toast);
-    window.setTimeout(() => toast.remove(), 2500);
+    window.setTimeout(() => toast.classList.add('is-leaving'), TOAST_VISIBLE_MS - TOAST_EXIT_MS);
+    window.setTimeout(() => toast.remove(), TOAST_VISIBLE_MS);
   }
 
   setNavigationOpen(open: boolean): void {

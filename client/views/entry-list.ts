@@ -56,7 +56,7 @@ export class EntryListView {
       this.updateRow(row, entry, index, options);
       orderedRows.push(row);
     });
-    this.list.replaceChildren(...orderedRows);
+    reconcileRowOrder(this.list, orderedRows);
 
     this.updateLoadMore(options.totalCount, options.loadLimit);
 
@@ -192,4 +192,11 @@ export class EntryListView {
       mark.setAttribute('aria-pressed', String(read));
     }
   }
+}
+
+function reconcileRowOrder(list: HTMLDivElement, rows: readonly HTMLDivElement[]): void {
+  rows.forEach((row, index) => {
+    const current = list.children.item(index);
+    if (current !== row) list.insertBefore(row, current);
+  });
 }

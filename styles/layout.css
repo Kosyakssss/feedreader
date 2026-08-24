@@ -159,31 +159,44 @@ body {
   flex-direction: column;
 }
 
+.feed-list-header,
 .feed-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 190px 40px;
   align-items: center;
-  justify-content: space-between;
   gap: var(--spacing-sm);
 }
 
 .feed-info {
   min-width: 0;
-  flex: 1;
 }
 
-.feed-actions {
-  display: flex;
+.feed-list-header-metrics,
+.feed-metrics {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
   align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.feed-tools,
+.add-form,
+.feed-file-actions {
+  display: flex;
   gap: var(--spacing-xs);
 }
 
-.add-form {
-  display: flex;
-  gap: var(--spacing-sm);
+.feed-tools {
+  align-items: stretch;
   margin-bottom: var(--spacing-md);
 }
 
 .add-form input {
+  flex: 1;
+}
+
+.add-form {
+  min-width: 0;
   flex: 1;
 }
 

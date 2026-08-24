@@ -7,16 +7,19 @@
 }
 
 .feed-file-actions {
-  display: flex;
-  gap: var(--spacing-sm);
-  margin-bottom: var(--spacing-md);
+  flex: none;
+}
+
+.feed-tools .search-input {
+  margin-bottom: 0;
 }
 
 .feed-item {
   background: var(--bg-card);
   border: 0.5px solid var(--border);
   border-radius: 0;
-  padding: var(--spacing-md);
+  min-height: 58px;
+  padding: 9px var(--spacing-sm);
   transition: background var(--transition);
 }
 
@@ -38,6 +41,7 @@
 }
 
 .feed-label {
+  display: block;
   font-weight: 600;
   color: var(--text);
   min-width: 0;
@@ -51,20 +55,6 @@
   color: var(--accent);
 }
 
-.feed-label-row {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  justify-content: space-between;
-}
-
-.feed-status {
-  align-items: center;
-  display: flex;
-  flex-shrink: 0;
-  gap: var(--spacing-xs);
-}
-
 .feed-meta {
   font-size: 0.8em;
   color: var(--text-muted);
@@ -73,48 +63,58 @@
   white-space: nowrap;
 }
 
-.feed-unread-badge {
-  background: var(--accent);
-  color: var(--on-accent);
+.feed-list-header {
+  padding: 0 var(--spacing-sm) 6px;
+  color: var(--text-muted);
   font-size: 0.7em;
-  padding: 2px 7px;
-  border-radius: 0;
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.035em;
 }
 
-.feed-error {
-  background: var(--danger-soft);
+.feed-list-header-metrics,
+.feed-metrics {
+  text-align: right;
+}
+
+.feed-metrics {
+  color: var(--text-muted);
+  font-size: 0.76em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.feed-unread.has-unread {
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.feed-unread-context,
+.feed-health-prefix {
+  display: none;
+}
+
+.feed-health.has-error {
   color: var(--danger);
-  font-size: 0.75em;
-  font-weight: 500;
-  padding: 2px 7px;
-  border-radius: 0;
-  white-space: nowrap;
+  font-weight: 600;
 }
 
-@media (prefers-color-scheme: dark) {
-  .feed-error {
-    color: var(--danger);
-  }
+.btn-feed-delete {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  color: var(--text-muted);
 }
 
-.feed-ok {
-  background: var(--success-soft);
-  color: var(--success);
-  font-size: 0.75em;
-  font-weight: 500;
-  padding: 2px 7px;
-  border-radius: 0;
-  white-space: nowrap;
+.btn-feed-delete .ui-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.btn-feed-delete:hover {
+  color: var(--danger);
 }
 
 .feed-file-actions .btn {
+  min-width: 0;
   text-align: center;
-}
-
-@media (prefers-color-scheme: dark) {
-  .feed-ok {
-    color: var(--success);
-  }
 }

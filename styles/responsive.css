@@ -82,12 +82,17 @@
   }
 
   .btn-icon {
-    min-width: 36px;
-    min-height: 36px;
+    min-width: 44px;
+    min-height: 44px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     padding: 0;
+  }
+
+  .entry-actions .btn-icon {
+    width: 44px;
+    height: 44px;
   }
 
   .entry-checkbox input[type="checkbox"] {
@@ -160,19 +165,16 @@
     grid-column: 1 / -1;
   }
 
-  .feed-item {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: var(--spacing-xs);
-    padding: 8px var(--spacing-sm);
+  .feed-list-header {
+    display: none;
   }
 
-  .feed-label-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 6px;
-    min-width: 0;
+  .feed-item {
+    grid-template-columns: minmax(0, 1fr) 44px;
+    align-items: center;
+    gap: 2px var(--spacing-xs);
+    min-height: 64px;
+    padding: 8px var(--spacing-sm);
   }
 
   .feed-label {
@@ -187,36 +189,54 @@
     min-width: 0;
   }
 
-  .feed-actions {
-    gap: var(--spacing-xs);
+  .feed-metrics {
+    display: flex;
+    grid-column: 1;
+    gap: var(--spacing-sm);
+    justify-content: flex-start;
+    text-align: left;
   }
 
   .btn-feed-delete {
-    align-items: center;
-    display: inline-flex;
-    aspect-ratio: 1;
-    justify-content: center;
-    padding: 0;
-    width: 34px;
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    width: 44px;
+    height: 44px;
   }
 
-  .feed-unread-badge {
-    align-self: center;
+  .feed-unread-context,
+  .feed-health-prefix {
+    display: inline;
   }
 
-  .feed-file-actions,
-  .add-form {
+  .feed-unread:not(.has-unread) {
+    display: none;
+  }
+
+  .feed-tools {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--spacing-xs);
   }
 
   .add-form {
+    display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .feed-file-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .add-form input {
     min-width: 0;
+    font-size: 16px;
+  }
+
+  .settings-form input,
+  .settings-form select {
+    font-size: 16px;
   }
 
   .shortcuts-panel {

@@ -1,9 +1,3 @@
-/* View transition */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: var(--transition);
-}
-
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;

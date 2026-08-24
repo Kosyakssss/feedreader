@@ -143,14 +143,30 @@ function buildToolbar(state: AppState, showActions: boolean): HTMLElement {
 function buildFeedsPage(state: AppState): HTMLElement {
   const page = element('div', 'page feeds-page');
   page.dataset.page = 'feeds';
+  const unreadByFeed = new Map<string, number>();
+  for (const entry of state.entries) {
+    if (!entry.state?.read) unreadByFeed.set(entry.feedId, (unreadByFeed.get(entry.feedId) ?? 0) + 1);
+  }
+  const unreadTotal = [...unreadByFeed.values()].reduce((sum, count) => sum + count, 0);
+  const issueCount = state.feeds.feeds.reduce((count, feed) => count + (state.feeds.health?.[feed.id]?.error ? 1 : 0), 0);
+
   const header = element('div', 'page-header feeds-header');
   const heading = element('div');
-  heading.append(element('h1', 'page-title', 'Feeds'), element('div', 'feeds-subtitle', `${state.feeds.feeds.length} sources`));
+  const summary = [
+    `${state.feeds.feeds.length} sources`,
+    `${unreadTotal} unread`,
+    ...(issueCount > 0 ? [`${issueCount} ${issueCount === 1 ? 'issue' : 'issues'}`] : []),
+  ];
+  heading.append(element('h1', 'page-title', 'Feeds'), element('div', 'feeds-subtitle', summary.join(' · ')));
   header.append(heading);
 
+  const tools = element('div', 'feed-tools');
   const addForm = element('form', 'add-form');
   addForm.id = 'add-feed-form';
+  const inputLabel = element('label', 'visually-hidden', 'Feed or site address');
+  inputLabel.htmlFor = 'add-feed-url';
   const input = element('input', 'search-input');
+  input.id = 'add-feed-url';
   input.name = 'url';
   input.placeholder = 'Feed, site URL, or @handle…';
   input.required = true;
@@ -160,58 +176,80 @@ function buildFeedsPage(state: AppState): HTMLElement {
   addForm.append(input, add);
 
   const fileActions = element('div', 'feed-file-actions');
-  const importLabel = element('label', 'btn', 'Import OPML');
+  const importButton = button('Import OPML');
+  importButton.dataset.importFeeds = '';
   const opml = element('input');
   opml.type = 'file';
   opml.accept = '.opml,.xml';
   opml.id = 'opml-input';
   opml.hidden = true;
-  importLabel.append(opml);
   const exportLink = element('a', 'btn', 'Export OPML');
   exportLink.href = externalPath('/api/feeds/export');
   exportLink.setAttribute('download', 'feedreader.opml');
-  fileActions.append(importLabel, exportLink);
+  fileActions.append(importButton, opml, exportLink);
+  tools.append(addForm, fileActions);
 
   const list = element('div', 'feed-list');
-  for (const feed of state.feeds.feeds) list.append(buildFeedRow(state, feed));
+  list.setAttribute('role', 'list');
+  if (state.feeds.feeds.length > 0) list.append(buildFeedListHeader());
+  for (const feed of state.feeds.feeds) list.append(buildFeedRow(state, feed, unreadByFeed.get(feed.id) ?? 0));
   if (state.feeds.feeds.length === 0) list.append(element('div', 'empty-state', 'No feeds yet. Add one above!'));
-  page.append(header, addForm, fileActions, list);
+  addForm.prepend(inputLabel);
+  page.append(header, tools, list);
   return page;
 }
 
-function buildFeedRow(state: AppState, feed: Feed): HTMLElement {
+function buildFeedListHeader(): HTMLElement {
+  const header = element('div', 'feed-list-header');
+  header.setAttribute('aria-hidden', 'true');
+  header.append(element('span', undefined, 'Subscription'));
+  const metrics = element('div', 'feed-list-header-metrics');
+  metrics.append(element('span', undefined, 'Unread'), element('span', undefined, 'Checked'));
+  header.append(metrics, element('span'));
+  return header;
+}
+
+function buildFeedRow(state: AppState, feed: Feed, unread: number): HTMLElement {
   const row = element('div', 'feed-item');
+  row.setAttribute('role', 'listitem');
   const info = element('div', 'feed-info');
-  const labelRow = element('div', 'feed-label-row');
   const label = element('a', 'feed-label', feed.label);
   label.href = externalPath(`/feed/${encodeURIComponent(feed.id)}`);
   label.dataset.link = '';
   label.dir = 'auto';
-  labelRow.append(label);
-  info.append(labelRow, element('div', 'feed-meta', feed.url));
+  const meta = element('div', 'feed-meta', displayFeedUrl(feed.url));
+  meta.title = feed.url;
+  info.append(label, meta);
 
-  const actions = element('div', 'feed-actions');
-  const status = element('div', 'feed-status');
-  const unread = state.entries.reduce((count, entry) => count + (entry.feedId === feed.id && !entry.state?.read ? 1 : 0), 0);
-  if (unread > 0) status.append(element('span', 'feed-unread-badge', String(unread)));
+  const metrics = element('div', 'feed-metrics');
+  const unreadMetric = element('span', `feed-unread${unread > 0 ? ' has-unread' : ''}`);
+  unreadMetric.setAttribute('aria-label', `${unread} unread ${unread === 1 ? 'entry' : 'entries'}`);
+  unreadMetric.append(element('span', 'feed-unread-value', unread > 0 ? String(unread) : '—'), element('span', 'feed-unread-context', ' unread'));
   const health = state.feeds.health?.[feed.id];
   const lastFetch = health?.lastFetched ? timeAgo(new Date(health.lastFetched).toISOString()) : 'never';
+  const healthMetric = element('span', `feed-health${health?.error ? ' has-error' : ''}`);
   if (health?.error) {
-    const error = element('span', 'feed-error', 'Error');
-    error.title = health.error;
-    status.append(error);
+    healthMetric.textContent = 'Error';
+    healthMetric.title = health.error;
   } else {
-    status.append(element('span', 'feed-ok', `Updated ${lastFetch}${health?.entryCount === 0 && lastFetch !== 'never' ? ' · 0 items' : ''}`));
+    if (lastFetch === 'never') healthMetric.textContent = 'Not checked';
+    else healthMetric.append(element('span', 'feed-health-prefix', 'Checked '), document.createTextNode(lastFetch));
+    if (health?.entryCount === 0 && lastFetch !== 'never') healthMetric.title = 'Feed returned no entries';
   }
+  metrics.append(unreadMetric, healthMetric);
+
   const remove = button('', 'btn btn-feed-delete');
   remove.append(icon('close'));
   remove.dataset.deleteFeed = feed.id;
   remove.dataset.feedLabel = feed.label;
   remove.title = 'Remove feed';
   remove.setAttribute('aria-label', `Remove ${feed.label}`);
-  actions.append(status, remove);
-  row.append(info, actions);
+  row.append(info, metrics, remove);
   return row;
+}
+
+function displayFeedUrl(raw: string): string {
+  return raw.replace(/^https?:\/\/(?:www\.)?/i, '').replace(/\/$/, '');
 }
 
 function buildSettingsPage(state: AppState): HTMLElement {

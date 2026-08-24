@@ -99,9 +99,18 @@
   border-radius: 0;
   cursor: pointer;
   position: relative;
-  transition: background var(--transition), border-color var(--transition);
+  transform-origin: center;
+  transition: background var(--transition), border-color var(--transition), transform 80ms ease-out;
   flex-shrink: 0;
-  touch-action: manipulation;
+  touch-action: none;
+}
+
+.entry-checkbox {
+  touch-action: none;
+}
+
+.entry-checkbox:active input[type="checkbox"] {
+  transform: scale(0.9);
 }
 
 .entry-checkbox input[type="checkbox"]:hover {
@@ -128,5 +137,15 @@
 @media (prefers-color-scheme: dark) {
   .entry-checkbox input[type="checkbox"] {
     border-color: var(--border);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .entry-checkbox input[type="checkbox"] {
+    transition: none;
+  }
+
+  .entry-checkbox:active input[type="checkbox"] {
+    transform: none;
   }
 }

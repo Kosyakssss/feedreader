@@ -76,6 +76,13 @@ describe('selection gesture threshold', () => {
     expect(exceedsSelectionDragThreshold(20, 20, 26, 20)).toBe(true);
     expect(exceedsSelectionDragThreshold(20, 20, 25, 24)).toBe(true);
   });
+
+  test('gives touch taps more movement tolerance before drag selection', () => {
+    expect(exceedsSelectionDragThreshold(20, 20, 29, 20, 'touch')).toBe(false);
+    expect(exceedsSelectionDragThreshold(20, 20, 30, 20, 'touch')).toBe(true);
+    expect(exceedsSelectionDragThreshold(20, 20, 26, 20, 'pen')).toBe(false);
+    expect(exceedsSelectionDragThreshold(20, 20, 28, 20, 'pen')).toBe(true);
+  });
 });
 
 describe('code-native interface icons', () => {

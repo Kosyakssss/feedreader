@@ -333,7 +333,7 @@ Rules:
 
 ### 7.4 Icon button
 
-An icon button contains one icon, an accessible name, and a tooltip on hover/focus. Selected icon buttons expose pressed state. Row icon buttons keep their hit areas separated even when their visible glyphs are close.
+An icon button contains one icon, an accessible name, and a tooltip on hover/focus. Selected icon buttons expose pressed state. Row icon buttons keep their hit areas separated even when their visible glyphs are close. Entry star and read actions use equal 40×40px targets at regular density and equal 44×44px targets on compact layouts.
 
 ### 7.5 Segmented filter
 
@@ -354,8 +354,9 @@ The entry checkbox is the explicit selection affordance. The surrounding selecti
 - Shift-click selects or deselects the contiguous visible range from the last anchor.
 - A stationary press completes the browser's ordinary checkbox click sequence and toggles exactly once; it is never captured or rerendered on pointer-down.
 - Fine-pointer drag begins only after 6px of deliberate movement in the lane, then paints one selection state across rows.
-- Touch keeps native tap and vertical-scroll behavior. Touch drag does not enter selection-paint mode without a future explicit selection mode.
+- Touch drag begins after 10px of deliberate movement in the explicit selection lane. A stationary touch remains a native tap, while vertical scrolling continues to start from the rest of the row.
 - The compact selection label provides a 44×44px native hit surface around the unchanged visible checkbox without shifting row content.
+- A stationary press compresses the visible checkbox to 90% without replacing or moving its native input.
 - Dragging outside the lane after capture may continue across rows; ordinary scrolling or text selection elsewhere must not start selection.
 - Checked, unchecked, pressed, focus-visible, and mixed bulk states have complete visuals.
 
@@ -615,18 +616,18 @@ Feed row anatomy:
 
 1. feed label linking to Feed detail;
 2. source URL;
-3. unread count when nonzero;
+3. unread count in an aligned numeric column;
 4. health status;
 5. remove action.
 
 Health copy:
 
-- never checked: “Not checked yet”;
-- healthy: “Updated `time`”;
-- healthy and empty: “Updated `time` · 0 items”;
+- never checked: “Not checked”;
+- healthy: the relative check time under a persistent “Checked” column label;
+- healthy and empty: the relative check time, with “Feed returned no entries” available as detail;
 - failed: “Error”, with persistent diagnostic detail available.
 
-The row prioritizes the label, unread count, and error state when space is constrained. The raw URL truncates first. Remove opens a confirmation naming the feed. After confirmation, the action remains pending until entries and feed state are reconciled; success returns to the Feeds page and reports “Feed removed”. Failure leaves the row in place.
+The list has quiet Subscription, Unread, and Checked column labels on regular layouts. Health is plain aligned text rather than a repeated success badge; only unread values and errors receive semantic emphasis. Compact rows move the two metrics beneath the source metadata and expose their labels in the row. The row prioritizes the label, unread count, and error state when space is constrained. The raw URL truncates first. Remove opens a confirmation naming the feed. After confirmation, the action remains pending until entries and feed state are reconciled; success returns to the Feeds page and reports “Feed removed”. Failure leaves the row in place.
 
 ### 8.11 Settings form
 
@@ -714,9 +715,9 @@ An unknown or removed feed ID shows “Feed not found” with links to Feeds and
 Order:
 
 1. “Feeds” title and total source count;
-2. feed add form;
-3. Import and Export actions;
-4. feed list or no-feeds empty state.
+2. source, unread, and issue summary;
+3. one management row containing the feed add form and Import/Export actions;
+4. aligned feed directory or no-feeds empty state.
 
 When there are no feeds, the empty state points back to the already-visible add field rather than duplicating another Add action.
 

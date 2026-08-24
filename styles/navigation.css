@@ -18,12 +18,12 @@
 }
 
 .refresh-status {
-  --refresh-segment-width: 18px;
+  --refresh-segment-width: 28px;
   --refresh-inline-padding: 0px;
   appearance: none;
   position: relative;
   display: flex;
-  width: 96px;
+  width: 140px;
   align-self: stretch;
   align-items: center;
   justify-content: flex-end;
