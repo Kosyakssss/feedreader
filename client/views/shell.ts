@@ -1,11 +1,13 @@
 import type { AppState, RefreshStatus } from '../state.ts';
-import { activeRefreshSegment, filledRefreshSegments } from '../refresh-progress.ts';
+import { filledRefreshSegments } from '../refresh-progress.ts';
 import { requiredElement } from './dom.ts';
 
+const SEGMENT_SCAN_MS = 320;
 const COMPLETE_HOLD_MS = 700;
+const COMPACT_LAYOUT_QUERY = '(max-width: 699px)';
 
 export class ShellView {
-  private readonly refreshRoot = requiredElement<HTMLElement>('#refresh-status');
+  private readonly refreshRoot = requiredElement<HTMLButtonElement>('#refresh-status');
   private readonly refreshGraphic = requiredElement<HTMLElement>('[data-refresh-graphic]', this.refreshRoot);
   private readonly refreshLabel = requiredElement<HTMLElement>('[data-refresh-label]', this.refreshRoot);
   private readonly refreshLive = requiredElement<HTMLElement>('[data-refresh-live]', this.refreshRoot);
@@ -14,8 +16,23 @@ export class ShellView {
   private readonly bulkCount = requiredElement<HTMLElement>('#bulk-count');
   private readonly shortcuts = requiredElement<HTMLElement>('#shortcuts-overlay');
   private collapseTimer: number | null = null;
-  private lastRunning = false;
-  private lastRunId: string | null = null;
+  private segmentTimer: number | null = null;
+  private displayedSegments = 0;
+  private segmentStartedAt = 0;
+  private visualRunStarted = false;
+  private visualRunId: string | null = null;
+  private settledRunId: string | null | undefined;
+  private latestStatus: RefreshStatus | null = null;
+
+  constructor() {
+    const compactLayout = matchMedia(COMPACT_LAYOUT_QUERY);
+    compactLayout.addEventListener('change', () => this.setNavigationOpen(false));
+    this.refreshRoot.addEventListener('click', () => this.toggleRefreshDetails());
+    document.addEventListener('pointerdown', event => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target?.closest('[data-refresh-status]')) this.dismissRefreshDetails();
+    }, true);
+  }
 
   update(state: AppState): void {
     this.updateNavigation(state.page);
@@ -42,6 +59,18 @@ export class ShellView {
 
   navigationOpen(): boolean {
     return document.body.classList.contains('nav-menu-open');
+  }
+
+  toggleRefreshDetails(): void {
+    if (!this.refreshRoot.dataset.phase?.endsWith('-collapsed')) return;
+    const revealed = this.refreshRoot.dataset.revealed === 'true';
+    this.refreshRoot.dataset.revealed = String(!revealed);
+    this.refreshRoot.setAttribute('aria-expanded', String(!revealed));
+  }
+
+  dismissRefreshDetails(): void {
+    delete this.refreshRoot.dataset.revealed;
+    this.refreshRoot.setAttribute('aria-expanded', 'false');
   }
 
   setShortcutsOpen(open: boolean): void {
@@ -81,60 +110,113 @@ export class ShellView {
       return;
     }
 
-    const isNewRun = !!status.runId && status.runId !== this.lastRunId;
-    if (isNewRun) this.lastRunId = status.runId;
-    if (status.refreshing) {
-      this.clearTimers();
-      this.refreshRoot.dataset.phase = 'running';
-      this.refreshGraphic.removeAttribute('aria-hidden');
-      this.refreshGraphic.setAttribute('role', 'progressbar');
-      this.refreshGraphic.setAttribute('aria-valuemin', '0');
-      this.refreshGraphic.setAttribute('aria-valuemax', String(status.total || 0));
-      this.refreshGraphic.setAttribute('aria-valuenow', String(status.completed || 0));
-      const filled = filledRefreshSegments(status.completed, status.total);
-      const active = activeRefreshSegment(status.completed, status.total);
-      this.bars.forEach((bar, index) => {
-        bar.classList.toggle('is-filled', filled[index] ?? false);
-        bar.classList.toggle('is-active', index === active);
-      });
-      const text = refreshText(status);
-      this.refreshLabel.textContent = '';
-      this.refreshRoot.setAttribute('aria-label', text);
-      this.refreshLive.textContent = text;
+    if (!this.visualRunStarted || status.runId !== this.visualRunId) this.beginVisualRun(status);
+    this.latestStatus = status;
+    this.updateRefreshAccessibility(status);
+
+    if (!status.refreshing && status.runId === this.settledRunId) {
       this.refreshRoot.title = failureTitle(status);
-      this.lastRunning = true;
       return;
     }
 
-    if (this.lastRunning || isNewRun) {
-      this.lastRunning = false;
-      const outcome = refreshOutcome(status);
-      this.refreshRoot.dataset.phase = outcome;
-      this.refreshGraphic.removeAttribute('role');
-      this.refreshGraphic.removeAttribute('aria-valuemin');
-      this.refreshGraphic.removeAttribute('aria-valuemax');
-      this.refreshGraphic.removeAttribute('aria-valuenow');
-      this.refreshGraphic.setAttribute('aria-hidden', 'true');
-      this.bars.forEach(bar => {
-        bar.classList.add('is-filled');
-        bar.classList.remove('is-active');
-      });
-      const text = refreshText(status);
-      this.refreshLabel.textContent = collapsedRefreshText(status);
-      this.refreshRoot.setAttribute('aria-label', collapsedRefreshText(status));
-      this.refreshLive.textContent = text;
-      this.refreshRoot.title = failureTitle(status);
-      this.collapseTimer = window.setTimeout(() => {
-        this.refreshRoot.dataset.phase = `${outcome}-collapsed`;
-      }, COMPLETE_HOLD_MS);
+    this.renderRunning(status);
+    this.advanceVisualProgress();
+  }
+
+  private beginVisualRun(status: RefreshStatus): void {
+    this.clearTimers();
+    this.dismissRefreshDetails();
+    this.visualRunStarted = true;
+    this.visualRunId = status.runId;
+    this.settledRunId = undefined;
+    this.displayedSegments = 0;
+    this.segmentStartedAt = performance.now();
+    this.latestStatus = status;
+  }
+
+  private advanceVisualProgress(): void {
+    const status = this.latestStatus;
+    if (!status || status.runId !== this.visualRunId) return;
+    const confirmed = status.refreshing
+      ? filledRefreshSegments(status.completed, status.total).filter(Boolean).length
+      : this.bars.length;
+
+    if (this.displayedSegments >= confirmed) {
+      if (!status.refreshing && this.displayedSegments === this.bars.length) this.finishVisualRun(status);
       return;
     }
+    if (this.segmentTimer !== null) return;
 
+    const elapsed = performance.now() - this.segmentStartedAt;
+    const delay = Math.max(0, SEGMENT_SCAN_MS - elapsed);
+    this.segmentTimer = window.setTimeout(() => {
+      this.segmentTimer = null;
+      const latest = this.latestStatus;
+      if (!latest || latest.runId !== this.visualRunId) return;
+      const latestConfirmed = latest.refreshing
+        ? filledRefreshSegments(latest.completed, latest.total).filter(Boolean).length
+        : this.bars.length;
+      if (this.displayedSegments < latestConfirmed) {
+        this.displayedSegments += 1;
+        this.segmentStartedAt = performance.now();
+      }
+      if (!latest.refreshing && this.displayedSegments === this.bars.length) this.finishVisualRun(latest);
+      else {
+        this.renderRunning(latest);
+        this.advanceVisualProgress();
+      }
+    }, delay);
+  }
+
+  private renderRunning(status: RefreshStatus): void {
+    this.refreshRoot.dataset.phase = 'running';
+    this.dismissRefreshDetails();
+    this.refreshGraphic.removeAttribute('aria-hidden');
+    this.refreshGraphic.setAttribute('role', 'progressbar');
+    this.refreshGraphic.setAttribute('aria-valuemin', '0');
+    this.refreshGraphic.setAttribute('aria-valuemax', String(status.total || 0));
+    this.refreshGraphic.setAttribute('aria-valuenow', String(status.completed || 0));
+    this.bars.forEach((bar, index) => {
+      bar.classList.toggle('is-filled', index < this.displayedSegments);
+      bar.classList.toggle('is-active', index === this.displayedSegments);
+    });
+    this.refreshLabel.textContent = '';
     this.refreshRoot.title = failureTitle(status);
+  }
+
+  private updateRefreshAccessibility(status: RefreshStatus): void {
+    const text = refreshText(status);
+    this.refreshRoot.setAttribute('aria-label', status.refreshing ? text : collapsedRefreshText(status));
+    this.refreshLive.textContent = text;
+  }
+
+  private finishVisualRun(status: RefreshStatus): void {
+    if (status.runId === this.settledRunId) return;
+    this.settledRunId = status.runId;
+    const outcome = refreshOutcome(status);
+    this.refreshRoot.dataset.phase = outcome;
+    this.refreshGraphic.removeAttribute('role');
+    this.refreshGraphic.removeAttribute('aria-valuemin');
+    this.refreshGraphic.removeAttribute('aria-valuemax');
+    this.refreshGraphic.removeAttribute('aria-valuenow');
+    this.refreshGraphic.setAttribute('aria-hidden', 'true');
+    this.bars.forEach(bar => {
+      bar.classList.add('is-filled');
+      bar.classList.remove('is-active');
+    });
+    this.refreshLabel.textContent = collapsedRefreshText(status);
+    this.refreshRoot.title = failureTitle(status);
+    this.collapseTimer = window.setTimeout(() => {
+      this.refreshRoot.dataset.phase = `${outcome}-collapsed`;
+    }, COMPLETE_HOLD_MS);
   }
 
   private setCollapsed(text: string, phase: string): void {
     this.clearTimers();
+    this.dismissRefreshDetails();
+    this.visualRunStarted = false;
+    this.settledRunId = undefined;
+    this.latestStatus = null;
     this.refreshRoot.dataset.phase = phase;
     this.refreshLabel.textContent = text;
     this.refreshRoot.setAttribute('aria-label', text || 'Feed refresh status');
@@ -144,7 +226,9 @@ export class ShellView {
 
   private clearTimers(): void {
     if (this.collapseTimer !== null) window.clearTimeout(this.collapseTimer);
+    if (this.segmentTimer !== null) window.clearTimeout(this.segmentTimer);
     this.collapseTimer = null;
+    this.segmentTimer = null;
   }
 }
 

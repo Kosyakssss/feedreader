@@ -17,7 +17,7 @@ export function renderApp(basePath = '', assetVersion = ''): string {
 <body>
 <nav class="nav-bar">
   <a href="${basePath}/" class="nav-logo" data-link>🔖 Feedreader</a>
-  <div class="refresh-status" id="refresh-status" data-phase="loading" tabindex="0" aria-label="Loading saved entries">
+  <button class="refresh-status" id="refresh-status" type="button" data-refresh-status data-phase="loading" aria-label="Loading saved entries" aria-expanded="false">
     <span class="refresh-label" data-refresh-label></span>
     <span class="refresh-graphic" data-refresh-graphic aria-hidden="true">
       <span class="refresh-bar"></span>
@@ -26,7 +26,7 @@ export function renderApp(basePath = '', assetVersion = ''): string {
       <span class="refresh-bar"></span>
     </span>
     <span class="visually-hidden" data-refresh-live role="status" aria-live="polite"></span>
-  </div>
+  </button>
   <button class="nav-menu-button" type="button" aria-label="Open navigation" aria-expanded="false" data-nav-menu>☰</button>
   <div class="nav-links">
     <a href="${basePath}/" data-link class="nav-link" data-nav="/">Timeline</a>

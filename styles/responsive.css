@@ -1,33 +1,34 @@
 /* Responsive */
-@media (max-width: 640px) {
+@media (max-width: 699px) {
   :root {
     --spacing-md: 12px;
     --font-size: 14px;
   }
 
   .nav-bar {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    padding: var(--spacing-xs) var(--spacing-sm);
+    display: flex;
+    min-height: 42px;
+    gap: 0;
+    padding: 0 var(--spacing-sm);
   }
 
   .nav-logo {
     font-size: 1em;
+    margin-right: auto;
   }
 
   .nav-menu-button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    justify-self: end;
     margin-left: 0;
   }
 
   .refresh-status {
     --refresh-segment-width: 14px;
-    justify-self: center;
+    width: 104px;
+    flex: none;
     margin-left: 0;
-    max-width: 42vw;
   }
 
   .refresh-label {
@@ -47,22 +48,13 @@
     border: 0.5px solid var(--border);
     border-radius: 0;
     box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16);
-    opacity: 0;
-    pointer-events: none;
-    transform: translateY(-8px) scale(0.98);
-    transform-origin: top right;
-    visibility: hidden;
-    transition: opacity var(--transition), transform var(--transition), visibility 0s linear var(--transition);
+    display: none;
   }
 
   .nav-links::-webkit-scrollbar { display: none; }
 
   .nav-menu-open .nav-links {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateY(0) scale(1);
-    visibility: visible;
-    transition-delay: 0s;
+    display: flex;
   }
 
   .nav-link {
@@ -111,6 +103,29 @@
   .btn {
     font-size: 0.8em;
     padding: 6px var(--spacing-sm);
+  }
+
+  .toolbar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--spacing-xs);
+  }
+
+  .filter-tabs,
+  .timeline-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .timeline-actions {
+    justify-self: stretch;
+  }
+
+  .filter-tabs button,
+  .timeline-actions .btn {
+    min-width: 0;
+    text-align: center;
+    white-space: nowrap;
   }
 
   .bulk-bar {
@@ -209,29 +224,5 @@
 
   .toast {
     width: 100%;
-  }
-}
-
-@container page (max-width: 620px) {
-  .toolbar {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--spacing-xs);
-  }
-
-  .filter-tabs,
-  .timeline-actions {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    width: 100%;
-  }
-
-  .timeline-actions {
-    justify-self: stretch;
-  }
-
-  .filter-tabs button,
-  .timeline-actions .btn {
-    min-width: 0;
-    text-align: center;
   }
 }

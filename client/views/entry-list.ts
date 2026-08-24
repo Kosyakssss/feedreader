@@ -32,11 +32,7 @@ export class EntryListView {
       return;
     }
 
-    const previousRects = new Map<string, DOMRect>();
     const anchor = options.animate ? this.scrollAnchor() : null;
-    if (options.animate) {
-      for (const [id, row] of this.rows) previousRects.set(id, row.getBoundingClientRect());
-    }
 
     if (!this.list) {
       this.list = element('div', 'entry-list');
@@ -71,8 +67,8 @@ export class EntryListView {
       }
     }
 
-    if (options.animate && previousRects.size > 0 && options.newIds?.size) {
-      animateEntryChanges(orderedRows, previousRects, options.newIds);
+    if (options.animate && options.newIds?.size) {
+      animateEntryChanges(orderedRows, options.newIds);
     }
   }
 
