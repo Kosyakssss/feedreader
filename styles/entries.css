@@ -125,18 +125,6 @@
   border-color: var(--accent);
 }
 
-.entry-checkbox input[type="checkbox"]:checked::after {
-  content: '';
-  position: absolute;
-  left: 5px;
-  top: 2px;
-  width: 5px;
-  height: 9px;
-  border: solid var(--on-accent);
-  border-width: 0 1.5px 1.5px 0;
-  transform: rotate(45deg);
-}
-
 @media (prefers-color-scheme: dark) {
   .entry-checkbox input[type="checkbox"] {
     border-color: var(--border);
