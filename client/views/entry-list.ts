@@ -14,10 +14,15 @@ export interface EntryListOptions {
   animate?: boolean;
 }
 
+interface EntryRow {
+  slot: HTMLDivElement;
+  card: HTMLDivElement;
+}
+
 export class EntryListView {
   readonly element = element('div');
   private list: HTMLDivElement | null = null;
-  private rows = new Map<string, HTMLDivElement>();
+  private rows = new Map<string, EntryRow>();
 
   constructor() {
     this.element.id = 'entry-list';
@@ -44,32 +49,32 @@ export class EntryListView {
     const visibleIds = new Set(entries.map(entry => entry.id));
     for (const [id, row] of this.rows) {
       if (!visibleIds.has(id)) {
-        row.remove();
+        row.slot.remove();
         this.rows.delete(id);
       }
     }
 
-    const orderedRows: HTMLDivElement[] = [];
+    const orderedRows: EntryRow[] = [];
     entries.forEach((entry, index) => {
       const row = this.rows.get(entry.id) ?? this.createRow(entry);
       this.rows.set(entry.id, row);
       this.updateRow(row, entry, index, options);
       orderedRows.push(row);
     });
-    reconcileRowOrder(this.list, orderedRows);
+    reconcileRowOrder(this.list, orderedRows.map(row => row.slot));
 
     this.updateLoadMore(options.totalCount, options.loadLimit);
 
     if (anchor && scrollY > 72) {
       const currentAnchor = this.rows.get(anchor.id);
       if (currentAnchor) {
-        const delta = currentAnchor.getBoundingClientRect().top - anchor.top;
+        const delta = currentAnchor.slot.getBoundingClientRect().top - anchor.top;
         if (Math.abs(delta) >= 0.5) window.scrollBy(0, delta);
       }
     }
 
     if (options.animate && options.newIds?.size) {
-      animateEntryChanges(orderedRows, options.newIds);
+      animateEntryChanges(orderedRows.map(row => row.slot), options.newIds);
     }
   }
 
@@ -91,16 +96,18 @@ export class EntryListView {
 
   private scrollAnchor(): { id: string; top: number } | null {
     const topEdge = document.querySelector('.nav-bar')?.getBoundingClientRect().bottom ?? 0;
-    for (const [id, row] of this.rows) {
-      const rect = row.getBoundingClientRect();
-      if (rect.bottom > topEdge) return { id, top: rect.top };
+    for (const child of this.list?.children ?? []) {
+      if (!(child instanceof HTMLElement) || !child.dataset.id) continue;
+      const rect = child.getBoundingClientRect();
+      if (rect.bottom > topEdge) return { id: child.dataset.id, top: rect.top };
     }
     return null;
   }
 
-  private createRow(entry: EnrichedEntry): HTMLDivElement {
-    const row = element('div', 'entry-card');
-    row.setAttribute('role', 'listitem');
+  private createRow(entry: EnrichedEntry): EntryRow {
+    const slot = element('div', 'entry-slot');
+    slot.setAttribute('role', 'listitem');
+    const card = element('div', 'entry-card');
 
     const checkboxLabel = element('label', 'entry-checkbox');
     const checkbox = element('input');
@@ -129,28 +136,30 @@ export class EntryListView {
     mark.dataset.mark = entry.id;
     actions.append(star, mark);
 
-    row.append(checkboxLabel, leading, content, actions);
-    return row;
+    card.append(checkboxLabel, leading, content, actions);
+    slot.append(card);
+    return { slot, card };
   }
 
-  private updateRow(row: HTMLDivElement, entry: EnrichedEntry, index: number, options: EntryListOptions): void {
+  private updateRow(row: EntryRow, entry: EnrichedEntry, index: number, options: EntryListOptions): void {
     const read = !!entry.state?.read;
     const starred = !!entry.state?.starred;
     const selected = options.selectedIds.has(entry.id);
     const focused = options.focusedEntryId === entry.id;
-    row.className = `entry-card ${read ? 'entry-read' : 'entry-unread'}${selected ? ' entry-selected' : ''}${focused ? ' entry-focused' : ''}`;
-    row.dataset.id = entry.id;
-    row.dataset.idx = String(index);
-    row.setAttribute('aria-selected', String(selected));
+    row.slot.dataset.id = entry.id;
+    row.slot.setAttribute('aria-selected', String(selected));
+    row.card.className = `entry-card ${read ? 'entry-read' : 'entry-unread'}${selected ? ' entry-selected' : ''}${focused ? ' entry-focused' : ''}`;
+    row.card.dataset.id = entry.id;
+    row.card.dataset.idx = String(index);
 
-    const checkbox = row.querySelector<HTMLInputElement>('[data-select]');
+    const checkbox = row.card.querySelector<HTMLInputElement>('[data-select]');
     if (checkbox) {
       checkbox.dataset.select = entry.id;
       checkbox.checked = selected;
       checkbox.setAttribute('aria-label', `Select ${entry.title || 'entry'}`);
     }
 
-    const titleSlot = row.querySelector<HTMLElement>('.entry-title-slot');
+    const titleSlot = row.card.querySelector<HTMLElement>('.entry-title-slot');
     if (titleSlot) {
       const safeUrl = safeHttpUrl(entry.url);
       const title = entry.title || 'Untitled';
@@ -171,10 +180,10 @@ export class EntryListView {
       if (titleNode !== current) titleSlot.replaceChildren(titleNode);
     }
 
-    const metadata = row.querySelector<HTMLElement>('.entry-meta');
+    const metadata = row.card.querySelector<HTMLElement>('.entry-meta');
     if (metadata) metadata.textContent = `${entry.feedLabel || 'Unknown'} · ${timeAgo(entry.published)}`;
 
-    const star = row.querySelector<HTMLButtonElement>('.btn-star');
+    const star = row.card.querySelector<HTMLButtonElement>('.btn-star');
     if (star) {
       star.dataset.star = entry.id;
       star.classList.toggle('starred', starred);
@@ -183,7 +192,7 @@ export class EntryListView {
       star.title = starred ? 'Unstar' : 'Star';
       star.setAttribute('aria-label', starred ? 'Unstar entry' : 'Star entry');
     }
-    const mark = row.querySelector<HTMLButtonElement>('.btn-mark');
+    const mark = row.card.querySelector<HTMLButtonElement>('.btn-mark');
     if (mark) {
       mark.dataset.mark = entry.id;
       setIcon(mark, read ? 'circle' : 'circle-filled');

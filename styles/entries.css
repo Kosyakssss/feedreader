@@ -8,13 +8,16 @@
   user-select: none;
 }
 
-.entry-card + .entry-card {
+.entry-slot + .entry-slot {
   margin-top: -0.5px;
+}
+
+.entry-slot + .entry-slot .entry-card {
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
 
-.entry-list .entry-card:not(:last-child) {
+.entry-list .entry-slot:not(:last-child) .entry-card {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }

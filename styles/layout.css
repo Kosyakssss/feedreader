@@ -80,6 +80,16 @@ body {
   flex-direction: column;
 }
 
+.entry-slot {
+  flex: none;
+  min-height: 0;
+}
+
+.entry-slot.is-revealing {
+  overflow: hidden;
+  overflow: clip;
+}
+
 .entry-card {
   display: flex;
   align-items: center;

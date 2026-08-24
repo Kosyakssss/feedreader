@@ -528,7 +528,7 @@ Responsibilities:
 - update counts, empty state, and Show more after server-directed removals;
 - preserve the nearest surviving scroll anchor when rows are removed above the viewport.
 
-Every retained new entry appears at its actual sorted position, including between existing rows when a feed reports unusual dates. Visible new rows reveal from top to bottom with a short downward expansion/fade; existing visible rows use positional continuity so the insertion is understandable. Insertions above the viewport compensate scroll to hold the reader's visual position. Offscreen rows do not animate, and background refresh never yanks the page upward.
+Every retained new entry appears at its actual sorted position, including between existing rows when a feed reports unusual dates. Visible new rows reveal from top to bottom through a clipped layout slot around a full-size row: the slot expands downward while the already aligned row receives only a restrained fade and settle. Controls and text never re-center inside a partially sized card. Existing visible rows use positional continuity so the insertion is understandable. Insertions above the viewport compensate scroll to hold the reader's visual position. Offscreen rows do not animate, and background refresh never yanks the page upward.
 
 ### 8.6 Entry row
 
