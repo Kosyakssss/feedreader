@@ -1,0 +1,218 @@
+/* Search — filled field */
+.search-input {
+  background: var(--control-bg);
+  border: 1px solid transparent;
+  border-radius: 0;
+  padding: 9px 12px;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 0.9em;
+  transition: none;
+  outline: none;
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.search-input:focus {
+  background: var(--bg-card);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3.5px var(--focus-ring);
+}
+
+@media (prefers-color-scheme: dark) {
+  .search-input {
+    background: var(--control-bg);
+  }
+  .search-input:focus {
+    background: var(--bg-card);
+    box-shadow: 0 0 0 3.5px var(--focus-ring);
+  }
+}
+
+/* Filter tabs — iOS segmented control feel */
+.filter-tabs button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.8em;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 5px 12px;
+  border-radius: 0;
+  font-family: var(--font);
+  transition: color var(--transition), background var(--transition), transform 100ms ease;
+}
+
+.filter-tabs button:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.filter-tabs button:active {
+  transform: scale(0.97);
+}
+
+.filter-tabs button.active {
+  color: var(--accent);
+  font-weight: 600;
+  background: var(--accent-soft);
+}
+
+@media (prefers-color-scheme: dark) {
+  .filter-tabs button.active {
+    background: var(--accent-soft);
+  }
+}
+
+/* Buttons — iOS-style with press feedback */
+.btn {
+  background: var(--bg-card);
+  border: 0.5px solid var(--border);
+  color: var(--accent);
+  padding: 6px 14px;
+  border-radius: 0;
+  font-family: var(--font);
+  font-size: 0.85em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), transform 100ms ease, opacity var(--transition);
+}
+
+.btn:hover {
+  background: var(--bg-hover);
+}
+
+.btn:active {
+  transform: scale(0.97);
+  opacity: 0.8;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--on-accent);
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.btn-primary:active {
+  background: var(--accent-hover);
+}
+
+.btn-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 1.1em;
+  padding: var(--spacing-xs);
+  border-radius: 0;
+  transition: color var(--transition), background var(--transition), transform 120ms ease;
+  line-height: 1;
+}
+
+.btn-icon:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.btn-icon:active {
+  transform: scale(0.88);
+}
+
+.btn-star.starred {
+  color: var(--star);
+}
+
+.btn-star.starred:hover {
+  color: var(--star);
+}
+
+/* Settings */
+.settings-form label {
+  font-size: 0.9em;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.settings-form input,
+.settings-form select {
+  background-color: var(--control-bg);
+  border: 1px solid transparent;
+  border-radius: 0;
+  padding: 7px var(--spacing-sm);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--font-size);
+  transition: none;
+}
+
+.settings-form input:focus,
+.settings-form select:focus {
+  outline: none;
+  background-color: var(--bg-card);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3.5px var(--focus-ring);
+}
+
+.settings-form select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236f6e69'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+  cursor: pointer;
+}
+
+@media (prefers-color-scheme: dark) {
+  .settings-form input,
+  .settings-form select {
+    background-color: var(--control-bg);
+  }
+  .settings-form input:focus,
+  .settings-form select:focus {
+    background-color: var(--bg-card);
+    box-shadow: 0 0 0 3.5px var(--focus-ring);
+  }
+  .settings-form select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23878580'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+  }
+}
+
+/* Add feed form input */
+.add-form input {
+  background: var(--control-bg);
+  border: 1px solid transparent;
+  border-radius: 0;
+  padding: 7px 12px;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--font-size);
+  transition: none;
+  outline: none;
+}
+
+.add-form input::placeholder {
+  color: var(--text-muted);
+}
+
+.add-form input:focus {
+  background: var(--bg-card);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3.5px var(--focus-ring);
+}
+
+@media (prefers-color-scheme: dark) {
+  .add-form input {
+    background: var(--control-bg);
+  }
+  .add-form input:focus {
+    background: var(--bg-card);
+    box-shadow: 0 0 0 3.5px var(--focus-ring);
+  }
+}

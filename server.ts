@@ -1,5 +1,5 @@
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { stat } from 'node:fs/promises';
 
 import {
   readFeeds, readState, updateState, readConfig, writeConfig,
@@ -10,6 +10,7 @@ import { CONFIG_LIMITS, inLimit } from './lib/data.ts';
 import { fetchAllFeeds, parseOPML, decodeHtmlEntities, probeFeed, publishedTime, resolveFeedInput } from './lib/feeds.ts';
 import type { FeedFetchResult } from './lib/feeds.ts';
 import { renderApp } from './lib/render.ts';
+import { buildClientAssets, encodedAsset, encodedResponse, type ClientAssets, type EncodedAsset } from './lib/client-assets.ts';
 import type { EnrichedEntry, Feed } from './lib/types.ts';
 import { isSafeExternalUrl, isSafeObjectKey, sanitizeThemeName } from './lib/security.ts';
 
@@ -18,10 +19,10 @@ const DEFAULT_HOST = '127.0.0.1';
 const SERVE_BASE_PATH = '/feedreader';
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const SHUTDOWN_TIMEOUT_MS = 10_000;
-const APP_JS = Bun.file(join(dirname(fileURLToPath(import.meta.url)), 'public', 'app.js'));
-
 let allowedHosts = new Set<string>();
 let allowedOrigins = new Set<string>();
+let clientAssets: ClientAssets | null = null;
+let entriesSnapshot: { fingerprint: string; asset: EncodedAsset } | null = null;
 
 function configureTrust(port: number, trustedOrigins: readonly string[]): void {
   allowedHosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`]);
@@ -393,35 +394,42 @@ function err(msg: string, status = 500): Response {
   return json({ error: msg }, status);
 }
 
-function appJsResponse(req: Request): Response {
-  const size = APP_JS.size;
-  const lastModified = new Date(APP_JS.lastModified);
-  const etag = `"${size.toString(16)}-${APP_JS.lastModified.toString(16)}"`;
-  const headers = new Headers({
-    'accept-ranges': 'bytes',
-    'content-type': 'text/javascript; charset=utf-8',
-    etag,
-    'last-modified': lastModified.toUTCString(),
-  });
+function clientAssetResponse(req: Request, kind: keyof ClientAssets): Response {
+  if (!clientAssets) return err('Client assets are unavailable', 503);
+  return encodedResponse(
+    req,
+    clientAssets[kind],
+    kind === 'script' ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8',
+    { allowRange: true },
+  );
+}
 
-  if (req.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers });
-  const modifiedSince = req.headers.get('if-modified-since');
-  if (modifiedSince && lastModified.getTime() <= new Date(modifiedSince).getTime()) {
-    return new Response(null, { status: 304, headers });
+async function entriesResponse(req: Request, feed?: string): Promise<Response> {
+  if (feed) return encodedJsonResponse(req, await getEntries(feed));
+  const fingerprint = await dataFingerprint(['cache.json', 'state.json', 'feeds.json']);
+  if (!entriesSnapshot || entriesSnapshot.fingerprint !== fingerprint) {
+    const bytes = new TextEncoder().encode(JSON.stringify(await getEntries()));
+    entriesSnapshot = { fingerprint, asset: encodedAsset(bytes) };
   }
+  return encodedResponse(req, entriesSnapshot.asset, 'application/json; charset=utf-8');
+}
 
-  const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get('range') || '');
-  if (!range) return new Response(APP_JS, { headers });
-  const rawStart = range[1] ? Number(range[1]) : null;
-  const rawEnd = range[2] ? Number(range[2]) : null;
-  const start = rawStart ?? Math.max(0, size - (rawEnd ?? 0));
-  const end = rawStart === null ? size - 1 : Math.min(rawEnd ?? size - 1, size - 1);
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= size) {
-    headers.set('content-range', `bytes */${size}`);
-    return new Response(null, { status: 416, headers });
-  }
-  headers.set('content-range', `bytes ${start}-${end}/${size}`);
-  return new Response(APP_JS.slice(start, end + 1), { status: 206, headers });
+function encodedJsonResponse(req: Request, data: unknown, status = 200): Response {
+  const bytes = new TextEncoder().encode(JSON.stringify(data));
+  const response = encodedResponse(req, encodedAsset(bytes), 'application/json; charset=utf-8', { cacheControl: 'no-store' });
+  return status === 200 ? response : new Response(response.body, { status, headers: response.headers });
+}
+
+async function dataFingerprint(files: string[]): Promise<string> {
+  const parts = await Promise.all(files.map(async file => {
+    try {
+      const info = await stat(join(getDataDir(), file));
+      return `${file}:${info.ino}:${info.size}:${info.mtimeMs}`;
+    } catch {
+      return `${file}:missing`;
+    }
+  }));
+  return parts.join('|');
 }
 
 function assertTrustedRequest(req: Request): void {
@@ -464,7 +472,7 @@ async function handleRequest(req: Request, server: Bun.Server<undefined>): Promi
 
     if (path === '/api/entries' && method === 'GET') {
       const feed = url.searchParams.get('feed') || undefined;
-      return json(await getEntries(feed));
+      return await entriesResponse(req, feed);
     }
 
     if (path === '/api/refresh' && method === 'POST') {
@@ -674,7 +682,11 @@ async function handleRequest(req: Request, server: Bun.Server<undefined>): Promi
     }
 
     if (path === '/app.js' && method === 'GET') {
-      return appJsResponse(req);
+      return clientAssetResponse(req, 'script');
+    }
+
+    if (path === '/app.css' && method === 'GET') {
+      return clientAssetResponse(req, 'style');
     }
 
     if (path.startsWith('/api/')) {
@@ -690,7 +702,7 @@ async function handleRequest(req: Request, server: Bun.Server<undefined>): Promi
     return new Response(html, { headers: {
       'content-type': 'text/html; charset=utf-8',
       'content-security-policy':
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'",
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'",
     }});
 
   } catch (e) {
@@ -756,6 +768,8 @@ async function main() {
   configureTrust(port, config.trustedOrigins);
   startupHost = host;
   startupPort = port;
+
+  clientAssets = await buildClientAssets();
 
   await mergeSyncConflicts();
 

@@ -15,5 +15,5 @@
     "exactOptionalPropertyTypes": false,
     "skipLibCheck": true
   },
-  "include": ["server.ts", "lib/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
+  "include": ["server.ts", "client/**/*.ts", "lib/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
 }

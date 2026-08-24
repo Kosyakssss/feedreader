@@ -1,0 +1,120 @@
+/* Feeds page */
+.feeds-subtitle {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  font-weight: 500;
+  margin-top: 1px;
+}
+
+.feed-file-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.feed-item {
+  background: var(--bg-card);
+  border: 0.5px solid var(--border);
+  border-radius: 0;
+  padding: var(--spacing-md);
+  transition: background var(--transition);
+}
+
+.feed-item + .feed-item {
+  margin-top: -0.5px;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.feed-list .feed-item:not(:last-child) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.feed-item:hover {
+  background: var(--bg-hover);
+  z-index: 1;
+  position: relative;
+}
+
+.feed-label {
+  font-weight: 600;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feed-label:hover {
+  color: var(--accent);
+}
+
+.feed-label-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  justify-content: space-between;
+}
+
+.feed-status {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--spacing-xs);
+}
+
+.feed-meta {
+  font-size: 0.8em;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feed-unread-badge {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.7em;
+  padding: 2px 7px;
+  border-radius: 0;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.feed-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 0.75em;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 0;
+  white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+  .feed-error {
+    color: var(--danger);
+  }
+}
+
+.feed-ok {
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: 0.75em;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 0;
+  white-space: nowrap;
+}
+
+.feed-file-actions .btn {
+  text-align: center;
+}
+
+@media (prefers-color-scheme: dark) {
+  .feed-ok {
+    color: var(--success);
+  }
+}

@@ -157,7 +157,8 @@ describe('server hardening', () => {
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain('href="/feedreader/api/theme"');
-    expect(html).toContain('<script src="/feedreader/app.js" defer></script>');
+    expect(html).toContain('href="/feedreader/app.css"');
+    expect(html).toContain('<script src="/feedreader/app.js" type="module"></script>');
 
     const api = await fetch(`http://127.0.0.1:${port}/feedreader/api/state`, {
       method: 'POST',
@@ -191,7 +192,8 @@ describe('server hardening', () => {
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain('href="/feedreader/api/theme"');
-    expect(html).toContain('<script src="/feedreader/app.js" defer></script>');
+    expect(html).toContain('href="/feedreader/app.css"');
+    expect(html).toContain('<script src="/feedreader/app.js" type="module"></script>');
   });
 
   test('requires JSON content type for JSON endpoints', async () => {
@@ -409,15 +411,18 @@ describe('server hardening', () => {
     const page = await fetch(`http://127.0.0.1:${port}/`);
     const html = await page.text();
     expect(html).toContain('id="refresh-status"');
+    expect(html.match(/class="refresh-bar"/g)).toHaveLength(4);
     const app = await (await fetch(`http://127.0.0.1:${port}/app.js`)).text();
     expect(app).toContain('Loading saved entries…');
     expect(app).toContain('Checking feeds ');
-    expect(app).toContain("'/api/refresh/status?since=' + refreshCursor");
+    expect(app).toContain('/api/refresh/status?since=');
   });
 
   test('serves app.js with a strict CSP on the document', async () => {
     const page = await fetch(`http://127.0.0.1:${port}/`);
     expect(page.headers.get('content-security-policy')).toContain("script-src 'self'");
+    expect(page.headers.get('content-security-policy')).toContain("style-src 'self'");
+    expect(page.headers.get('content-security-policy')).not.toContain("'unsafe-inline'");
     const script = await fetch(`http://127.0.0.1:${port}/app.js`);
     expect(script.status).toBe(200);
     expect(script.headers.get('content-type')).toContain('text/javascript');
@@ -425,7 +430,7 @@ describe('server hardening', () => {
     expect(underServe.status).toBe(200);
   });
 
-  test('serves app.js through Bun.file with conditional and range handling', async () => {
+  test('serves compiled client assets with conditional, compressed, and range handling', async () => {
     const full = await fetch(`http://127.0.0.1:${port}/app.js`);
     expect(full.status).toBe(200);
     const etag = full.headers.get('etag');
@@ -442,6 +447,31 @@ describe('server hardening', () => {
     expect(range.status).toBe(206);
     expect(range.headers.get('content-range')).toMatch(/^bytes 0-15\//);
     expect((await range.arrayBuffer()).byteLength).toBe(16);
+
+    const compressed = await fetch(`http://127.0.0.1:${port}/app.css`, {
+      headers: { 'accept-encoding': 'gzip' },
+    });
+    expect(compressed.status).toBe(200);
+    expect(compressed.headers.get('content-encoding')).toBe('gzip');
+    expect(compressed.headers.get('vary')).toContain('accept-encoding');
+    expect(await compressed.text()).toContain('.entry-card');
+  });
+
+  test('compresses and revalidates the cached entries snapshot', async () => {
+    const full = await fetch(`http://127.0.0.1:${port}/api/entries`, {
+      headers: { 'accept-encoding': 'gzip' },
+    });
+    expect(full.status).toBe(200);
+    expect(full.headers.get('content-encoding')).toBe('gzip');
+    expect(full.headers.get('vary')).toContain('accept-encoding');
+    expect(await full.json()).toEqual([]);
+    const etag = full.headers.get('etag');
+    expect(etag).toBeTruthy();
+
+    const conditional = await fetch(`http://127.0.0.1:${port}/api/entries`, {
+      headers: { 'if-none-match': etag! },
+    });
+    expect(conditional.status).toBe(304);
   });
 
   test('validates raw Host before serving app.js', async () => {

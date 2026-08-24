@@ -8,6 +8,7 @@ A local-first RSS/Atom reader that runs in the browser. Portable, pretty, lightw
 - **Minimal reading in-app** — entries open original links. The app is a _launcher_, not a reader.
 - **Portable server** — runs on Bun 1.4 or newer on macOS and Linux.
 - **No runtime dependencies** — HTTP, static files, and XML parsing use Bun APIs.
+- **Framework-free typed client** — browser code is TypeScript and native DOM/CSS, bundled in memory by Bun when the server starts.
 - **Theme choice** — one adaptive system theme follows the browser and macOS light/dark appearance.
 - **File-synced state** — Syncthing conflict files (`state.sync-conflict-*.json`) are auto-merged using latest-timestamp-wins per entry.
 - **Safer imports/state** — feed URLs are validated on both manual add and OPML import, and entry IDs are scoped per feed so state cannot bleed across subscriptions.
@@ -71,7 +72,7 @@ All runtime data lives in `data/`. The feed list and system theme are versioned;
 | `cache.json`           | Fetched entries + fetch timestamps           | No        |
 | `config.json`          | Local settings (created on first write)      | No        |
 | `transaction.json`     | Crash-recovery journal for multi-file writes | No        |
-| `themes/system.css`    | Adaptive system light/dark theme                  | Yes       |
+| `themes/system.css`    | Adaptive system light/dark design tokens       | Yes       |
 
 ## Pages
 
@@ -90,6 +91,7 @@ All runtime data lives in `data/`. The feed list and system theme are versioned;
 - **Feed auto-discovery**: fetches HTML, looks for `<link rel="alternate">`, tries common paths
 - **OPML import**: paste or upload OPML to add feeds in bulk; unsafe/local URLs are skipped
 - **View transitions**: uses the View Transition API for page navigation — browsers that don't support it just skip the animation
+- **Keyed live updates**: refreshed entries appear at their sorted position without rebuilding unchanged rows or moving a scrolled reading position
 - **Retention**: default 3000 entries, configurable by count and/or max days (whichever hits first)
 
 ## API Notes
