@@ -1,11 +1,6 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;
-  }
-
-  .refresh-graphic,
-  .nav-links,
-  .toast {
     transition: none !important;
     animation: none !important;
   }

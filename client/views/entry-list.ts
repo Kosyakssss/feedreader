@@ -147,7 +147,6 @@ export class EntryListView {
     const selected = options.selectedIds.has(entry.id);
     const focused = options.focusedEntryId === entry.id;
     row.slot.dataset.id = entry.id;
-    row.slot.setAttribute('aria-selected', String(selected));
     row.card.className = `entry-card ${read ? 'entry-read' : 'entry-unread'}${selected ? ' entry-selected' : ''}${focused ? ' entry-focused' : ''}`;
     row.card.dataset.id = entry.id;
     row.card.dataset.idx = String(index);
@@ -190,14 +189,14 @@ export class EntryListView {
       setIcon(star, starred ? 'star-filled' : 'star');
       star.setAttribute('aria-pressed', String(starred));
       star.title = starred ? 'Unstar' : 'Star';
-      star.setAttribute('aria-label', starred ? 'Unstar entry' : 'Star entry');
+      star.setAttribute('aria-label', 'Star entry');
     }
     const mark = row.card.querySelector<HTMLButtonElement>('.btn-mark');
     if (mark) {
       mark.dataset.mark = entry.id;
       setIcon(mark, read ? 'circle' : 'circle-filled');
       mark.title = read ? 'Mark unread' : 'Mark read';
-      mark.setAttribute('aria-label', mark.title);
+      mark.setAttribute('aria-label', 'Read entry');
       mark.setAttribute('aria-pressed', String(read));
     }
   }

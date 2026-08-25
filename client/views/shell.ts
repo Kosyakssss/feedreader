@@ -8,6 +8,20 @@ const TOAST_VISIBLE_MS = 2500;
 const TOAST_EXIT_MS = 180;
 const COMPACT_LAYOUT_QUERY = '(max-width: 699px)';
 
+interface ShellTiming {
+  segmentScanMs: number;
+  completeHoldMs: number;
+  toastVisibleMs: number;
+  toastExitMs: number;
+}
+
+const DEFAULT_TIMING: ShellTiming = {
+  segmentScanMs: SEGMENT_SCAN_MS,
+  completeHoldMs: COMPLETE_HOLD_MS,
+  toastVisibleMs: TOAST_VISIBLE_MS,
+  toastExitMs: TOAST_EXIT_MS,
+};
+
 export class ShellView {
   private readonly refreshRoot = requiredElement<HTMLButtonElement>('#refresh-status');
   private readonly refreshGraphic = requiredElement<HTMLElement>('[data-refresh-graphic]', this.refreshRoot);
@@ -25,8 +39,11 @@ export class ShellView {
   private visualRunId: string | null = null;
   private settledRunId: string | null | undefined;
   private latestStatus: RefreshStatus | null = null;
+  private shortcutReturnFocus: HTMLElement | null = null;
+  private readonly timing: ShellTiming;
 
-  constructor() {
+  constructor(timing: Partial<ShellTiming> = {}) {
+    this.timing = { ...DEFAULT_TIMING, ...timing };
     const compactLayout = matchMedia(COMPACT_LAYOUT_QUERY);
     compactLayout.addEventListener('change', () => this.setNavigationOpen(false));
     this.refreshRoot.addEventListener('click', () => this.toggleRefreshDetails());
@@ -34,6 +51,7 @@ export class ShellView {
       const target = event.target instanceof Element ? event.target : null;
       if (!target?.closest('[data-refresh-status]')) this.dismissRefreshDetails();
     }, true);
+    this.shortcuts.addEventListener('keydown', event => this.trapShortcutFocus(event));
   }
 
   update(state: AppState): void {
@@ -47,8 +65,8 @@ export class ShellView {
     toast.className = 'toast';
     toast.textContent = message;
     requiredElement('#toast-container').append(toast);
-    window.setTimeout(() => toast.classList.add('is-leaving'), TOAST_VISIBLE_MS - TOAST_EXIT_MS);
-    window.setTimeout(() => toast.remove(), TOAST_VISIBLE_MS);
+    window.setTimeout(() => toast.classList.add('is-leaving'), this.timing.toastVisibleMs - this.timing.toastExitMs);
+    window.setTimeout(() => toast.remove(), this.timing.toastVisibleMs);
   }
 
   setNavigationOpen(open: boolean): void {
@@ -77,7 +95,17 @@ export class ShellView {
   }
 
   setShortcutsOpen(open: boolean): void {
-    this.shortcuts.hidden = !open;
+    if (open === !this.shortcuts.hidden) return;
+    if (open) {
+      this.shortcutReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      this.shortcuts.hidden = false;
+      this.shortcutFocusables()[0]?.focus({ preventScroll: true });
+      return;
+    }
+    this.shortcuts.hidden = true;
+    const returnFocus = this.shortcutReturnFocus;
+    this.shortcutReturnFocus = null;
+    if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   }
 
   shortcutsOpen(): boolean {
@@ -156,7 +184,7 @@ export class ShellView {
     if (this.segmentTimer !== null) return;
 
     const elapsed = performance.now() - this.segmentStartedAt;
-    const delay = Math.max(0, SEGMENT_SCAN_MS - elapsed);
+    const delay = Math.max(0, this.timing.segmentScanMs - elapsed);
     this.segmentTimer = window.setTimeout(() => {
       this.segmentTimer = null;
       const latest = this.latestStatus;
@@ -216,7 +244,7 @@ export class ShellView {
     this.refreshRoot.title = failureTitle(status);
     this.collapseTimer = window.setTimeout(() => {
       this.refreshRoot.dataset.phase = `${outcome}-collapsed`;
-    }, COMPLETE_HOLD_MS);
+    }, this.timing.completeHoldMs);
   }
 
   private setCollapsed(text: string, phase: string): void {
@@ -237,6 +265,30 @@ export class ShellView {
     if (this.segmentTimer !== null) window.clearTimeout(this.segmentTimer);
     this.collapseTimer = null;
     this.segmentTimer = null;
+  }
+
+  private shortcutFocusables(): HTMLElement[] {
+    return [...this.shortcuts.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )].filter(element => !element.hidden);
+  }
+
+  private trapShortcutFocus(event: KeyboardEvent): void {
+    if (event.key !== 'Tab' || this.shortcuts.hidden) return;
+    const focusable = this.shortcutFocusables();
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (!first || !last) {
+      event.preventDefault();
+      return;
+    }
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 }
 

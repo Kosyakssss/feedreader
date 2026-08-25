@@ -1,5 +1,6 @@
-import { mkdir, readdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { join, resolve } from 'node:path';
 import type { CacheFile, Config, Entry, EntryState, FeedCacheMeta, FeedsFile, StateFile } from './types.ts';
 import { createEntryId, publishedTime } from './feeds.ts';
@@ -11,6 +12,10 @@ const DEFAULT_CONFIG: Config = {
   theme: 'system',
   port: 8787,
   trustedOrigins: [],
+};
+
+export type ConfigPatch = Partial<Omit<Config, 'retention'>> & {
+  retention?: Partial<Config['retention']>;
 };
 
 /** Single source of truth for config value ranges (shared with the PUT /api/config validator). */
@@ -30,7 +35,8 @@ type DataFilename = 'feeds.json' | 'state.json' | 'cache.json' | 'config.json';
 
 let dataDir: string;
 let recoveryChain: Promise<void> | null = null;
-let dataMutationChain: Promise<void> = Promise.resolve();
+let dataOperationChain: Promise<void> = Promise.resolve();
+const dataOperationContext = new AsyncLocalStorage<boolean>();
 
 export function getDataDir(): string {
   if (!dataDir) {
@@ -103,14 +109,20 @@ function normalizeFeedMeta(value: unknown): Record<string, FeedCacheMeta> {
 
 function normalizeFeedsFile(value: unknown): FeedsFile {
   if (!isRecord(value)) return { folders: [], feeds: [] };
-  const folders = Array.isArray(value.folders)
+  const rawFolders = Array.isArray(value.folders)
     ? value.folders.filter(isRecord).flatMap(folder => {
       const { id, name } = folder;
       if (typeof id !== 'string' || !isSafeObjectKey(id) || typeof name !== 'string') return [];
       return [{ id, name }];
     })
     : [];
-  const feeds = Array.isArray(value.feeds)
+  const folderIds = new Set<string>();
+  const folders = rawFolders.filter(folder => {
+    if (folderIds.has(folder.id)) return false;
+    folderIds.add(folder.id);
+    return true;
+  });
+  const rawFeeds = Array.isArray(value.feeds)
     ? value.feeds.filter(isRecord).flatMap(feed => {
       const { id, url, label, folderId } = feed;
       if (typeof id !== 'string' || !isSafeObjectKey(id)) return [];
@@ -119,6 +131,14 @@ function normalizeFeedsFile(value: unknown): FeedsFile {
       return [{ id, url, label, folderId: folderId || null }];
     })
     : [];
+  const feedIds = new Set<string>();
+  const feedUrls = new Set<string>();
+  const feeds = rawFeeds.filter(feed => {
+    if (feedIds.has(feed.id) || feedUrls.has(feed.url)) return false;
+    feedIds.add(feed.id);
+    feedUrls.add(feed.url);
+    return true;
+  });
   return { folders, feeds };
 }
 
@@ -139,9 +159,15 @@ function normalizeEntry(entry: unknown): Entry | null {
 
 function normalizeCacheFile(cache: unknown): CacheFile {
   if (!isRecord(cache)) return { entries: [], lastFetched: {}, feedErrors: {}, feedMeta: {} };
-  const entries = Array.isArray(cache.entries)
+  const rawEntries = Array.isArray(cache.entries)
     ? cache.entries.flatMap(entry => normalizeEntry(entry) || [])
     : [];
+  const entryIds = new Set<string>();
+  const entries = rawEntries.filter(entry => {
+    if (entryIds.has(entry.id)) return false;
+    entryIds.add(entry.id);
+    return true;
+  });
   return {
     entries,
     lastFetched: numberRecord(cache.lastFetched),
@@ -233,8 +259,40 @@ async function writeJSONRaw(filename: string, data: unknown): Promise<void> {
   await mkdir(getDataDir(), { recursive: true });
   const target = join(getDataDir(), filename);
   const tmp = `${target}.tmp.${process.pid}.${randomUUID()}`;
-  await writeFile(tmp, JSON.stringify(data, null, 2) + '\n');
-  await rename(tmp, target);
+  let renamed = false;
+  try {
+    const handle = await open(tmp, 'wx');
+    try {
+      await handle.writeFile(JSON.stringify(data, null, 2) + '\n');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(tmp, target);
+    renamed = true;
+    await syncDataDirectory();
+  } finally {
+    if (!renamed) await unlink(tmp).catch(() => undefined);
+  }
+}
+
+async function syncDataDirectory(): Promise<void> {
+  const directory = await open(getDataDir(), 'r');
+  try {
+    await directory.sync();
+  } catch (error) {
+    const code = typeof error === 'object' && error && 'code' in error
+      ? (error as { code?: unknown }).code
+      : undefined;
+    if (code !== 'EINVAL' && code !== 'ENOTSUP' && code !== 'EPERM') throw error;
+  } finally {
+    await directory.close();
+  }
+}
+
+async function unlinkDurably(filename: string): Promise<void> {
+  await unlink(join(getDataDir(), filename));
+  await syncDataDirectory();
 }
 
 async function recoverPendingTransaction(): Promise<void> {
@@ -263,7 +321,7 @@ async function recoverPendingTransaction(): Promise<void> {
   for (const [filename, data] of writes) {
     await writeJSONRaw(filename, data);
   }
-  await unlink(join(getDataDir(), TRANSACTION_FILE));
+  await unlinkDurably(TRANSACTION_FILE);
 }
 
 async function ensureRecovered(): Promise<void> {
@@ -276,7 +334,7 @@ async function writeJSON(filename: DataFilename, data: unknown): Promise<void> {
   await writeJSONRaw(filename, normalizeDataFile(filename, data));
 }
 
-export async function writeDataFiles(files: Partial<Record<DataFilename, unknown>>): Promise<void> {
+async function writeDataFilesUnlocked(files: Partial<Record<DataFilename, unknown>>): Promise<void> {
   await ensureRecovered();
   const writes = Object.entries(files).flatMap(([filename, data]) =>
     isDataFilename(filename) ? [[filename, normalizeDataFile(filename, data)] as const] : []
@@ -292,17 +350,26 @@ export async function writeDataFiles(files: Partial<Record<DataFilename, unknown
   for (const [filename, data] of writes) {
     await writeJSONRaw(filename, data);
   }
-  await unlink(join(getDataDir(), TRANSACTION_FILE));
+  await unlinkDurably(TRANSACTION_FILE);
 }
 
-export async function runDataMutation<T>(operation: () => Promise<T>): Promise<T> {
-  let result!: T;
-  const run = dataMutationChain.then(async () => {
-    result = await operation();
-  });
-  dataMutationChain = run.then(() => undefined, () => undefined);
-  await run;
-  return result;
+async function runDataOperation<T>(operation: () => Promise<T>): Promise<T> {
+  if (dataOperationContext.getStore()) return await operation();
+  const run = dataOperationChain.then(() => dataOperationContext.run(true, operation));
+  dataOperationChain = run.then(() => undefined, () => undefined);
+  return await run;
+}
+
+export function runDataRead<T>(operation: () => Promise<T>): Promise<T> {
+  return runDataOperation(operation);
+}
+
+export function runDataMutation<T>(operation: () => Promise<T>): Promise<T> {
+  return runDataOperation(operation);
+}
+
+export function writeDataFiles(files: Partial<Record<DataFilename, unknown>>): Promise<void> {
+  return runDataMutation(() => writeDataFilesUnlocked(files));
 }
 
 // Latest-timestamp-wins merge for sync conflicts and re-reads. Correct only
@@ -312,13 +379,15 @@ function mergeStateEntry(existing: EntryState | undefined, incoming: EntryState)
   const next: EntryState = existing ? { ...existing } : {};
 
   if (typeof incoming.read === 'boolean' && !('read' in next)) next.read = incoming.read;
-  if (typeof incoming.read === 'boolean' && incoming.readAt && (!next.readAt || incoming.readAt >= next.readAt)) {
+  if (typeof incoming.read === 'boolean' && incoming.readAt !== undefined &&
+      (next.readAt === undefined || incoming.readAt >= next.readAt)) {
     next.read = incoming.read;
     next.readAt = incoming.readAt;
   }
 
   if (typeof incoming.starred === 'boolean' && !('starred' in next)) next.starred = incoming.starred;
-  if (typeof incoming.starred === 'boolean' && incoming.starredAt && (!next.starredAt || incoming.starredAt >= next.starredAt)) {
+  if (typeof incoming.starred === 'boolean' && incoming.starredAt !== undefined &&
+      (next.starredAt === undefined || incoming.starredAt >= next.starredAt)) {
     next.starred = incoming.starred;
     next.starredAt = incoming.starredAt;
   }
@@ -358,74 +427,77 @@ function normalizeStateFile(state: StateFile, cache: CacheFile): StateFile {
   return normalized;
 }
 
-let stateUpdateChain: Promise<void> = Promise.resolve();
-
-export const writeFeeds = (d: FeedsFile) => writeJSON('feeds.json', normalizeFeedsFile(d));
+export const writeFeeds = (d: FeedsFile) => runDataMutation(() => writeJSON('feeds.json', normalizeFeedsFile(d)));
 
 async function readRawState(): Promise<StateFile> {
   return normalizeStateShape(await readJSON<unknown>('state.json', {}));
 }
 
 export async function readState(cache?: CacheFile): Promise<StateFile> {
-  const state = await readRawState();
-  return cache ? normalizeStateFile(state, cache) : state;
+  return runDataRead(async () => {
+    const state = await readRawState();
+    return cache ? normalizeStateFile(state, cache) : state;
+  });
 }
 
-export const writeState = (d: StateFile) => writeJSON('state.json', normalizeStateShape(d));
+export const writeState = (d: StateFile) => runDataMutation(() => writeJSON('state.json', normalizeStateShape(d)));
 
 export async function updateState(mutator: (state: StateFile) => StateFile | void | Promise<StateFile | void>, cache?: CacheFile): Promise<StateFile> {
-  let result!: StateFile;
-  const run = stateUpdateChain.then(async () => {
+  return runDataMutation(async () => {
     const currentCache = cache || await readCache();
     const currentState = await readState(currentCache);
     const nextState = await mutator(currentState) || currentState;
     await writeState(nextState);
-    result = nextState;
+    return nextState;
   });
-  stateUpdateChain = run.then(() => undefined, () => undefined);
-  await run;
-  return result;
 }
 
-export const readFeeds = async () => normalizeFeedsFile(await readJSON<unknown>('feeds.json', { folders: [], feeds: [] }));
-export const readCache = async () => normalizeCacheFile(await readJSON<unknown>('cache.json', { entries: [], lastFetched: {}, feedErrors: {} }));
-export const writeCache = (d: CacheFile) => writeJSON('cache.json', normalizeCacheFile(d));
+export const readFeeds = () => runDataRead(async () =>
+  normalizeFeedsFile(await readJSON<unknown>('feeds.json', { folders: [], feeds: [] })));
+export const readCache = () => runDataRead(async () =>
+  normalizeCacheFile(await readJSON<unknown>('cache.json', { entries: [], lastFetched: {}, feedErrors: {} })));
+export const writeCache = (d: CacheFile) => runDataMutation(() => writeJSON('cache.json', normalizeCacheFile(d)));
 
 export async function readConfig(): Promise<Config> {
-  return normalizeConfig(await readJSON<unknown>('config.json', {}));
+  return runDataRead(async () => normalizeConfig(await readJSON<unknown>('config.json', {})));
 }
 
-export async function writeConfig(partial: Partial<Config>): Promise<Config> {
-  const current = await readConfig();
-  const updated = normalizeConfig({ ...current, ...partial, retention: { ...current.retention, ...partial.retention } });
-  await writeJSON('config.json', updated);
-  return updated;
+export async function writeConfig(partial: ConfigPatch): Promise<Config> {
+  return runDataMutation(async () => {
+    const current = await readConfig();
+    const updated = normalizeConfig({ ...current, ...partial, retention: { ...current.retention, ...partial.retention } });
+    await writeJSON('config.json', updated);
+    return updated;
+  });
 }
 
 export async function mergeSyncConflicts(): Promise<void> {
-  const dir = getDataDir();
-  let files: string[];
-  try {
-    files = await readdir(dir);
-  } catch {
-    return;
-  }
-  const conflicts = files.filter(f => f.startsWith('state.sync-conflict-') && f.endsWith('.json'));
-  if (conflicts.length === 0) return;
-
-  const cache = await readCache();
-  const mergedFiles: string[] = [];
-  await updateState(async (state) => {
-    for (const file of conflicts) {
-      const conflictState = normalizeStateFile(await readJSON<StateFile>(file, {}), cache);
-      for (const [id, cs] of Object.entries(conflictState)) {
-        state[id] = mergeStateEntry(state[id], cs);
-      }
-      mergedFiles.push(file);
+  return runDataMutation(async () => {
+    const dir = getDataDir();
+    let files: string[];
+    try {
+      files = await readdir(dir);
+    } catch {
+      return;
     }
-    return state;
-  }, cache);
-  await Promise.all(mergedFiles.map(file => unlink(join(dir, file))));
+    const conflicts = files.filter(f => f.startsWith('state.sync-conflict-') && f.endsWith('.json'));
+    if (conflicts.length === 0) return;
+
+    const cache = await readCache();
+    const mergedFiles: string[] = [];
+    await updateState(async (state) => {
+      for (const file of conflicts) {
+        const conflictState = normalizeStateFile(await readJSON<StateFile>(file, {}), cache);
+        for (const [id, cs] of Object.entries(conflictState)) {
+          state[id] = mergeStateEntry(state[id], cs);
+        }
+        mergedFiles.push(file);
+      }
+      return state;
+    }, cache);
+    await Promise.all(mergedFiles.map(file => unlink(join(dir, file))));
+    await syncDataDirectory();
+  });
 }
 
 export function pruneEntries(cache: CacheFile, state: StateFile, config: Config): { cache: CacheFile; state: StateFile } {

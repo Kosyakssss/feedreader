@@ -2,16 +2,20 @@ import { join } from 'node:path';
 import { stat } from 'node:fs/promises';
 
 import {
+  CONFIG_LIMITS,
   readFeeds, readState, updateState, readConfig, writeConfig,
   readCache, mergeSyncConflicts, pruneEntries,
-  readThemeCSS, generateId, getDataDir, runDataMutation, writeDataFiles,
+  readThemeCSS, generateId, getDataDir, runDataRead, runDataMutation, writeDataFiles,
+  inLimit,
+  type ConfigPatch,
 } from './lib/data.ts';
-import { CONFIG_LIMITS, inLimit } from './lib/data.ts';
-import { fetchAllFeeds, parseOPML, decodeHtmlEntities, probeFeed, publishedTime, resolveFeedInput } from './lib/feeds.ts';
-import type { FeedFetchResult } from './lib/feeds.ts';
+import {
+  fetchAllFeeds, parseOPML, decodeHtmlEntities, probeFeed, publishedTime, resolveFeedInput,
+  type FeedFetchResult,
+} from './lib/feeds.ts';
 import { renderApp } from './lib/render.ts';
 import { buildClientAssets, encodedAsset, encodedResponse, type ClientAssets, type EncodedAsset } from './lib/client-assets.ts';
-import type { EnrichedEntry, Feed } from './lib/types.ts';
+import type { Config, EnrichedEntry, EntryState, Feed } from './lib/types.ts';
 import { isSafeExternalUrl, isSafeObjectKey, sanitizeThemeName } from './lib/security.ts';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -94,38 +98,48 @@ function safeEntryUrl(rawUrl: string): string {
 }
 
 async function getEntries(feedFilter?: string): Promise<EnrichedEntry[]> {
-  const cache = await readCache();
-  const [state, feedsFile] = await Promise.all([readState(cache), readFeeds()]);
-  const feedMap = Object.fromEntries(feedsFile.feeds.map(f => [f.id, f.label]));
-  let entries = cache.entries;
-  if (feedFilter) entries = entries.filter(e => e.feedId === feedFilter);
-  return entries
-    .slice()
-    .sort((a, b) => publishedTime(b) - publishedTime(a))
-    .map(e => ({ ...e, url: safeEntryUrl(e.url), title: decodeHtmlEntities(e.title), feedLabel: feedMap[e.feedId] || 'Unknown', state: state[e.id] || {} }));
+  return runDataRead(async () => {
+    const cache = await readCache();
+    const [state, feedsFile] = await Promise.all([readState(cache), readFeeds()]);
+    const feedMap = Object.fromEntries(feedsFile.feeds.map(f => [f.id, f.label]));
+    let entries = cache.entries;
+    if (feedFilter) entries = entries.filter(e => e.feedId === feedFilter);
+    return entries
+      .slice()
+      .sort((a, b) => publishedTime(b) - publishedTime(a))
+      .map(e => ({ ...e, url: safeEntryUrl(e.url), title: decodeHtmlEntities(e.title), feedLabel: feedMap[e.feedId] || 'Unknown', state: state[e.id] || {} }));
+  });
 }
 
 async function getFeedsWithHealth() {
-  const [feedsFile, cache] = await Promise.all([readFeeds(), readCache()]);
-  const entryCounts: Record<string, number> = {};
-  for (const entry of cache.entries) {
-    entryCounts[entry.feedId] = (entryCounts[entry.feedId] ?? 0) + 1;
-  }
-  const health: Record<string, { lastFetched: number | null; error: string | null; entryCount: number }> = {};
-  for (const f of feedsFile.feeds) {
-    health[f.id] = {
-      lastFetched: cache.lastFetched[f.id] || null,
-      error: cache.feedErrors?.[f.id] || null,
-      entryCount: entryCounts[f.id] ?? 0,
-    };
-  }
-  return { ...feedsFile, health };
+  return runDataRead(async () => {
+    const [feedsFile, cache] = await Promise.all([readFeeds(), readCache()]);
+    const entryCounts: Record<string, number> = {};
+    for (const entry of cache.entries) {
+      entryCounts[entry.feedId] = (entryCounts[entry.feedId] ?? 0) + 1;
+    }
+    const health: Record<string, { lastFetched: number | null; error: string | null; entryCount: number }> = {};
+    for (const f of feedsFile.feeds) {
+      health[f.id] = {
+        lastFetched: cache.lastFetched[f.id] || null,
+        error: cache.feedErrors?.[f.id] || null,
+        entryCount: entryCounts[f.id] ?? 0,
+      };
+    }
+    return { ...feedsFile, health };
+  });
 }
 
 async function refreshFeeds(progress: RefreshProgress): Promise<number> {
-  await runDataMutation(() => mergeSyncConflicts());
-  const [feedsFile, startingCache] = await Promise.all([readFeeds(), readCache()]);
-  const startingState = await readState(startingCache);
+  await mergeSyncConflicts();
+  const { feedsFile, startingCache, startingState } = await runDataRead(async () => {
+    const [nextFeeds, nextCache] = await Promise.all([readFeeds(), readCache()]);
+    return {
+      feedsFile: nextFeeds,
+      startingCache: nextCache,
+      startingState: await readState(nextCache),
+    };
+  });
   const feedsToFetch = feedsFile.feeds;
   progress.total = feedsToFetch.length;
 
@@ -368,7 +382,7 @@ function renderBasePath(req: Request, pathname: string): string {
   return '';
 }
 
-async function parseJSONBody(req: Request): Promise<any> {
+async function parseJSONBody(req: Request): Promise<unknown> {
   if (!hasJsonContentType(req)) {
     throw new HttpError(415, 'Content-Type must be application/json');
   }
@@ -462,6 +476,223 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseStateUpdates(body: unknown): Record<string, Pick<EntryState, 'read' | 'starred'>> {
+  if (!isRecord(body) || !isRecord(body.entries)) throw new HttpError(400, 'Invalid state payload');
+  const parsed: Record<string, Pick<EntryState, 'read' | 'starred'>> = Object.create(null);
+  for (const [id, value] of Object.entries(body.entries)) {
+    if (!isSafeObjectKey(id)) throw new HttpError(400, 'Invalid entry id');
+    if (!isRecord(value)) throw new HttpError(400, `Invalid state update for ${id}`);
+    const update: Pick<EntryState, 'read' | 'starred'> = {};
+    if ('read' in value) {
+      if (typeof value.read !== 'boolean') throw new HttpError(400, `Invalid read state for ${id}`);
+      update.read = value.read;
+    }
+    if ('starred' in value) {
+      if (typeof value.starred !== 'boolean') throw new HttpError(400, `Invalid starred state for ${id}`);
+      update.starred = value.starred;
+    }
+    if (!('read' in update) && !('starred' in update)) throw new HttpError(400, `Empty state update for ${id}`);
+    parsed[id] = update;
+  }
+  return parsed;
+}
+
+async function updateEntryState(req: Request): Promise<Response> {
+  const updates = parseStateUpdates(await parseJSONBody(req));
+  const now = Date.now();
+  await runDataMutation(async () => {
+    const cache = await readCache();
+    const knownIds = new Set(cache.entries.map(entry => entry.id));
+    for (const change of refreshProgress?.changes ?? []) knownIds.add(change.entry.id);
+    for (const id of Object.keys(updates)) {
+      if (!knownIds.has(id)) throw new HttpError(400, `Unknown entry id: ${id}`);
+    }
+    await updateState((state) => {
+      for (const [id, update] of Object.entries(updates)) {
+        const next = state[id] ?? {};
+        if (update.read !== undefined) {
+          next.read = update.read;
+          next.readAt = now;
+        }
+        if (update.starred !== undefined) {
+          next.starred = update.starred;
+          next.starredAt = now;
+        }
+        state[id] = next;
+      }
+      return state;
+    }, cache);
+  });
+  return json({ ok: true });
+}
+
+function parseConfigPatch(body: unknown): ConfigPatch {
+  if (!isRecord(body)) throw new HttpError(400, 'Invalid config payload');
+  const patch: ConfigPatch = {};
+  if ('maxBulkOpen' in body) {
+    if (typeof body.maxBulkOpen !== 'number' || !inLimit(body.maxBulkOpen, CONFIG_LIMITS.maxBulkOpen)) {
+      throw new HttpError(400, 'Invalid maxBulkOpen');
+    }
+    patch.maxBulkOpen = body.maxBulkOpen;
+  }
+  if ('port' in body) {
+    if (typeof body.port !== 'number' || !inLimit(body.port, CONFIG_LIMITS.port)) {
+      throw new HttpError(400, 'Invalid port');
+    }
+    patch.port = body.port;
+  }
+  if ('theme' in body) {
+    if (body.theme === null || body.theme === '') {
+      patch.theme = 'system';
+    } else {
+      const safeTheme = sanitizeThemeName(body.theme);
+      if (!safeTheme) throw new HttpError(400, 'Invalid theme name');
+      if (safeTheme !== 'system') throw new HttpError(400, 'Theme is not available');
+      patch.theme = safeTheme;
+    }
+  }
+  if ('retention' in body) {
+    if (!isRecord(body.retention)) throw new HttpError(400, 'Invalid retention config');
+    const retention: Partial<Config['retention']> = {};
+    if ('maxEntries' in body.retention) {
+      const maxEntries = body.retention.maxEntries;
+      if (typeof maxEntries !== 'number' || !inLimit(maxEntries, CONFIG_LIMITS.maxEntries)) {
+        throw new HttpError(400, 'Invalid retention.maxEntries');
+      }
+      retention.maxEntries = maxEntries;
+    }
+    if ('maxDays' in body.retention) {
+      const maxDays = body.retention.maxDays;
+      if (maxDays !== null && (typeof maxDays !== 'number' || !inLimit(maxDays, CONFIG_LIMITS.maxDays))) {
+        throw new HttpError(400, 'Invalid retention.maxDays');
+      }
+      retention.maxDays = maxDays as number | null;
+    }
+    patch.retention = retention;
+  }
+  return patch;
+}
+
+async function updateConfig(req: Request): Promise<Response> {
+  const patch = parseConfigPatch(await parseJSONBody(req));
+  return json(await writeConfig(patch));
+}
+
+async function addFeed(req: Request, server: Bun.Server<undefined>): Promise<Response> {
+  const body = await parseJSONBody(req);
+  if (!isRecord(body) || typeof body.url !== 'string') throw new HttpError(400, 'Invalid feed payload');
+  server.timeout(req, 120);
+  const resolved = await resolveFeedInput(body.url).catch(error => {
+    throw new HttpError(400, (error as Error).message || 'Could not resolve feed');
+  });
+  const probe = await probeFeed(resolved.url, resolved.label).catch((error: unknown) => {
+    throw new HttpError(400, `Feed could not be read: ${(error as Error)?.message || 'unknown error'}`);
+  });
+  if (!probe.ok) throw new HttpError(400, `Feed could not be read: ${probe.error}`);
+
+  const feed = await runDataMutation(async () => {
+    const feedsFile = await readFeeds();
+    if (feedsFile.feeds.some(existing => existing.url === resolved.url)) {
+      throw new HttpError(409, 'Feed already exists');
+    }
+    const created = {
+      id: generateId(),
+      url: resolved.url,
+      label: resolved.label,
+      folderId: null,
+    };
+    feedsFile.feeds.push(created);
+    await writeDataFiles({ 'feeds.json': feedsFile });
+    return created;
+  });
+  return json(feed, 201);
+}
+
+async function deleteFeed(id: string): Promise<Response> {
+  await runDataMutation(async () => {
+    const feedsFile = await readFeeds();
+    feedsFile.feeds = feedsFile.feeds.filter(feed => feed.id !== id);
+    const cache = await readCache();
+    const removedIds = new Set(cache.entries.filter(entry => entry.feedId === id).map(entry => entry.id));
+    cache.entries = cache.entries.filter(entry => entry.feedId !== id);
+    delete cache.lastFetched[id];
+    delete cache.feedErrors[id];
+    delete cache.feedMeta[id];
+    const state = await readState(cache);
+    for (const removedId of removedIds) delete state[removedId];
+    await writeDataFiles({ 'feeds.json': feedsFile, 'cache.json': cache, 'state.json': state });
+  });
+  return json({ ok: true });
+}
+
+async function importFeeds(req: Request): Promise<Response> {
+  const raw = await parseBody(req);
+  let opmlText = raw;
+  const boundary = req.headers.get('content-type')?.match(/boundary=(.+)/)?.[1];
+  if (boundary) {
+    for (const part of raw.split(`--${boundary}`)) {
+      const bodyStart = part.indexOf('\r\n\r\n');
+      if (bodyStart === -1) continue;
+      const content = part.slice(bodyStart + 4).trim();
+      if (content.includes('<opml') || content.includes('<outline')) {
+        opmlText = content;
+        break;
+      }
+    }
+  }
+
+  const imported = parseOPML(opmlText);
+  const added = await runDataMutation(async () => {
+    const feedsFile = await readFeeds();
+    const existingUrls = new Set(feedsFile.feeds.map(feed => feed.url));
+    let count = 0;
+    for (const candidate of imported) {
+      let feedUrl: string;
+      try {
+        feedUrl = parseExternalUrlOrThrow(candidate.url).href;
+      } catch {
+        continue;
+      }
+      if (existingUrls.has(feedUrl)) continue;
+      feedsFile.feeds.push({
+        id: generateId(),
+        url: feedUrl,
+        label: candidate.label || new URL(feedUrl).hostname,
+        folderId: null,
+      });
+      existingUrls.add(feedUrl);
+      count++;
+    }
+    await writeDataFiles({ 'feeds.json': feedsFile });
+    return count;
+  });
+  return json({ added, skipped: imported.length - added });
+}
+
+async function exportFeeds(): Promise<Response> {
+  const feedsFile = await readFeeds();
+  const outlines = feedsFile.feeds.map(feed =>
+    `  <outline type="rss" text="${escapeHtml(feed.label)}" title="${escapeHtml(feed.label)}" xmlUrl="${escapeHtml(feed.url)}" />`
+  );
+  const opml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<opml version="2.0">',
+    '<head><title>Feedreader Export</title></head>',
+    '<body>',
+    ...outlines,
+    '</body>',
+    '</opml>',
+  ].join('\n');
+  return new Response(opml, { headers: {
+    'content-type': 'text/xml; charset=utf-8',
+    'content-disposition': 'attachment; filename="feedreader.opml"',
+  }});
+}
+
 async function handleRequest(req: Request, server: Bun.Server<undefined>): Promise<Response> {
   try {
     assertTrustedHost(req);
@@ -492,22 +723,7 @@ async function handleRequest(req: Request, server: Bun.Server<undefined>): Promi
     }
 
     if (path === '/api/state' && method === 'POST') {
-      const body = await parseJSONBody(req);
-      if (!body || typeof body !== 'object' || !body.entries || typeof body.entries !== 'object' || Array.isArray(body.entries)) {
-        throw new HttpError(400, 'Invalid state payload');
-      }
-      const now = Date.now();
-      await runDataMutation(() => updateState((state) => {
-        for (const [id, updates] of Object.entries(body.entries as Record<string, any>)) {
-          if (!isSafeObjectKey(id)) throw new HttpError(400, 'Invalid entry id');
-          if (!updates || typeof updates !== 'object') continue;
-          if (!state[id]) state[id] = {};
-          if ('read' in updates && typeof updates.read === 'boolean') { state[id].read = updates.read; state[id].readAt = now; }
-          if ('starred' in updates && typeof updates.starred === 'boolean') { state[id].starred = updates.starred; state[id].starredAt = now; }
-        }
-        return state;
-      }));
-      return json({ ok: true });
+      return await updateEntryState(req);
     }
 
     if (path === '/api/feeds' && method === 'GET') {
@@ -515,112 +731,19 @@ async function handleRequest(req: Request, server: Bun.Server<undefined>): Promi
     }
 
     if (path === '/api/feeds' && method === 'POST') {
-      const body = await parseJSONBody(req);
-      if (!body || typeof body !== 'object' || typeof body.url !== 'string') {
-        throw new HttpError(400, 'Invalid feed payload');
-      }
-      server.timeout(req, 120);
-      const resolved = await resolveFeedInput(body.url).catch(error => {
-        throw new HttpError(400, (error as Error).message || 'Could not resolve feed');
-      });
-      const feedUrl = resolved.url;
-      const probe = await probeFeed(feedUrl, resolved.label).catch((error: unknown) => {
-        throw new HttpError(400, `Feed could not be read: ${(error as Error)?.message || 'unknown error'}`);
-      });
-      if (!probe.ok) {
-        throw new HttpError(400, `Feed could not be read: ${probe.error}`);
-      }
-      const newFeed = await runDataMutation(async () => {
-        const feedsFile = await readFeeds();
-        if (feedsFile.feeds.some(f => f.url === feedUrl)) {
-          throw new HttpError(409, 'Feed already exists');
-        }
-        const feed = {
-          id: generateId(),
-          url: feedUrl,
-          label: resolved.label,
-          folderId: null,
-        };
-        feedsFile.feeds.push(feed);
-        await writeDataFiles({ 'feeds.json': feedsFile });
-        return feed;
-      });
-      return json(newFeed, 201);
+      return await addFeed(req, server);
     }
 
     if (path.startsWith('/api/feeds/') && method === 'DELETE') {
-      const id = path.slice('/api/feeds/'.length);
-      await runDataMutation(async () => {
-        const feedsFile = await readFeeds();
-        feedsFile.feeds = feedsFile.feeds.filter(f => f.id !== id);
-        const cache = await readCache();
-        const removedIds = new Set(cache.entries.filter(e => e.feedId === id).map(e => e.id));
-        cache.entries = cache.entries.filter(e => e.feedId !== id);
-        delete cache.lastFetched[id];
-        delete cache.feedErrors[id];
-        const state = await readState(cache);
-        for (const rid of removedIds) delete state[rid];
-        await writeDataFiles({ 'feeds.json': feedsFile, 'cache.json': cache, 'state.json': state });
-      });
-      return json({ ok: true });
+      return await deleteFeed(path.slice('/api/feeds/'.length));
     }
 
     if (path === '/api/feeds/import' && method === 'POST') {
-      const raw = await parseBody(req);
-      let opmlText = raw;
-      const boundary = req.headers.get('content-type')?.match(/boundary=(.+)/)?.[1];
-      if (boundary) {
-        const parts = raw.split('--' + boundary);
-        for (const part of parts) {
-          const bodyStart = part.indexOf('\r\n\r\n');
-          if (bodyStart !== -1) {
-            const content = part.slice(bodyStart + 4).trim();
-            if (content.includes('<opml') || content.includes('<outline')) {
-              opmlText = content;
-              break;
-            }
-          }
-        }
-      }
-      const imported = parseOPML(opmlText);
-      const added = await runDataMutation(async () => {
-        const feedsFile = await readFeeds();
-        const existingUrls = new Set(feedsFile.feeds.map(f => f.url));
-        let count = 0;
-        for (const f of imported) {
-          let feedUrl: string;
-          try {
-            feedUrl = parseExternalUrlOrThrow(f.url).href;
-          } catch {
-            continue;
-          }
-          if (existingUrls.has(feedUrl)) continue;
-          feedsFile.feeds.push({
-            id: generateId(),
-            url: feedUrl,
-            label: f.label || new URL(feedUrl).hostname,
-            folderId: null,
-          });
-          existingUrls.add(feedUrl);
-          count++;
-        }
-        await writeDataFiles({ 'feeds.json': feedsFile });
-        return count;
-      });
-      return json({ added, skipped: imported.length - added });
+      return await importFeeds(req);
     }
 
     if (path === '/api/feeds/export' && method === 'GET') {
-      const feedsFile = await readFeeds();
-      let opml = '<?xml version="1.0" encoding="UTF-8"?>\n<opml version="2.0">\n<head><title>Feedreader Export</title></head>\n<body>\n';
-      for (const f of feedsFile.feeds) {
-        opml += `  <outline type="rss" text="${escapeHtml(f.label)}" title="${escapeHtml(f.label)}" xmlUrl="${escapeHtml(f.url)}" />\n`;
-      }
-      opml += '</body>\n</opml>';
-      return new Response(opml, { headers: {
-        'content-type': 'text/xml; charset=utf-8',
-        'content-disposition': 'attachment; filename="feedreader.opml"',
-      }});
+      return await exportFeeds();
     }
 
     if (path === '/api/config' && method === 'GET') {
@@ -628,55 +751,7 @@ async function handleRequest(req: Request, server: Bun.Server<undefined>): Promi
     }
 
     if (path === '/api/config' && method === 'PUT') {
-      const body = await parseJSONBody(req);
-      if (!body || typeof body !== 'object') throw new HttpError(400, 'Invalid config payload');
-
-      const patch: any = {};
-      if ('maxBulkOpen' in body) {
-        if (typeof body.maxBulkOpen !== 'number' || !inLimit(body.maxBulkOpen, CONFIG_LIMITS.maxBulkOpen)) {
-          throw new HttpError(400, 'Invalid maxBulkOpen');
-        }
-        patch.maxBulkOpen = body.maxBulkOpen;
-      }
-      if ('port' in body) {
-        if (typeof body.port !== 'number' || !inLimit(body.port, CONFIG_LIMITS.port)) {
-          throw new HttpError(400, 'Invalid port');
-        }
-        patch.port = body.port;
-      }
-      if ('theme' in body) {
-        if (body.theme === null || body.theme === '') {
-          patch.theme = 'system';
-        } else {
-          const safeTheme = sanitizeThemeName(body.theme);
-          if (!safeTheme) throw new HttpError(400, 'Invalid theme name');
-          if (!['system'].includes(safeTheme)) {
-            throw new HttpError(400, 'Theme is not available');
-          }
-          patch.theme = safeTheme;
-        }
-      }
-      if ('retention' in body) {
-        const r = body.retention;
-        if (!r || typeof r !== 'object') throw new HttpError(400, 'Invalid retention config');
-        const retentionPatch: any = {};
-        if ('maxEntries' in r) {
-          if (typeof r.maxEntries !== 'number' || !inLimit(r.maxEntries, CONFIG_LIMITS.maxEntries)) {
-            throw new HttpError(400, 'Invalid retention.maxEntries');
-          }
-          retentionPatch.maxEntries = r.maxEntries;
-        }
-        if ('maxDays' in r) {
-          if (r.maxDays !== null && (typeof r.maxDays !== 'number' || !inLimit(r.maxDays, CONFIG_LIMITS.maxDays))) {
-            throw new HttpError(400, 'Invalid retention.maxDays');
-          }
-          retentionPatch.maxDays = r.maxDays;
-        }
-        patch.retention = retentionPatch;
-      }
-
-      const updated = await runDataMutation(() => writeConfig(patch));
-      return json(updated);
+      return await updateConfig(req);
     }
 
     if (path === '/api/theme' && method === 'GET') {
@@ -716,7 +791,7 @@ async function handleRequest(req: Request, server: Bun.Server<undefined>): Promi
       return err(e.message, e.status);
     }
     console.error('Request error:', e);
-    return err((e as Error).message);
+    return err('Internal server error');
   }
 }
 

@@ -90,7 +90,7 @@ All runtime data lives in `data/`. The feed list and system theme are versioned;
 - **Bulk actions**: open all unread (tab cap configurable, default 20), mark read/starred, select multiple with `x`, shift-click, or drag-selecting the checkbox lane
 - **Feed auto-discovery**: fetches HTML, looks for `<link rel="alternate">`, tries common paths
 - **OPML import**: paste or upload OPML to add feeds in bulk; unsafe/local URLs are skipped
-- **View transitions**: uses the View Transition API for page navigation — browsers that don't support it just skip the animation
+- **Incremental rendering**: keyed DOM reconciliation preserves entry identity, while targeted Web Animations reveal only newly inserted entries
 - **Keyed live updates**: refreshed entries appear at their sorted position without rebuilding unchanged rows or moving a scrolled reading position
 - **Retention**: default 3000 entries, configurable by count and/or max days (whichever hits first)
 

@@ -39,3 +39,5 @@ export const api = {
   deleteFeed: (id: string) => request<{ ok: boolean }>('DELETE', `/api/feeds/${encodeURIComponent(id)}`),
   importFeeds: (body: FormData) => request<{ added: number; skipped: number }>('POST', '/api/feeds/import', body),
 };
+
+export type FeedreaderApi = typeof api;

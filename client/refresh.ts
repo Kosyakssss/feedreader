@@ -1,4 +1,4 @@
-import { api } from './api.ts';
+import { api, type FeedreaderApi } from './api.ts';
 import type { RefreshStatus } from './state.ts';
 
 const POLL_INTERVAL_MS = 750;
@@ -9,6 +9,7 @@ export class RefreshPoller {
   constructor(
     private readonly receive: (status: RefreshStatus) => void,
     private readonly cursor: () => number,
+    private readonly client: FeedreaderApi = api,
   ) {}
 
   run(): Promise<RefreshStatus> {
@@ -21,11 +22,11 @@ export class RefreshPoller {
   }
 
   private async poll(): Promise<RefreshStatus> {
-    let latest = await api.startRefresh();
+    let latest = await this.client.startRefresh();
     this.receive(latest);
     while (latest.refreshing) {
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
-      latest = await api.refreshStatus(this.cursor());
+      latest = await this.client.refreshStatus(this.cursor());
       this.receive(latest);
     }
     return latest;

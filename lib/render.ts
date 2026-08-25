@@ -66,7 +66,7 @@ ${renderIconSprite()}
     <button class="btn" data-shortcuts-close>Close</button>
   </div>
 </div>
-<div class="toast-container" id="toast-container"></div>
+<div class="toast-container" id="toast-container" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <script src="${basePath}/app.js${assetQuery}" type="module"></script>
 </body>

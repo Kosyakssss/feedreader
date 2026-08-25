@@ -92,7 +92,7 @@
   font-size: 0.8em;
 }
 
-/* Checkbox — custom rounded Apple-style */
+/* Checkbox */
 .entry-checkbox input[type="checkbox"] {
   -webkit-appearance: none;
   appearance: none;

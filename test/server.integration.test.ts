@@ -6,10 +6,24 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import type { Config } from '../lib/types.ts';
 
 let dataDir = '';
 let port = 0;
 let proc: ChildProcess | null = null;
+let serverOutput = '';
+
+async function availablePort(): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const selected = typeof address === 'object' && address ? address.port : 0;
+      server.close(error => error ? reject(error) : resolve(selected));
+    });
+  });
+}
 
 async function waitForServerReady(baseUrl: string): Promise<void> {
   const deadline = Date.now() + 8000;
@@ -46,17 +60,34 @@ beforeAll(async () => {
   await writeFile(join(dataDir, 'config.json'), '{ "trustedOrigins": ["https://airm1.example.ts.net"] }\n');
   await writeFile(join(dataDir, 'themes', 'system.css'), '/* feedreader-system-theme */\nbody { color: CanvasText; }\n');
 
-  port = 41000 + Math.floor(Math.random() * 5000);
+  port = await availablePort();
   proc = spawn(process.env.FEEDREADER_SERVER_BIN || 'bun', ['server.ts', '--data', dataDir, '--port', String(port)], {
     cwd: dirname(fileURLToPath(new URL('../server.ts', import.meta.url))),
-    stdio: 'ignore',
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
+  proc.stdout?.on('data', chunk => { serverOutput += String(chunk); });
+  proc.stderr?.on('data', chunk => { serverOutput += String(chunk); });
 
-  await waitForServerReady(`http://127.0.0.1:${port}`);
+  try {
+    await waitForServerReady(`http://127.0.0.1:${port}`);
+  } catch (error) {
+    throw new Error(`${(error as Error).message}\n${serverOutput}`);
+  }
 });
 
 afterAll(async () => {
-  proc?.kill();
+  if (proc && proc.exitCode === null) {
+    proc.kill();
+    await new Promise<void>(resolve => {
+      const forceTimer = setTimeout(() => proc?.kill('SIGKILL'), 3000);
+      const abandonTimer = setTimeout(resolve, 5000);
+      proc?.once('exit', () => {
+        clearTimeout(forceTimer);
+        clearTimeout(abandonTimer);
+        resolve();
+      });
+    });
+  }
   if (dataDir) await rm(dataDir, { recursive: true, force: true });
 });
 
@@ -242,7 +273,7 @@ describe('server hardening', () => {
     }
   });
 
-  test('fails loudly on malformed cache JSON', async () => {
+  test('returns a generic 500 for malformed cache JSON without exposing disk details', async () => {
     const cachePath = join(dataDir, 'cache.json');
     const original = await readFile(cachePath, 'utf-8');
     await writeFile(cachePath, '{bad');
@@ -250,13 +281,15 @@ describe('server hardening', () => {
       const res = await fetch(`http://127.0.0.1:${port}/api/entries`);
       expect(res.status).toBe(500);
       const body = await res.json() as { error: string };
-      expect(body.error).toContain('Malformed JSON in cache.json');
+      expect(body.error).toBe('Internal server error');
     } finally {
       await writeFile(cachePath, original);
     }
   });
 
   test('skips unsafe feed URLs during OPML import', async () => {
+    const feedsPath = join(dataDir, 'feeds.json');
+    const originalFeeds = await readFile(feedsPath, 'utf-8');
     const form = new FormData();
     form.append('file', new File([
       `<?xml version="1.0"?>
@@ -268,40 +301,119 @@ describe('server hardening', () => {
 </opml>`,
     ], 'feeds.opml', { type: 'text/xml' }));
 
-    const res = await fetch(`http://127.0.0.1:${port}/api/feeds/import`, {
-      method: 'POST',
-      body: form,
-    });
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/feeds/import`, {
+        method: 'POST',
+        body: form,
+      });
 
-    expect(res.status).toBe(200);
-    const body = await res.json() as { added: number; skipped: number };
-    expect(body).toEqual({ added: 1, skipped: 1 });
+      expect(res.status).toBe(200);
+      const body = await res.json() as { added: number; skipped: number };
+      expect(body).toEqual({ added: 1, skipped: 1 });
 
-    const feedsRes = await fetch(`http://127.0.0.1:${port}/api/feeds`);
-    const feeds = await feedsRes.json() as { feeds: Array<{ url: string }> };
-    expect(feeds.feeds.map(feed => feed.url)).toEqual(['https://example.com/feed.xml']);
+      const feedsRes = await fetch(`http://127.0.0.1:${port}/api/feeds`);
+      const feeds = await feedsRes.json() as { feeds: Array<{ url: string }> };
+      expect(feeds.feeds.map(feed => feed.url)).toEqual(['https://example.com/feed.xml']);
+    } finally {
+      await writeFile(feedsPath, originalFeeds);
+    }
   });
 
   test('preserves concurrent state updates', async () => {
+    const cachePath = join(dataDir, 'cache.json');
+    const statePath = join(dataDir, 'state.json');
+    const [originalCache, originalState] = await Promise.all([
+      readFile(cachePath, 'utf-8'),
+      readFile(statePath, 'utf-8'),
+    ]);
+    const persistedEntries = ['a', 'b'].map(id => ({
+      id: `f:${id}`,
+      sourceId: id,
+      feedId: 'f',
+      url: `https://example.com/${id}`,
+      title: id,
+      published: '2026-08-25T00:00:00.000Z',
+    }));
+    await writeFile(cachePath, JSON.stringify({ entries: persistedEntries, lastFetched: {}, feedErrors: {}, feedMeta: {} }));
     const requests: Promise<Response>[] = [];
     for (let i = 0; i < 100; i++) {
       requests.push(fetch(`http://127.0.0.1:${port}/api/state`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ entries: { a: { read: true } } }),
+        body: JSON.stringify({ entries: { 'f:a': { read: true } } }),
       }));
       requests.push(fetch(`http://127.0.0.1:${port}/api/state`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ entries: { b: { starred: true } } }),
+        body: JSON.stringify({ entries: { 'f:b': { starred: true } } }),
       }));
     }
 
-    await Promise.all(requests);
+    try {
+      const responses = await Promise.all(requests);
+      expect(responses.every(response => response.status === 200)).toBe(true);
+      const state = JSON.parse(await readFile(statePath, 'utf-8')) as Record<string, { read?: boolean; starred?: boolean }>;
+      expect(state['f:a']?.read).toBe(true);
+      expect(state['f:b']?.starred).toBe(true);
+    } finally {
+      await Promise.all([writeFile(cachePath, originalCache), writeFile(statePath, originalState)]);
+    }
+  });
 
-    const state = JSON.parse(await readFile(join(dataDir, 'state.json'), 'utf-8')) as Record<string, { read?: boolean; starred?: boolean }>;
-    expect(state.a?.read).toBe(true);
-    expect(state.b?.starred).toBe(true);
+  test('rejects unknown entry ids and malformed state values', async () => {
+    const unknown = await fetch(`http://127.0.0.1:${port}/api/state`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ entries: { missing: { read: true } } }),
+    });
+    expect(unknown.status).toBe(400);
+
+    const malformed = await fetch(`http://127.0.0.1:${port}/api/state`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ entries: { missing: { read: 'yes' } } }),
+    });
+    expect(malformed.status).toBe(400);
+  });
+
+  test('deleting a feed removes its cache metadata, entries, and state atomically', async () => {
+    const paths = ['feeds.json', 'cache.json', 'state.json'] as const;
+    const originals = await Promise.all(paths.map(file => readFile(join(dataDir, file), 'utf-8')));
+    const persistedEntry = {
+      id: 'delete-me:item',
+      sourceId: 'item',
+      feedId: 'delete-me',
+      url: 'https://example.com/item',
+      title: 'Item',
+      published: '2026-08-25T00:00:00.000Z',
+    };
+    await Promise.all([
+      writeFile(join(dataDir, 'feeds.json'), JSON.stringify({ folders: [], feeds: [
+        { id: 'delete-me', url: 'https://example.com/feed', label: 'Delete me', folderId: null },
+      ] })),
+      writeFile(join(dataDir, 'cache.json'), JSON.stringify({
+        entries: [persistedEntry],
+        lastFetched: { 'delete-me': 1 },
+        feedErrors: { 'delete-me': 'old error' },
+        feedMeta: { 'delete-me': { etag: 'old', failureCount: 2 } },
+      })),
+      writeFile(join(dataDir, 'state.json'), JSON.stringify({ [persistedEntry.id]: { starred: true, starredAt: 1 } })),
+    ]);
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/feeds/delete-me`, { method: 'DELETE' });
+      expect(response.status).toBe(200);
+      const [feeds, cache, state] = await Promise.all(paths.map(async file =>
+        JSON.parse(await readFile(join(dataDir, file), 'utf-8'))));
+      expect(feeds.feeds).toEqual([]);
+      expect(cache.entries).toEqual([]);
+      expect(cache.lastFetched).toEqual({});
+      expect(cache.feedErrors).toEqual({});
+      expect(cache.feedMeta).toEqual({});
+      expect(state).toEqual({});
+    } finally {
+      await Promise.all(paths.map((file, index) => writeFile(join(dataDir, file), originals[index]!)));
+    }
   });
 
   test('rejects invalid theme name in /api/config', async () => {
@@ -343,6 +455,37 @@ describe('server hardening', () => {
       body: JSON.stringify({ theme: 'default' }),
     });
     expect(res.status).toBe(400);
+  });
+
+  test('validates config bounds and preserves fields omitted by partial updates', async () => {
+    const configPath = join(dataDir, 'config.json');
+    const original = await readFile(configPath, 'utf-8');
+    try {
+      for (const body of [
+        { maxBulkOpen: 0 },
+        { retention: { maxEntries: 99 } },
+        { retention: { maxDays: 36501 } },
+      ]) {
+        const invalid = await fetch(`http://127.0.0.1:${port}/api/config`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        expect(invalid.status).toBe(400);
+      }
+
+      const update = await fetch(`http://127.0.0.1:${port}/api/config`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ retention: { maxDays: 30 } }),
+      });
+      expect(update.status).toBe(200);
+      const saved = await update.json() as Config;
+      expect(saved.retention).toEqual({ maxEntries: 3000, maxDays: 30 });
+      expect(saved.maxBulkOpen).toBe(20);
+    } finally {
+      await writeFile(configPath, original);
+    }
   });
 
   test('starts refresh with progress and delta fields instead of full snapshots', async () => {

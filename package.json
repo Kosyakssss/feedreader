@@ -2,6 +2,7 @@
   "name": "feedreader",
   "devDependencies": {
     "@types/bun": "^1.4.0",
+    "happy-dom": "^20.11.6",
     "typescript": "^7.0.2"
   },
   "scripts": {

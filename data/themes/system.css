@@ -23,15 +23,11 @@
   --border: rgba(40, 39, 38, 0.16);
   --star: #bc5215;
   --danger: #af3029;
-  --danger-soft: rgba(175, 48, 41, 0.12);
-  --success: #66800b;
-  --success-soft: rgba(102, 128, 11, 0.14);
   --warning: #ad8301;
   --control-bg: rgba(40, 39, 38, 0.06);
   --focus-ring: rgba(32, 94, 166, 0.25);
   --overlay: rgba(40, 39, 38, 0.34);
   --on-accent: #fffcf0;
-  --radius: 0;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
   --font-mono: "SF Mono", ui-monospace, "Cascadia Code", monospace;
   --font-size: 15px;
@@ -40,7 +36,6 @@
   --spacing-md: 16px;
   --spacing-lg: 24px;
   --spacing-xl: 32px;
-  --shadow: 0 0.5px 0 rgba(40, 39, 38, 0.04), 0 1px 3px rgba(40, 39, 38, 0.08);
   --transition: 180ms;
 }
 
@@ -62,14 +57,10 @@
     --border: rgba(206, 205, 195, 0.17);
     --star: #da702c;
     --danger: #d14d41;
-    --danger-soft: rgba(209, 77, 65, 0.18);
-    --success: #879a39;
-    --success-soft: rgba(135, 154, 57, 0.18);
     --warning: #d0a215;
     --control-bg: rgba(206, 205, 195, 0.08);
     --focus-ring: rgba(67, 133, 190, 0.32);
     --overlay: rgba(16, 15, 15, 0.72);
     --on-accent: #100f0f;
-    --shadow: none;
   }
 }

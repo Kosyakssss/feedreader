@@ -1,4 +1,4 @@
-import type { EnrichedEntry, Feed } from '../../lib/types.ts';
+import type { Feed } from '../../lib/types.ts';
 import { externalPath } from '../router.ts';
 import {
   type AppState,

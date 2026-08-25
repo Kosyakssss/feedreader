@@ -10,19 +10,24 @@ export function isSafeObjectKey(key: string): boolean {
   return key !== '__proto__' && key !== 'constructor' && key !== 'prototype';
 }
 
-function isPrivateIPv4(host: string): boolean {
+function isNonPublicIPv4(host: string): boolean {
   const parts = host.split('.').map(Number);
   if (parts.length !== 4 || parts.some(n => Number.isNaN(n) || n < 0 || n > 255)) return true;
 
-  const [a, b] = parts;
-  if (a === undefined || b === undefined) return true;
+  const [a, b, c] = parts;
+  if (a === undefined || b === undefined || c === undefined) return true;
   if (a === 10) return true;
   if (a === 127) return true;
   if (a === 0) return true;
   if (a === 169 && b === 254) return true;
   if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 192 && b === 168) return true;
+  if (a === 192 && b === 0 && (c === 0 || c === 2)) return true;
+  if (a === 192 && b === 88 && c === 99) return true;
   if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  if (a === 198 && b === 51 && c === 100) return true;
+  if (a === 203 && b === 0 && c === 113) return true;
   if (a >= 224) return true;
   return false;
 }
@@ -67,7 +72,7 @@ function parseIPv6Groups(host: string): number[] | null {
   ];
 }
 
-function isPrivateIPv6(host: string): boolean {
+function isNonPublicIPv6(host: string): boolean {
   const groups = parseIPv6Groups(host);
   if (!groups) return true;
 
@@ -76,32 +81,35 @@ function isPrivateIPv6(host: string): boolean {
   if (groups.slice(0, 7).every(group => group === 0) && g7 === 1) return true; // Loopback
   if ((g0 & 0xfe00) === 0xfc00) return true; // Unique local fc00::/7
   if ((g0 & 0xffc0) === 0xfe80) return true; // Link-local fe80::/10
+  if ((g0 & 0xffc0) === 0xfec0) return true; // Deprecated site-local fec0::/10
   if ((g0 & 0xff00) === 0xff00) return true; // Multicast ff00::/8
+  if (g0 === 0x0100 && groups.slice(1, 4).every(group => group === 0)) return true; // Discard-only 100::/64
+  if (g0 === 0x2001 && g1 === 0x0db8) return true; // Documentation 2001:db8::/32
 
-  // IPv4-embedded transition mechanisms resolve to private IPv4 space.
+  // IPv4-embedded transition mechanisms may resolve to non-public IPv4 space.
   if (g0 === 0x0064 && g1 === 0xff9b) { // NAT64 well-known prefix 64:ff9b::/96
     const mapped = `${g6 >> 8}.${g6 & 0xff}.${g7 >> 8}.${g7 & 0xff}`;
-    return isPrivateIPv4(mapped);
+    return isNonPublicIPv4(mapped);
   }
   if (g0 === 0x2002) { // 6to4 2002::/16 — IPv4 sits in g1:g2
     const embedded = `${(g1 >> 8)}.${g1 & 0xff}.${(g2 >> 8)}.${g2 & 0xff}`;
-    return isPrivateIPv4(embedded);
+    return isNonPublicIPv4(embedded);
   }
   if (g0 === 0x2001 && g1 === 0) { // Teredo 2001::/32 — obfuscated client IPv4 in g6:g7
     const mapped = `${(g6 ^ 0xffff) >> 8}.${(g6 ^ 0xffff) & 0xff}.${(g7 ^ 0xffff) >> 8}.${(g7 ^ 0xffff) & 0xff}`;
-    return isPrivateIPv4(mapped);
+    return isNonPublicIPv4(mapped);
   }
 
   const firstFiveZero = groups.slice(0, 5).every(group => group === 0);
   if (firstFiveZero && g5 === 0xffff) {
     const mapped = `${g6 >> 8}.${g6 & 0xff}.${g7 >> 8}.${g7 & 0xff}`;
-    return isPrivateIPv4(mapped);
+    return isNonPublicIPv4(mapped);
   }
 
   const firstSixZero = groups.slice(0, 6).every(group => group === 0);
   if (firstSixZero) {
     const compatible = `${g6 >> 8}.${g6 & 0xff}.${g7 >> 8}.${g7 & 0xff}`;
-    return isPrivateIPv4(compatible);
+    return isNonPublicIPv4(compatible);
   }
 
   return false;
@@ -113,11 +121,11 @@ function normalizeHostname(host: string): string {
   return unbracketed.replace(/\.+$/, '');
 }
 
-export function isPrivateAddress(address: string): boolean {
+export function isNonPublicAddress(address: string): boolean {
   const normalized = normalizeHostname(address);
   const ipVersion = isIP(normalized);
-  if (ipVersion === 4) return isPrivateIPv4(normalized);
-  if (ipVersion === 6) return isPrivateIPv6(normalized);
+  if (ipVersion === 4) return isNonPublicIPv4(normalized);
+  if (ipVersion === 6) return isNonPublicIPv6(normalized);
   return false;
 }
 
@@ -132,6 +140,9 @@ export function isSafeExternalUrl(rawUrl: string): { ok: true; url: URL } | { ok
   if (!(parsed.protocol === 'http:' || parsed.protocol === 'https:')) {
     return { ok: false, reason: 'Only http/https URLs are allowed' };
   }
+  if (parsed.username || parsed.password) {
+    return { ok: false, reason: 'URL credentials are not allowed' };
+  }
 
   const normalizedHost = normalizeHostname(parsed.hostname);
   if (normalizedHost === 'localhost' || normalizedHost.endsWith('.localhost') || normalizedHost.endsWith('.local')) {
@@ -139,11 +150,11 @@ export function isSafeExternalUrl(rawUrl: string): { ok: true; url: URL } | { ok
   }
 
   const ipVersion = isIP(normalizedHost);
-  if (ipVersion === 4 && isPrivateIPv4(normalizedHost)) {
-    return { ok: false, reason: 'Private IPv4 addresses are not allowed' };
+  if (ipVersion === 4 && isNonPublicIPv4(normalizedHost)) {
+    return { ok: false, reason: 'Non-public IPv4 addresses are not allowed' };
   }
-  if (ipVersion === 6 && isPrivateIPv6(normalizedHost)) {
-    return { ok: false, reason: 'Private IPv6 addresses are not allowed' };
+  if (ipVersion === 6 && isNonPublicIPv6(normalizedHost)) {
+    return { ok: false, reason: 'Non-public IPv6 addresses are not allowed' };
   }
 
   return { ok: true, url: parsed };

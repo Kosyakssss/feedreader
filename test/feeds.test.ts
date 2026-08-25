@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { fetchAllFeeds, fetchFeed, probeFeed, parseAtprotoFeedUrl, parseFeedStructured, parseFeedAny, parseFeed, decodeFeedBytes, parseOPML, resolveFeedInput } from '../lib/feeds.ts';
+import type { ExternalFetch } from '../lib/external-fetch.ts';
+
+const directFetch: ExternalFetch = (url, init) => globalThis.fetch(url, { ...init, redirect: 'manual' });
 
 describe('parseFeed', () => {
   test('parses RSS items', () => {
@@ -328,6 +331,25 @@ describe('parseFeedStructured', () => {
     expect(parseFeedStructured(nested(101), 'f').format).toBe('unrecognized');
   });
 
+  test('rejects recursive and amplifying internal entities before parsing', () => {
+    const declarations = ['<!ENTITY e0 "ha">'];
+    for (let level = 1; level <= 18; level++) {
+      declarations.push(`<!ENTITY e${level} "&e${level - 1};&e${level - 1};">`);
+    }
+    const amplified = `<!DOCTYPE rss [${declarations.join('')}]><rss><channel><item><title>&e18;</title></item></channel></rss>`;
+    const recursive = '<!DOCTYPE rss [<!ENTITY loop "&loop;">]><rss><channel><item><title>&loop;</title></item></channel></rss>';
+    expect(parseFeedStructured(amplified, 'f').format).toBe('unrecognized');
+    expect(parseFeedStructured(recursive, 'f').format).toBe('unrecognized');
+  });
+
+  test('limits entity expansion rather than rejecting a large bounded document', () => {
+    const padding = 'x'.repeat(300 * 1024);
+    const xml = `<!DOCTYPE rss [<!ENTITY short "safe">]><rss><channel><item><guid>1</guid><title>&short;</title><description>${padding}</description></item></channel></rss>`;
+    const parsed = parseFeedStructured(xml, 'large-bounded');
+    expect(parsed.format).toBe('rss');
+    expect(parsed.entries[0]?.title).toBe('safe');
+  });
+
   test('parses JSON Feed 1.1 documents', () => {
     const body = JSON.stringify({
       version: 'https://jsonfeed.org/version/1.1',
@@ -415,6 +437,26 @@ describe('probeFeed', () => {
 });
 
 describe('fetchAllFeeds', () => {
+  test('stops reading a feed response once the byte limit is crossed', async () => {
+    let cancelled = false;
+    const oversized = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let index = 0; index < 11; index++) controller.enqueue(new Uint8Array(1024 * 1024));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const result = await fetchFeed({
+      id: 'large',
+      url: 'https://93.184.216.34/feed.xml',
+      label: 'Large',
+      folderId: null,
+    }, {}, async () => new Response(oversized));
+    expect(result.error).toBe('Response body too large');
+    expect(cancelled).toBe(true);
+  });
+
   test('fetches every feed concurrently and preserves feed errors', async () => {
     const originalFetch = globalThis.fetch;
     let active = 0;
@@ -525,7 +567,7 @@ describe('fetchAllFeeds', () => {
       });
 
       expect(result.entries).toEqual([]);
-      expect(result.error).toContain('Private IPv4 addresses are not allowed');
+      expect(result.error).toContain('Non-public IPv4 addresses are not allowed');
       expect(calls).toEqual(['https://93.184.216.34/feed.xml']);
     } finally {
       globalThis.fetch = originalFetch;
@@ -560,7 +602,7 @@ describe('ATProto feeds', () => {
     }) as typeof fetch;
 
     try {
-      await expect(resolveFeedInput('@alice.example')).resolves.toEqual({
+      await expect(resolveFeedInput('@alice.example', directFetch)).resolves.toEqual({
         url: 'atproto://profile/alice.example',
         label: 'Alice',
       });
@@ -601,7 +643,7 @@ describe('ATProto feeds', () => {
     })) as unknown as typeof fetch;
 
     try {
-      await expect(resolveFeedInput('https://example.com/')).rejects.toThrow('No RSS, Atom, JSON Feed');
+      await expect(resolveFeedInput('https://example.com/', directFetch)).rejects.toThrow('No RSS, Atom, JSON Feed');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -658,7 +700,7 @@ describe('ATProto feeds', () => {
         url: 'atproto://profile/alice.example',
         label: 'Alice',
         folderId: null,
-      });
+      }, {}, directFetch);
 
       expect(result.error).toBeUndefined();
       expect(result.entries).toEqual([{

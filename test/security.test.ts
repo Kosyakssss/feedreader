@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { isPrivateAddress, isSafeExternalUrl, sanitizeThemeName } from '../lib/security.ts';
+import { isNonPublicAddress, isSafeExternalUrl, sanitizeThemeName } from '../lib/security.ts';
 
 describe('sanitizeThemeName', () => {
   test('accepts safe names', () => {
@@ -28,6 +28,16 @@ describe('isSafeExternalUrl', () => {
     expect(isSafeExternalUrl('ftp://example.com/file').ok).toBe(false);
   });
 
+  test('rejects embedded credentials and non-public documentation ranges', () => {
+    expect(isSafeExternalUrl('https://user:secret@example.com/feed').ok).toBe(false);
+    for (const address of ['192.0.2.1', '198.18.0.1', '198.51.100.1', '203.0.113.1', '[2001:db8::1]']) {
+      expect(isSafeExternalUrl(`https://${address}/feed`).ok).toBe(false);
+    }
+    for (const address of ['192.0.3.1', '198.51.99.1', '203.0.112.1']) {
+      expect(isSafeExternalUrl(`https://${address}/feed`).ok).toBe(true);
+    }
+  });
+
   test('rejects localhost and private ranges', () => {
     expect(isSafeExternalUrl('http://localhost:8080').ok).toBe(false);
     expect(isSafeExternalUrl('http://localhost.').ok).toBe(false);
@@ -43,12 +53,12 @@ describe('isSafeExternalUrl', () => {
 
   test('flags IPv6 transition mechanisms embedding private IPv4', () => {
     // NAT64 well-known prefix wrapping loopback
-    expect(isPrivateAddress('[64:ff9b::127.0.0.1]')).toBe(true);
+    expect(isNonPublicAddress('[64:ff9b::127.0.0.1]')).toBe(true);
     // 6to4 embedding a private address (10.1.2.3 = a01:203)
-    expect(isPrivateAddress('[2002:a01:203::1]')).toBe(true);
+    expect(isNonPublicAddress('[2002:a01:203::1]')).toBe(true);
     // Teredo-obfuscated private address (192.168.0.1 = c0a8:0001 ^ ffff = 3f57:fffe)
-    expect(isPrivateAddress('[2001:0:ffff:ffff::3f57:fffe]')).toBe(true);
+    expect(isNonPublicAddress('[2001:0:ffff:ffff::3f57:fffe]')).toBe(true);
     // Plain public IPv6 must not be flagged.
-    expect(isPrivateAddress('[2606:4700:4700::1111]')).toBe(false);
+    expect(isNonPublicAddress('[2606:4700:4700::1111]')).toBe(false);
   });
 });

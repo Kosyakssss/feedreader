@@ -1,12 +1,11 @@
 import type { EnrichedEntry, EntryState } from '../lib/types.ts';
-import { api } from './api.ts';
+import { api, type FeedreaderApi } from './api.ts';
 import { RefreshPoller } from './refresh.ts';
 import { internalPath, pushRoute } from './router.ts';
 import {
   type AppState,
   type EntryFilter,
   createInitialState,
-  currentSource,
   filteredEntries,
   mergeRefreshEntries,
   reconcileTransientState,
@@ -23,27 +22,35 @@ export class FeedreaderApp {
   readonly shell: ShellView;
   private readonly pages: PageView;
   private readonly refreshPoller: RefreshPoller;
+  private readonly client: FeedreaderApi;
+  private readonly entryMutationVersions = new Map<string, number>();
+  private pendingEntryMutations = 0;
+  private stateResyncNeeded = false;
 
-  constructor(root: HTMLElement) {
+  constructor(root: HTMLElement, client: FeedreaderApi = api) {
     this.state = createInitialState(internalPath(location.pathname));
+    this.client = client;
     this.shell = new ShellView();
     this.pages = new PageView(root);
     this.refreshPoller = new RefreshPoller(
       status => this.applyRefreshStatus(status),
       () => this.state.refreshCursor,
+      client,
     );
   }
 
   async start(): Promise<void> {
     this.render({ rebuild: true });
     try {
-      const configPromise = api.config();
-      const feedsPromise = api.feeds();
-      this.state.entries = await api.entries();
+      const [entries, config, feeds] = await Promise.all([
+        this.client.entries(),
+        this.client.config(),
+        this.client.feeds(),
+      ]);
+      this.state.entries = entries;
+      this.state.config = { ...this.state.config, ...config };
+      this.state.feeds = feeds;
       this.state.initialDataLoading = false;
-      this.render();
-      this.state.config = { ...this.state.config, ...(await configPromise) };
-      this.state.feeds = await feedsPromise;
       this.render({ rebuild: this.state.page === '/feeds' || this.state.page.startsWith('/feed/') });
     } catch (error) {
       this.state.initialDataLoading = false;
@@ -87,7 +94,7 @@ export class FeedreaderApp {
   async refresh(showFailureToast = false): Promise<void> {
     try {
       const result = await this.refreshPoller.run();
-      this.state.feeds = await api.feeds();
+      this.state.feeds = await this.client.feeds();
       this.render({ rebuild: this.state.page === '/feeds' });
       if (showFailureToast && result.error) this.shell.toast(`Refresh failed: ${result.error}`);
     } catch (error) {
@@ -264,8 +271,8 @@ export class FeedreaderApp {
     const input = form.elements.namedItem('url');
     if (!(input instanceof HTMLInputElement)) return;
     try {
-      await api.addFeed(input.value);
-      [this.state.entries, this.state.feeds] = await Promise.all([api.entries(), api.feeds()]);
+      await this.client.addFeed(input.value);
+      [this.state.entries, this.state.feeds] = await Promise.all([this.client.entries(), this.client.feeds()]);
       input.value = '';
       this.render({ rebuild: true });
       this.shell.toast('Feed added');
@@ -280,8 +287,8 @@ export class FeedreaderApp {
     const body = new FormData();
     body.append('file', file);
     try {
-      const result = await api.importFeeds(body);
-      this.state.feeds = await api.feeds();
+      const result = await this.client.importFeeds(body);
+      this.state.feeds = await this.client.feeds();
       this.render({ rebuild: true });
       this.shell.toast(`${result.added} feeds imported, ${result.skipped} skipped`);
     } catch (error) {
@@ -294,8 +301,8 @@ export class FeedreaderApp {
   async deleteFeed(id: string, label: string): Promise<void> {
     if (!confirm(`Remove ${label || 'this feed'}?`)) return;
     try {
-      await api.deleteFeed(id);
-      [this.state.entries, this.state.feeds] = await Promise.all([api.entries(), api.feeds()]);
+      await this.client.deleteFeed(id);
+      [this.state.entries, this.state.feeds] = await Promise.all([this.client.entries(), this.client.feeds()]);
       reconcileTransientState(this.state);
       this.render({ rebuild: true });
       this.shell.toast('Feed removed');
@@ -314,7 +321,7 @@ export class FeedreaderApp {
       },
     };
     try {
-      this.state.config = await api.saveConfig(updated);
+      this.state.config = await this.client.saveConfig(updated);
       const theme = document.querySelector<HTMLLinkElement>('#theme-link');
       if (theme) theme.href = `${theme.href.split('?')[0]}?t=${Date.now()}`;
       this.shell.toast('Settings saved');
@@ -400,12 +407,16 @@ export class FeedreaderApp {
   private async markEntries(ids: string[], updates: EntryUpdate): Promise<boolean> {
     const payload: Record<string, EntryUpdate> = {};
     const previous = new Map<string, EntryState>();
+    const versions = new Map<string, number>();
     const now = Date.now();
     for (const id of ids) {
       payload[id] = updates;
       const entry = this.entry(id);
       if (!entry) continue;
       previous.set(id, { ...(entry.state ?? {}) });
+      const version = (this.entryMutationVersions.get(id) ?? 0) + 1;
+      this.entryMutationVersions.set(id, version);
+      versions.set(id, version);
       entry.state = {
         ...(entry.state ?? {}),
         ...updates,
@@ -413,18 +424,44 @@ export class FeedreaderApp {
         ...('starred' in updates ? { starredAt: now } : {}),
       };
     }
+    if (previous.size === 0) return true;
+    this.pendingEntryMutations += 1;
     this.render();
     try {
-      await api.updateEntries(payload);
+      await this.client.updateEntries(payload);
       return true;
     } catch (error) {
       for (const [id, state] of previous) {
+        if (this.entryMutationVersions.get(id) !== versions.get(id)) {
+          this.stateResyncNeeded = true;
+          continue;
+        }
         const entry = this.entry(id);
         if (entry) entry.state = state;
       }
       this.render();
       this.shell.toast(`Could not save state: ${errorMessage(error)}`);
       return false;
+    } finally {
+      this.pendingEntryMutations -= 1;
+      if (this.pendingEntryMutations === 0 && this.stateResyncNeeded) {
+        this.stateResyncNeeded = false;
+        await this.resyncEntryStates();
+      }
+    }
+  }
+
+  private async resyncEntryStates(): Promise<void> {
+    try {
+      const saved = await this.client.entries();
+      const states = new Map(saved.map(entry => [entry.id, entry.state ?? {}]));
+      for (const entry of this.state.entries) {
+        const state = states.get(entry.id);
+        if (state) entry.state = state;
+      }
+      this.render();
+    } catch (error) {
+      this.shell.toast(`Could not reload state: ${errorMessage(error)}`);
     }
   }
 

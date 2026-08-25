@@ -1,7 +1,6 @@
-import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
 import type { Entry, Feed, FeedCacheMeta } from './types.ts';
-import { isPrivateAddress, isSafeExternalUrl } from './security.ts';
+import { safeFetchExternal, type ExternalFetch } from './external-fetch.ts';
+import { isSafeExternalUrl } from './security.ts';
 
 const UA = 'Feedreader/1.0';
 const FEED_FETCH_TIMEOUT_MS = 8000;
@@ -9,7 +8,6 @@ const MAX_FEED_BYTES = 10 * 1024 * 1024;
 const MAX_DISCOVERY_BYTES = 2 * 1024 * 1024;
 /** Parallel feed fetches per refresh. Bounds sockets, memory, and hammering of feed hosts. */
 const FETCH_CONCURRENCY = 8;
-const MAX_REDIRECTS = 5;
 const ATPROTO_APPVIEW = 'https://public.api.bsky.app';
 const ATPROTO_IDENTITY = 'https://bsky.social';
 const PLC_DIRECTORY = 'https://plc.directory';
@@ -19,6 +17,7 @@ const MAX_ATPROTO_RECORDS = 1000;
 const DIRECT_FEED_PATH_RE = /\.(xml|rss|atom|json)$/i;
 const DIRECT_FEED_ROUTE_RE = /\/(feed|rss|atom|json)\/?$/i;
 const MAX_XML_DEPTH = 101;
+const MAX_XML_ENTITY_EXPANSION = 256 * 1024;
 
 const xmlPredefinedEntities = new Set(['amp', 'lt', 'gt', 'quot', 'apos']);
 
@@ -126,6 +125,7 @@ function findDoctype(xml: string): string {
 
 function declaredXmlEntities(xml: string): Set<string> {
   const names = new Set<string>();
+  const generalValues = new Map<string, string>();
   const parameters = new Map<string, string>();
   const pending: string[] = [];
   const seenParameters = new Set<string>();
@@ -143,7 +143,11 @@ function declaredXmlEntities(xml: string): Set<string> {
         const parameter = /^<!ENTITY\s+%\s*([^\s]+)\s+(["'])([\s\S]*?)\2\s*>$/i.exec(declaration);
         if (parameter?.[1] && parameter[3] !== undefined) parameters.set(parameter[1], parameter[3]);
         const general = /^<!ENTITY\s+(?!%)\s*([^\s]+)\s/i.exec(declaration);
-        if (general?.[1]) names.add(general[1]);
+        if (general?.[1]) {
+          names.add(general[1]);
+          const internal = /^<!ENTITY\s+(?!%)\s*([^\s]+)\s+(["'])([\s\S]*?)\2\s*>$/i.exec(declaration);
+          if (internal?.[1] && internal[3] !== undefined) generalValues.set(internal[1], internal[3]);
+        }
         i = end;
         continue;
       }
@@ -163,7 +167,36 @@ function declaredXmlEntities(xml: string): Set<string> {
     const value = parameters.get(name);
     if (value !== undefined) scanDtd(value);
   }
+  assertBoundedEntityExpansion(xml, doctype, generalValues);
   return names;
+}
+
+function assertBoundedEntityExpansion(xml: string, doctype: string, values: ReadonlyMap<string, string>): void {
+  const memo = new Map<string, number>();
+  const reference = /&([:_\p{L}\p{Nl}][:_\-.·\p{L}\p{Nl}\p{N}\p{M}\p{Pc}]*);/gu;
+
+  const expandedLength = (name: string, ancestors: ReadonlySet<string>): number => {
+    const cached = memo.get(name);
+    if (cached !== undefined) return cached;
+    if (ancestors.has(name)) throw new Error('Recursive XML entity declaration');
+    const value = values.get(name);
+    if (value === undefined) return 1;
+    const nextAncestors = new Set(ancestors).add(name);
+    let length = value.length;
+    for (const match of value.matchAll(reference)) {
+      length += expandedLength(match[1]!, nextAncestors) - match[0].length;
+      if (length > MAX_XML_ENTITY_EXPANSION) throw new Error('XML entity expansion limit exceeded');
+    }
+    memo.set(name, length);
+    return length;
+  };
+
+  const documentBody = xml.replace(doctype, '');
+  let expansion = 0;
+  for (const match of documentBody.matchAll(reference)) {
+    expansion += Math.max(0, expandedLength(match[1]!, new Set()) - match[0].length);
+    if (expansion > MAX_XML_ENTITY_EXPANSION) throw new Error('XML entity expansion limit exceeded');
+  }
 }
 
 function rewriteEntityReferences(value: string, declared: Set<string>): string {
@@ -246,7 +279,7 @@ function prepareXmlForBun(xml: string): string {
   return output;
 }
 
-function parseXml(xml: string): any {
+function parseXml(xml: string): unknown {
   return Bun.XML.parse(prepareXmlForBun(xml));
 }
 
@@ -285,7 +318,7 @@ interface AtprotoProfile {
   displayName?: string;
 }
 
-interface AtprotoRecord<T = any> {
+interface AtprotoRecord<T = unknown> {
   uri: string;
   value: T;
 }
@@ -388,9 +421,9 @@ function pickAttribute(value: unknown, decodeAgain = false): string {
   return decodeAgain ? decodeHtmlEntities(text) : text;
 }
 
-function pickText(value: any): string {
+function pickText(value: unknown): string {
   if (typeof value === 'string') return normalizeXmlScalar(value);
-  if (value && typeof value === 'object') {
+  if (isRecord(value)) {
     if (typeof value['#text'] === 'string') return normalizeXmlScalar(value['#text']);
   }
   if (value === undefined || value === null) return '';
@@ -512,14 +545,14 @@ export function publishedTime(entry: Pick<Entry, 'published'>): number {
   return Number.isFinite(time) ? time : 0;
 }
 
-function pickLink(link: any): string {
+function pickLink(link: unknown): string {
   if (typeof link === 'string') return pickText(link);
   if (Array.isArray(link)) {
-    const alt = link.find((l: any) => pickAttribute(l['@rel']) === 'alternate');
+    const alt = link.find(candidate => isRecord(candidate) && pickAttribute(candidate['@rel']) === 'alternate');
     const first = alt || link[0];
-    return pickAttribute(first?.['@href'] || first || '');
+    return pickAttribute(isRecord(first) ? first['@href'] : first);
   }
-  return pickAttribute(link?.['@href'] || '');
+  return pickAttribute(isRecord(link) ? link['@href'] : '');
 }
 
 function safeEntryUrl(rawUrl: string): string {
@@ -610,9 +643,10 @@ function extractLinkedAtUri(html: string, rel: string): string | null {
   return null;
 }
 
-function absoluteDocumentUrl(document: any, publication?: StandardPublication): string {
-  const path = typeof document?.path === 'string' ? document.path : '';
-  const site = document?.site;
+function absoluteDocumentUrl(document: unknown, publication?: StandardPublication): string {
+  if (!isRecord(document)) return '';
+  const path = typeof document.path === 'string' ? document.path : '';
+  const site = document.site;
   let base = '';
 
   if (publication?.url) {
@@ -635,43 +669,8 @@ function absoluteDocumentUrl(document: any, publication?: StandardPublication): 
   }
 }
 
-async function assertSafeFetchTarget(url: URL): Promise<void> {
-  const safe = isSafeExternalUrl(url.href);
-  if (!safe.ok) throw new Error(safe.reason);
-
-  const host = url.hostname.replace(/^\[|\]$/g, '').replace(/\.+$/, '');
-  if (isIP(host)) {
-    if (isPrivateAddress(host)) throw new Error('Private IP addresses are not allowed');
-    return;
-  }
-
-  const records = await lookup(host, { all: true });
-  if (records.length === 0) throw new Error('Hostname did not resolve');
-  for (const record of records) {
-    if (isPrivateAddress(record.address)) {
-      throw new Error('Host resolves to a private IP address');
-    }
-  }
-}
-
-async function safeFetchExternal(rawUrl: string, init: RequestInit): Promise<Response> {
-  let current = new URL(rawUrl);
-  for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
-    await assertSafeFetchTarget(current);
-    const res = await fetch(current.href, { ...init, redirect: 'manual' });
-
-    if (![301, 302, 303, 307, 308].includes(res.status)) return res;
-
-    const location = res.headers.get('location');
-    if (!location) return res;
-    await discardResponseBody(res);
-    current = new URL(location, current);
-  }
-  throw new Error('Too many redirects');
-}
-
-async function fetchJson<T>(rawUrl: string, init: RequestInit = {}): Promise<T> {
-  const res = await safeFetchExternal(rawUrl, {
+async function fetchJson<T>(rawUrl: string, init: RequestInit = {}, externalFetch: ExternalFetch): Promise<T> {
+  const res = await externalFetch(rawUrl, {
     ...init,
     headers: {
       'User-Agent': UA,
@@ -758,29 +757,34 @@ export interface ParsedFeed {
 
 export function parseFeedStructured(xml: string, feedId: string): ParsedFeed {
   const entries: Entry[] = [];
-  let doc: any;
+  let doc: unknown;
   try {
     doc = parseXml(xml);
   } catch {
     return { format: 'unrecognized', entries };
   }
 
-  if (doc && Object.hasOwn(doc, 'rss')) {
-    const rssItems = toArray(doc.rss.channel?.item);
+  if (isRecord(doc) && Object.hasOwn(doc, 'rss')) {
+    const rss = isRecord(doc.rss) ? doc.rss : {};
+    const channel = isRecord(rss.channel) ? rss.channel : {};
+    const rssItems = toArray(channel.item);
     for (const item of rssItems) {
+      if (!isRecord(item)) continue;
       const url = pickLink(item.link);
       const title = pickText(item.title) || 'Untitled';
       const published = pickDate(item.pubDate, item['dc:date']);
-      entries.push(buildEntry(feedId, pickText(item.guid?.['#text'] || item.guid || url), url, title, published));
+      entries.push(buildEntry(feedId, pickText(item.guid) || url, url, title, published));
     }
     return { format: 'rss', entries };
   }
 
-  if (doc && Object.hasOwn(doc, 'feed')) {
-    const atomEntries = toArray(doc.feed.entry);
+  if (isRecord(doc) && Object.hasOwn(doc, 'feed')) {
+    const feed = isRecord(doc.feed) ? doc.feed : {};
+    const atomEntries = toArray(feed.entry);
     for (const entry of atomEntries) {
+      if (!isRecord(entry)) continue;
       const url = pickLink(entry.link);
-      const title = pickText(entry.title?.['#text'] || entry.title) || 'Untitled';
+      const title = pickText(entry.title) || 'Untitled';
       const published = pickDate(entry.published, entry.updated);
       entries.push(buildEntry(feedId, pickText(entry.id || url), url, title, published));
     }
@@ -788,9 +792,11 @@ export function parseFeedStructured(xml: string, feedId: string): ParsedFeed {
   }
 
   // RDF/RSS 1.0
-  if (doc && Object.hasOwn(doc, 'rdf:RDF')) {
-    const rdfItems = toArray(doc['rdf:RDF'].item);
+  if (isRecord(doc) && Object.hasOwn(doc, 'rdf:RDF')) {
+    const rdf = isRecord(doc['rdf:RDF']) ? doc['rdf:RDF'] : {};
+    const rdfItems = toArray(rdf.item);
     for (const item of rdfItems) {
+      if (!isRecord(item)) continue;
       const url = pickLink(item.link);
       const title = pickText(item.title) || 'Untitled';
       const published = pickDate(item['dc:date'], item.pubDate);
@@ -846,31 +852,31 @@ export function parseFeedAny(text: string, feedId: string): ParsedFeed {
   return parseFeedStructured(text, feedId);
 }
 
-async function resolveHandle(handle: string): Promise<string> {
+async function resolveHandle(handle: string, externalFetch: ExternalFetch): Promise<string> {
   const url = new URL('/xrpc/com.atproto.identity.resolveHandle', ATPROTO_IDENTITY);
   url.searchParams.set('handle', handle);
-  const data = await fetchJson<{ did?: string }>(url.href);
+  const data = await fetchJson<{ did?: string }>(url.href, {}, externalFetch);
   if (!data.did) throw new Error('Handle did not resolve');
   return data.did;
 }
 
-async function getProfile(actor: string): Promise<AtprotoProfile> {
+async function getProfile(actor: string, externalFetch: ExternalFetch): Promise<AtprotoProfile> {
   const url = new URL('/xrpc/app.bsky.actor.getProfile', ATPROTO_APPVIEW);
   url.searchParams.set('actor', actor);
-  return await fetchJson<AtprotoProfile>(url.href);
+  return await fetchJson<AtprotoProfile>(url.href, {}, externalFetch);
 }
 
-async function getPdsEndpoint(did: string): Promise<string> {
+async function getPdsEndpoint(did: string, externalFetch: ExternalFetch): Promise<string> {
   let doc: DidDocument;
   if (did.startsWith('did:plc:')) {
-    doc = await fetchJson<DidDocument>(`${PLC_DIRECTORY}/${encodeURIComponent(did)}`);
+    doc = await fetchJson<DidDocument>(`${PLC_DIRECTORY}/${encodeURIComponent(did)}`, {}, externalFetch);
   } else if (did.startsWith('did:web:')) {
     const id = did.slice('did:web:'.length).replace(/%3A/gi, ':');
     const parts = id.split(':').map(decodeURIComponent);
     const host = parts.shift();
     if (!host) throw new Error('Invalid did:web identifier');
     const path = parts.length ? `${parts.join('/')}/did.json` : '.well-known/did.json';
-    doc = await fetchJson<DidDocument>(`https://${host}/${path}`);
+    doc = await fetchJson<DidDocument>(`https://${host}/${path}`, {}, externalFetch);
   } else {
     throw new Error(`Unsupported DID method: ${did}`);
   }
@@ -880,7 +886,7 @@ async function getPdsEndpoint(did: string): Promise<string> {
   return endpoint.replace(/\/+$/, '');
 }
 
-async function listAtprotoRecords<T>(pds: string, did: string, collection: string): Promise<AtprotoRecord<T>[]> {
+async function listAtprotoRecords<T>(pds: string, did: string, collection: string, externalFetch: ExternalFetch): Promise<AtprotoRecord<T>[]> {
   const records: AtprotoRecord<T>[] = [];
   let cursor = '';
 
@@ -891,7 +897,7 @@ async function listAtprotoRecords<T>(pds: string, did: string, collection: strin
     url.searchParams.set('limit', String(Math.min(100, MAX_ATPROTO_RECORDS - records.length)));
     if (cursor) url.searchParams.set('cursor', cursor);
 
-    const data = await fetchJson<{ records?: AtprotoRecord<T>[]; cursor?: string }>(url.href);
+    const data = await fetchJson<{ records?: AtprotoRecord<T>[]; cursor?: string }>(url.href, {}, externalFetch);
     records.push(...(data.records || []));
     if (!data.cursor || !data.records?.length) break;
     cursor = data.cursor;
@@ -900,20 +906,25 @@ async function listAtprotoRecords<T>(pds: string, did: string, collection: strin
   return records;
 }
 
-async function getAtprotoRecord<T>(pds: string, did: string, collection: string, rkey: string): Promise<AtprotoRecord<T>> {
+async function getAtprotoRecord<T>(pds: string, did: string, collection: string, rkey: string, externalFetch: ExternalFetch): Promise<AtprotoRecord<T>> {
   const url = new URL('/xrpc/com.atproto.repo.getRecord', pds);
   url.searchParams.set('repo', did);
   url.searchParams.set('collection', collection);
   url.searchParams.set('rkey', rkey);
-  return await fetchJson<AtprotoRecord<T>>(url.href);
+  return await fetchJson<AtprotoRecord<T>>(url.href, {}, externalFetch);
 }
 
-async function resolvePublication(pds: string, publicationUri: string, cache: Map<string, StandardPublication>): Promise<StandardPublication | undefined> {
+async function resolvePublication(
+  pds: string,
+  publicationUri: string,
+  cache: Map<string, StandardPublication>,
+  externalFetch: ExternalFetch,
+): Promise<StandardPublication | undefined> {
   if (cache.has(publicationUri)) return cache.get(publicationUri);
   const parsed = parseAtUri(publicationUri);
   if (!parsed || parsed.collection !== ATPROTO_PUBLICATION_COLLECTION) return undefined;
   try {
-    const record = await getAtprotoRecord<StandardPublication>(pds, parsed.did, parsed.collection, parsed.rkey);
+    const record = await getAtprotoRecord<StandardPublication>(pds, parsed.did, parsed.collection, parsed.rkey, externalFetch);
     cache.set(publicationUri, record.value);
     return record.value;
   } catch {
@@ -926,15 +937,16 @@ async function recordsToEntries(
   pds: string,
   records: AtprotoRecord[],
   publicationUri?: string,
+  externalFetch: ExternalFetch = safeFetchExternal,
 ): Promise<Entry[]> {
   const publications = new Map<string, StandardPublication>();
   const entries: Entry[] = [];
 
   for (const record of records) {
-    const value = record.value || {};
+    const value = isRecord(record.value) ? record.value : {};
     const site = typeof value.site === 'string' ? value.site : '';
     if (publicationUri && site !== publicationUri) continue;
-    const publication = site.startsWith('at://') ? await resolvePublication(pds, site, publications) : undefined;
+    const publication = site.startsWith('at://') ? await resolvePublication(pds, site, publications, externalFetch) : undefined;
     const title = typeof value.title === 'string' && value.title.trim() ? value.title.trim() : 'Untitled';
     const published = pickDate(
       typeof value.publishedAt === 'string' ? value.publishedAt : undefined,
@@ -946,18 +958,18 @@ async function recordsToEntries(
   return entries.sort((a, b) => publishedTime(b) - publishedTime(a));
 }
 
-async function fetchAtprotoFeed(feed: Feed): Promise<FeedFetchResult> {
+async function fetchAtprotoFeed(feed: Feed, externalFetch: ExternalFetch): Promise<FeedFetchResult> {
   const parsed = parseAtprotoFeedUrl(feed.url);
   if (!parsed) return { entries: [], error: 'Invalid ATProto feed URL' };
 
   try {
-    const did = parsed.type === 'profile' ? await resolveHandle(parsed.handle) : parsed.did;
-    const pds = await getPdsEndpoint(did);
-    const records = await listAtprotoRecords(pds, did, ATPROTO_DOCUMENT_COLLECTION);
+    const did = parsed.type === 'profile' ? await resolveHandle(parsed.handle, externalFetch) : parsed.did;
+    const pds = await getPdsEndpoint(did, externalFetch);
+    const records = await listAtprotoRecords(pds, did, ATPROTO_DOCUMENT_COLLECTION, externalFetch);
     const publicationUri = parsed.type === 'publication'
       ? `at://${parsed.did}/${ATPROTO_PUBLICATION_COLLECTION}/${parsed.rkey}`
       : undefined;
-    return { entries: await recordsToEntries(feed.id, pds, records, publicationUri) };
+    return { entries: await recordsToEntries(feed.id, pds, records, publicationUri, externalFetch) };
   } catch (e) {
     const msg = (e as Error).message || 'Unknown error';
     console.error(`Failed to fetch ${feed.label} (${feed.url}):`, msg);
@@ -965,8 +977,12 @@ async function fetchAtprotoFeed(feed: Feed): Promise<FeedFetchResult> {
   }
 }
 
-export async function fetchFeed(feed: Feed, meta: FeedCacheMeta = {}): Promise<FeedFetchResult> {
-  if (parseAtprotoFeedUrl(feed.url)) return await fetchAtprotoFeed(feed);
+export async function fetchFeed(
+  feed: Feed,
+  meta: FeedCacheMeta = {},
+  externalFetch: ExternalFetch = safeFetchExternal,
+): Promise<FeedFetchResult> {
+  if (parseAtprotoFeedUrl(feed.url)) return await fetchAtprotoFeed(feed, externalFetch);
 
   try {
     const headers: Record<string, string> = {
@@ -976,7 +992,7 @@ export async function fetchFeed(feed: Feed, meta: FeedCacheMeta = {}): Promise<F
     if (meta.etag) headers['If-None-Match'] = meta.etag;
     if (meta.lastModified) headers['If-Modified-Since'] = meta.lastModified;
 
-    const res = await safeFetchExternal(feed.url, {
+    const res = await externalFetch(feed.url, {
       headers,
       signal: AbortSignal.timeout(FEED_FETCH_TIMEOUT_MS),
     });
@@ -1009,8 +1025,12 @@ function pickValidators(res: Response, fallback: FeedCacheMeta): Pick<FeedCacheM
   };
 }
 
-export async function probeFeed(url: string, label: string): Promise<{ ok: boolean; error?: string; entryCount: number }> {
-  const result = await fetchFeed({ id: 'probe', url, label, folderId: null });
+export async function probeFeed(
+  url: string,
+  label: string,
+  externalFetch: ExternalFetch = safeFetchExternal,
+): Promise<{ ok: boolean; error?: string; entryCount: number }> {
+  const result = await fetchFeed({ id: 'probe', url, label, folderId: null }, {}, externalFetch);
   if (result.error) return { ok: false, error: result.error, entryCount: 0 };
   return { ok: true, entryCount: result.entries.length };
 }
@@ -1019,6 +1039,7 @@ export async function fetchAllFeeds(
   feeds: Feed[],
   meta: Record<string, FeedCacheMeta> = {},
   onFeedResult?: (feed: Feed, result: FeedFetchResult) => Promise<void>,
+  externalFetch: ExternalFetch = safeFetchExternal,
 ): Promise<{ entries: Entry[]; errors: Record<string, string>; feedMeta: Record<string, FeedCacheMeta> }> {
   const results: PromiseSettledResult<FeedFetchResult>[] = new Array(feeds.length);
   let nextFeedIndex = 0;
@@ -1028,7 +1049,7 @@ export async function fetchAllFeeds(
       const index = nextFeedIndex++;
       const feed = feeds[index];
       if (!feed) break;
-      results[index] = await Promise.resolve(fetchFeed(feed, meta[feed.id])).then(
+      results[index] = await Promise.resolve(fetchFeed(feed, meta[feed.id], externalFetch)).then(
         value => ({ status: 'fulfilled', value }),
         reason => ({ status: 'rejected', reason }),
       );
@@ -1070,8 +1091,9 @@ export function parseOPML(xml: string): { url: string; label: string }[] {
   const doc = parseXml(xml);
   const feeds: { url: string; label: string }[] = [];
 
-  function walk(outlines: any) {
+  function walk(outlines: unknown) {
     for (const o of toArray(outlines)) {
+      if (!isRecord(o)) continue;
       if (o['@xmlUrl']) {
         feeds.push({
           url: pickAttribute(o['@xmlUrl']),
@@ -1082,40 +1104,40 @@ export function parseOPML(xml: string): { url: string; label: string }[] {
     }
   }
 
-  const body = doc?.opml?.body;
+  const opml = isRecord(doc) && isRecord(doc.opml) ? doc.opml : null;
+  const body = opml && isRecord(opml.body) ? opml.body : null;
   if (body?.outline) walk(body.outline);
   return feeds;
 }
 
-async function resolvePublicationInput(publicationUri: string): Promise<ResolvedFeedInput | null> {
+async function resolvePublicationInput(publicationUri: string, externalFetch: ExternalFetch): Promise<ResolvedFeedInput | null> {
   const parsed = parseAtUri(publicationUri);
   if (!parsed || parsed.collection !== ATPROTO_PUBLICATION_COLLECTION) return null;
-  const pds = await getPdsEndpoint(parsed.did);
-  const record = await getAtprotoRecord<StandardPublication>(pds, parsed.did, parsed.collection, parsed.rkey);
+  const pds = await getPdsEndpoint(parsed.did, externalFetch);
+  const record = await getAtprotoRecord<StandardPublication>(pds, parsed.did, parsed.collection, parsed.rkey, externalFetch);
   return {
     url: atprotoPublicationUrl(parsed.did, parsed.rkey),
     label: record.value.name || record.value.url || publicationUri,
   };
 }
 
-async function resolveDocumentInput(documentUri: string): Promise<ResolvedFeedInput | null> {
+async function resolveDocumentInput(documentUri: string, externalFetch: ExternalFetch): Promise<ResolvedFeedInput | null> {
   const parsed = parseAtUri(documentUri);
   if (!parsed || parsed.collection !== ATPROTO_DOCUMENT_COLLECTION) return null;
-  const pds = await getPdsEndpoint(parsed.did);
-  const record = await getAtprotoRecord(pds, parsed.did, parsed.collection, parsed.rkey);
-  const value = record.value as { site?: unknown } | undefined;
-  const site = typeof value?.site === 'string' ? value.site : '';
-  if (site.startsWith('at://')) return await resolvePublicationInput(site);
+  const pds = await getPdsEndpoint(parsed.did, externalFetch);
+  const record = await getAtprotoRecord<Record<string, unknown>>(pds, parsed.did, parsed.collection, parsed.rkey, externalFetch);
+  const site = typeof record.value.site === 'string' ? record.value.site : '';
+  if (site.startsWith('at://')) return await resolvePublicationInput(site, externalFetch);
 
-  const profile = await getProfile(parsed.did);
+  const profile = await getProfile(parsed.did, externalFetch);
   return {
     url: atprotoProfileUrl(profile.handle),
     label: profile.displayName || profile.handle,
   };
 }
 
-async function resolveAtprotoPageInput(pageUrl: string): Promise<ResolvedFeedInput | null> {
-  const res = await safeFetchExternal(pageUrl, {
+async function resolveAtprotoPageInput(pageUrl: string, externalFetch: ExternalFetch): Promise<ResolvedFeedInput | null> {
+  const res = await externalFetch(pageUrl, {
     headers: { 'User-Agent': UA, Accept: 'text/html, application/xhtml+xml' },
     signal: AbortSignal.timeout(10000),
   });
@@ -1126,37 +1148,40 @@ async function resolveAtprotoPageInput(pageUrl: string): Promise<ResolvedFeedInp
 
   const html = await readResponseText(res, MAX_DISCOVERY_BYTES);
   const publicationUri = extractLinkedAtUri(html, ATPROTO_PUBLICATION_COLLECTION);
-  if (publicationUri) return await resolvePublicationInput(publicationUri);
+  if (publicationUri) return await resolvePublicationInput(publicationUri, externalFetch);
 
   const documentUri = extractLinkedAtUri(html, ATPROTO_DOCUMENT_COLLECTION);
-  if (documentUri) return await resolveDocumentInput(documentUri);
+  if (documentUri) return await resolveDocumentInput(documentUri, externalFetch);
 
   return null;
 }
 
-async function resolveActorInput(actor: string): Promise<ResolvedFeedInput | null> {
+async function resolveActorInput(actor: string, externalFetch: ExternalFetch): Promise<ResolvedFeedInput | null> {
   const handle = normalizeHandle(actor);
   if (!handle) return null;
-  const profile = await getProfile(handle);
+  const profile = await getProfile(handle, externalFetch);
   return {
     url: atprotoProfileUrl(profile.handle),
     label: profile.displayName || profile.handle,
   };
 }
 
-export async function resolveFeedInput(rawInput: string): Promise<ResolvedFeedInput> {
+export async function resolveFeedInput(
+  rawInput: string,
+  externalFetch: ExternalFetch = safeFetchExternal,
+): Promise<ResolvedFeedInput> {
   const input = rawInput.trim();
   if (!input) throw new Error('Feed URL is required');
 
   if (input.startsWith('@')) {
-    const actor = await resolveActorInput(input);
+    const actor = await resolveActorInput(input, externalFetch);
     if (actor) return actor;
   }
 
   if (input.startsWith('at://')) {
-    const publication = await resolvePublicationInput(input);
+    const publication = await resolvePublicationInput(input, externalFetch);
     if (publication) return publication;
-    const document = await resolveDocumentInput(input);
+    const document = await resolveDocumentInput(input, externalFetch);
     if (document) return document;
   }
 
@@ -1168,36 +1193,39 @@ export async function resolveFeedInput(rawInput: string): Promise<ResolvedFeedIn
   if (parsedUrl) {
     const blueskyHandle = extractBlueskyHandle(parsedUrl);
     if (blueskyHandle) {
-      const actor = await resolveActorInput(blueskyHandle);
+      const actor = await resolveActorInput(blueskyHandle, externalFetch);
       if (actor) return actor;
     }
 
     if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
-      const standardSite = await resolveAtprotoPageInput(parsedUrl.href).catch(() => null);
+      const standardSite = await resolveAtprotoPageInput(parsedUrl.href, externalFetch).catch(() => null);
       if (standardSite) return standardSite;
 
       const isDirectFeed = DIRECT_FEED_PATH_RE.test(parsedUrl.pathname) || DIRECT_FEED_ROUTE_RE.test(parsedUrl.pathname);
       const discoveredFeed = isDirectFeed
         ? parsedUrl.href
-        : await discoverFeedUrl(parsedUrl.href);
+        : await discoverFeedUrl(parsedUrl.href, externalFetch);
       if (discoveredFeed) return { url: discoveredFeed, label: new URL(discoveredFeed).hostname };
 
-      const hostnameActor = await resolveActorInput(parsedUrl.hostname).catch(() => null);
+      const hostnameActor = await resolveActorInput(parsedUrl.hostname, externalFetch).catch(() => null);
       if (hostnameActor) return hostnameActor;
 
       throw new Error('No RSS, Atom, JSON Feed, Standard Site metadata, or Bluesky handle found');
     }
   }
 
-  const actor = await resolveActorInput(input).catch(() => null);
+  const actor = await resolveActorInput(input, externalFetch).catch(() => null);
   if (actor) return actor;
 
   throw new Error('Enter an RSS/Atom URL, website URL, Bluesky handle, or Standard Site link');
 }
 
-export async function discoverFeedUrl(pageUrl: string): Promise<string | null> {
+export async function discoverFeedUrl(
+  pageUrl: string,
+  externalFetch: ExternalFetch = safeFetchExternal,
+): Promise<string | null> {
   try {
-    const res = await safeFetchExternal(pageUrl, {
+    const res = await externalFetch(pageUrl, {
       headers: { 'User-Agent': UA },
       signal: AbortSignal.timeout(10000),
     });
@@ -1221,7 +1249,7 @@ export async function discoverFeedUrl(pageUrl: string): Promise<string | null> {
   const guesses = ['/feed', '/rss', '/feed.xml', '/atom.xml', '/index.xml', '/rss.xml'];
   for (const path of guesses) {
     try {
-      const res = await safeFetchExternal(base + path, {
+      const res = await externalFetch(base + path, {
         method: 'HEAD',
         headers: { 'User-Agent': UA },
         signal: AbortSignal.timeout(5000),
