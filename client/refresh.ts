@@ -9,24 +9,25 @@ export class RefreshPoller {
   constructor(
     private readonly receive: (status: RefreshStatus) => void,
     private readonly cursor: () => number,
+    private readonly feedCursor: () => number,
     private readonly client: FeedreaderApi = api,
   ) {}
 
-  run(): Promise<RefreshStatus> {
+  run(feedIds?: string[]): Promise<RefreshStatus> {
     if (this.active) return this.active;
-    const run = this.poll().finally(() => {
+    const run = this.poll(feedIds).finally(() => {
       if (this.active === run) this.active = null;
     });
     this.active = run;
     return run;
   }
 
-  private async poll(): Promise<RefreshStatus> {
-    let latest = await this.client.startRefresh();
+  private async poll(feedIds?: string[]): Promise<RefreshStatus> {
+    let latest = await this.client.startRefresh(feedIds);
     this.receive(latest);
     while (latest.refreshing) {
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
-      latest = await this.client.refreshStatus(this.cursor());
+      latest = await this.client.refreshStatus(this.cursor(), this.feedCursor());
       this.receive(latest);
     }
     return latest;

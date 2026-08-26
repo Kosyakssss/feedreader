@@ -15,6 +15,8 @@ import { appendTrailingIcon, icon } from './icons.ts';
 export interface PageUpdateOptions {
   animate?: boolean;
   newIds?: ReadonlySet<string>;
+  animateFeeds?: boolean;
+  newFeedIds?: ReadonlySet<string>;
   rebuild?: boolean;
 }
 
@@ -36,6 +38,7 @@ export class PageView {
       this.root.replaceChildren(this.mounted.node);
     }
 
+    if (key === 'feeds') updateFeedsPage(state, this.mounted.node, options);
     this.updateToolbar(state, this.mounted.node);
     const list = this.mounted.entryList;
     if (list) {
@@ -143,24 +146,13 @@ function buildToolbar(state: AppState, showActions: boolean): HTMLElement {
 function buildFeedsPage(state: AppState): HTMLElement {
   const page = element('div', 'page feeds-page');
   page.dataset.page = 'feeds';
-  const unreadByFeed = new Map<string, number>();
-  for (const entry of state.entries) {
-    if (!entry.state?.read) unreadByFeed.set(entry.feedId, (unreadByFeed.get(entry.feedId) ?? 0) + 1);
-  }
-  const unreadTotal = [...unreadByFeed.values()].reduce((sum, count) => sum + count, 0);
-  const issueCount = state.feeds.feeds.reduce((count, feed) => count + (state.feeds.health?.[feed.id]?.error ? 1 : 0), 0);
-
   const header = element('div', 'page-header feeds-header');
   const heading = element('div');
-  const summary = [
-    `${state.feeds.feeds.length} sources`,
-    `${unreadTotal} unread`,
-    ...(issueCount > 0 ? [`${issueCount} ${issueCount === 1 ? 'issue' : 'issues'}`] : []),
-  ];
-  heading.append(element('h1', 'page-title', 'Feeds'), element('div', 'feeds-subtitle', summary.join(' · ')));
+  heading.append(element('h1', 'page-title', 'Feeds'), element('div', 'feeds-subtitle'));
   header.append(heading);
 
   const tools = element('div', 'feed-tools');
+  const addWrap = element('div', 'add-form-wrap');
   const addForm = element('form', 'add-form');
   addForm.id = 'add-feed-form';
   const inputLabel = element('label', 'visually-hidden', 'Feed or site address');
@@ -174,6 +166,11 @@ function buildFeedsPage(state: AppState): HTMLElement {
   const add = button('Add', 'btn btn-primary');
   add.type = 'submit';
   addForm.append(input, add);
+  const addStatus = element('div', 'add-feed-status');
+  addStatus.id = 'add-feed-status';
+  addStatus.setAttribute('aria-live', 'polite');
+  addStatus.hidden = true;
+  addWrap.append(addForm, addStatus);
 
   const fileActions = element('div', 'feed-file-actions');
   const importButton = button('Import OPML');
@@ -187,16 +184,137 @@ function buildFeedsPage(state: AppState): HTMLElement {
   exportLink.href = externalPath('/api/feeds/export');
   exportLink.setAttribute('download', 'feedreader.opml');
   fileActions.append(importButton, opml, exportLink);
-  tools.append(addForm, fileActions);
+  tools.append(addWrap, fileActions);
+
+  const importStatus = element('section', 'feed-import-status');
+  importStatus.setAttribute('aria-live', 'polite');
+  importStatus.hidden = true;
 
   const list = element('div', 'feed-list');
   list.setAttribute('role', 'list');
-  if (state.feeds.feeds.length > 0) list.append(buildFeedListHeader());
-  for (const feed of state.feeds.feeds) list.append(buildFeedRow(state, feed, unreadByFeed.get(feed.id) ?? 0));
-  if (state.feeds.feeds.length === 0) list.append(element('div', 'empty-state', 'No feeds yet. Add one above!'));
+  list.append(buildFeedListHeader());
   addForm.prepend(inputLabel);
-  page.append(header, tools, list);
+  page.append(header, tools, importStatus, list);
   return page;
+}
+
+function updateFeedsPage(state: AppState, page: HTMLElement, options: PageUpdateOptions): void {
+  const unreadByFeed = new Map<string, number>();
+  for (const entry of state.entries) {
+    if (!entry.state?.read) unreadByFeed.set(entry.feedId, (unreadByFeed.get(entry.feedId) ?? 0) + 1);
+  }
+  const unreadTotal = [...unreadByFeed.values()].reduce((sum, count) => sum + count, 0);
+  const issueCount = state.feeds.feeds.reduce((count, feed) => count + (state.feeds.health?.[feed.id]?.error ? 1 : 0), 0);
+  const summary = [
+    `${state.feeds.feeds.length} sources`,
+    `${unreadTotal} unread`,
+    ...(issueCount > 0 ? [`${issueCount} ${issueCount === 1 ? 'issue' : 'issues'}`] : []),
+  ];
+  const subtitle = page.querySelector<HTMLElement>('.feeds-subtitle');
+  if (subtitle) subtitle.textContent = summary.join(' · ');
+
+  updateAddForm(state, page);
+  updateImportStatus(state, page);
+
+  const list = page.querySelector<HTMLElement>('.feed-list');
+  if (!list) return;
+  const header = list.querySelector<HTMLElement>('.feed-list-header');
+  if (header) header.hidden = state.feeds.feeds.length === 0;
+  list.querySelector('.empty-state')?.remove();
+  list.querySelector('.feed-load-more')?.remove();
+
+  let pending = list.querySelector<HTMLElement>('.feed-pending');
+  if (state.feedAdd.pending) {
+    if (!pending) {
+      pending = element('div', 'feed-pending');
+      pending.setAttribute('role', 'status');
+      pending.append(element('span', 'feed-pending-spinner'), element('div', 'feed-pending-copy'));
+      header?.after(pending);
+    }
+    const copy = pending.querySelector<HTMLElement>('.feed-pending-copy');
+    if (copy) copy.replaceChildren(
+      element('strong', undefined, 'Finding and checking feed…'),
+      element('span', undefined, displayFeedUrl(state.feedAdd.value)),
+    );
+  } else {
+    pending?.remove();
+    pending = null;
+  }
+
+  const visibleFeeds = state.feeds.feeds.slice(0, state.feedDisplayLimit);
+  const visibleIds = new Set(visibleFeeds.map(feed => feed.id));
+  const rows = new Map(
+    [...list.querySelectorAll<HTMLElement>('.feed-item[data-feed-id]')]
+      .map(row => [row.dataset.feedId ?? '', row] as const),
+  );
+  for (const [id, row] of rows) {
+    if (!visibleIds.has(id)) row.remove();
+  }
+
+  const orderedRows: HTMLElement[] = [];
+  for (const feed of visibleFeeds) {
+    const row = rows.get(feed.id) ?? buildFeedRow(state, feed, unreadByFeed.get(feed.id) ?? 0);
+    updateFeedRow(state, row, feed, unreadByFeed.get(feed.id) ?? 0);
+    list.append(row);
+    orderedRows.push(row);
+  }
+
+  if (state.feeds.feeds.length === 0 && !state.feedAdd.pending) {
+    list.append(element('div', 'empty-state', 'No feeds yet. Add one above!'));
+  }
+  if (state.feeds.feeds.length > visibleFeeds.length) {
+    const more = element('div', 'feed-load-more');
+    const buttonNode = button(`Show ${Math.min(100, state.feeds.feeds.length - visibleFeeds.length)} more (${state.feeds.feeds.length - visibleFeeds.length} remaining)`);
+    buttonNode.dataset.loadmoreFeeds = '';
+    more.append(buttonNode);
+    list.append(more);
+  }
+
+  if (options.animateFeeds && options.newFeedIds?.size) animateFeedRows(orderedRows, options.newFeedIds);
+}
+
+function updateAddForm(state: AppState, page: HTMLElement): void {
+  const form = page.querySelector<HTMLFormElement>('#add-feed-form');
+  const input = page.querySelector<HTMLInputElement>('#add-feed-url');
+  const add = form?.querySelector<HTMLButtonElement>('button[type="submit"]');
+  const status = page.querySelector<HTMLElement>('#add-feed-status');
+  if (!form || !input || !add || !status) return;
+  form.toggleAttribute('aria-busy', state.feedAdd.pending);
+  input.disabled = state.feedAdd.pending;
+  add.disabled = state.feedAdd.pending;
+  add.textContent = state.feedAdd.pending ? 'Checking…' : 'Add';
+  add.classList.toggle('is-busy', state.feedAdd.pending);
+  if (!state.feedAdd.pending) input.value = state.feedAdd.value;
+  status.hidden = !state.feedAdd.error;
+  status.textContent = state.feedAdd.error ? `Couldn’t add feed: ${state.feedAdd.error}` : '';
+}
+
+function updateImportStatus(state: AppState, page: HTMLElement): void {
+  const panel = page.querySelector<HTMLElement>('.feed-import-status');
+  const buttonNode = page.querySelector<HTMLButtonElement>('[data-import-feeds]');
+  if (!panel || !buttonNode) return;
+  const progress = state.feedImport;
+  buttonNode.disabled = !!progress?.active;
+  if (!progress) {
+    panel.hidden = true;
+    panel.replaceChildren();
+    return;
+  }
+  panel.hidden = false;
+  if (progress.total === 0) {
+    panel.replaceChildren(element('div', 'feed-import-title', 'Reading subscriptions…'));
+    return;
+  }
+  const title = progress.active
+    ? `Checking imported feeds · ${progress.completed} / ${progress.total}`
+    : `Import complete · ${progress.succeeded} checked${progress.failed ? ` · ${progress.failed} need attention` : ''}`;
+  const meter = element('progress', 'feed-import-meter');
+  meter.max = progress.total;
+  meter.value = progress.completed;
+  const detail = element('div', 'feed-import-detail', progress.active
+    ? `${progress.succeeded} ready${progress.failed ? ` · ${progress.failed} failed` : ''}`
+    : `${progress.total} subscriptions added`);
+  panel.replaceChildren(element('div', 'feed-import-title', title), meter, detail);
 }
 
 function buildFeedListHeader(): HTMLElement {
@@ -211,6 +329,7 @@ function buildFeedListHeader(): HTMLElement {
 
 function buildFeedRow(state: AppState, feed: Feed, unread: number): HTMLElement {
   const row = element('div', 'feed-item');
+  row.dataset.feedId = feed.id;
   row.setAttribute('role', 'listitem');
   const info = element('div', 'feed-info');
   const label = element('a', 'feed-label', feed.label);
@@ -246,6 +365,79 @@ function buildFeedRow(state: AppState, feed: Feed, unread: number): HTMLElement 
   remove.setAttribute('aria-label', `Remove ${feed.label}`);
   row.append(info, metrics, remove);
   return row;
+}
+
+function updateFeedRow(state: AppState, row: HTMLElement, feed: Feed, unread: number): void {
+  row.dataset.feedId = feed.id;
+  const label = row.querySelector<HTMLAnchorElement>('.feed-label');
+  if (label) {
+    label.textContent = feed.label;
+    label.href = externalPath(`/feed/${encodeURIComponent(feed.id)}`);
+  }
+  const meta = row.querySelector<HTMLElement>('.feed-meta');
+  if (meta) {
+    meta.textContent = displayFeedUrl(feed.url);
+    meta.title = feed.url;
+  }
+  const unreadMetric = row.querySelector<HTMLElement>('.feed-unread');
+  if (unreadMetric) {
+    unreadMetric.classList.toggle('has-unread', unread > 0);
+    unreadMetric.setAttribute('aria-label', `${unread} unread ${unread === 1 ? 'entry' : 'entries'}`);
+    const value = unreadMetric.querySelector<HTMLElement>('.feed-unread-value');
+    if (value) value.textContent = unread > 0 ? String(unread) : '—';
+  }
+  const health = state.feeds.health?.[feed.id];
+  const healthMetric = row.querySelector<HTMLElement>('.feed-health');
+  if (healthMetric) {
+    healthMetric.classList.toggle('has-error', !!health?.error);
+    healthMetric.classList.toggle('is-checking', !!health?.checking);
+    healthMetric.replaceChildren();
+    healthMetric.removeAttribute('title');
+    if (health?.checking) {
+      healthMetric.textContent = 'Checking…';
+    } else if (health?.error) {
+      healthMetric.textContent = 'Error';
+      healthMetric.title = health.error;
+    } else {
+      const lastFetch = health?.lastFetched ? timeAgo(new Date(health.lastFetched).toISOString()) : 'never';
+      if (lastFetch === 'never') healthMetric.textContent = 'Not checked';
+      else healthMetric.append(element('span', 'feed-health-prefix', 'Checked '), document.createTextNode(lastFetch));
+      if (health?.entryCount === 0 && lastFetch !== 'never') healthMetric.title = 'Feed returned no entries';
+    }
+  }
+  const remove = row.querySelector<HTMLButtonElement>('[data-delete-feed]');
+  if (remove) {
+    const confirming = state.confirmDeleteFeedId === feed.id;
+    remove.dataset.deleteFeed = feed.id;
+    remove.dataset.feedLabel = feed.label;
+    remove.classList.toggle('is-confirming', confirming);
+    remove.replaceChildren(confirming ? document.createTextNode('Remove?') : icon('close'));
+    remove.title = confirming ? 'Click again to remove feed' : 'Remove feed';
+    remove.setAttribute('aria-label', confirming ? `Confirm removal of ${feed.label}` : `Remove ${feed.label}`);
+  }
+}
+
+function animateFeedRows(rows: readonly HTMLElement[], newIds: ReadonlySet<string>): void {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || document.visibilityState !== 'visible') return;
+  rows
+    .filter(row => newIds.has(row.dataset.feedId ?? ''))
+    .filter(row => {
+      const rect = row.getBoundingClientRect();
+      return rect.bottom > 0 && rect.top < innerHeight;
+    })
+    .slice(0, 6)
+    .forEach((row, index) => {
+      const height = row.getBoundingClientRect().height;
+      const delay = Math.min(index * 34, 136);
+      row.animate(
+        [{ height: '0px' }, { height: `${height}px` }],
+        { duration: 280, delay, easing: 'cubic-bezier(0.2, 0, 0, 1)', fill: 'backwards' },
+      );
+      row.animate(
+        [{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'translateY(0)' }],
+        { duration: 220, delay, easing: 'cubic-bezier(0.2, 0, 0, 1)', fill: 'backwards' },
+      );
+    });
 }
 
 function displayFeedUrl(raw: string): string {

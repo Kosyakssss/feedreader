@@ -53,7 +53,9 @@ function status(overrides: Partial<RefreshStatus> = {}): RefreshStatus {
     failed: 0,
     failures: [],
     cursor: 0,
+    feedCursor: 0,
     newEntries: [],
+    feedResults: [],
     removedIds: [],
     ...overrides,
   };
@@ -68,9 +70,13 @@ function client(overrides: Partial<FeedreaderApi> = {}): FeedreaderApi {
     startRefresh: async () => status(),
     refreshStatus: async () => status(),
     updateEntries: async () => ({ ok: true }),
-    addFeed: async () => ({}),
+    addFeed: async () => ({
+      feed: { id: 'feed', url: 'https://example.com/feed.xml', label: 'Feed', folderId: null },
+      entries: [],
+      health: { lastFetched: Date.now(), error: null, entryCount: 0 },
+    }),
     deleteFeed: async () => ({ ok: true }),
-    importFeeds: async () => ({ added: 0, skipped: 0 }),
+    importFeeds: async () => ({ feeds: [], added: 0, skipped: 0 }),
     ...overrides,
   };
 }
@@ -189,6 +195,37 @@ describe('client orchestration', () => {
 
     expect(reads).toBe(1);
     expect(app.state.entries[0]?.state?.read).toBe(false);
+  });
+
+  test('preserves the add form through refresh updates and shows pending errors inline', async () => {
+    const add = deferred<Awaited<ReturnType<FeedreaderApi['addFeed']>>>();
+    const app = renderedApp(client({ addFeed: () => add.promise }));
+    app.state.feeds = {
+      folders: [],
+      feeds: [{ id: 'feed', url: 'https://example.com/feed.xml', label: 'Feed', folderId: null }],
+      health: { feed: { lastFetched: null, error: null, entryCount: 0 } },
+    };
+    app.navigate('/feeds', false);
+
+    const input = document.querySelector<HTMLInputElement>('#add-feed-url')!;
+    input.value = 'https://new.example/feed.xml';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dataset.identity = 'original';
+    document.querySelector<HTMLButtonElement>('#add-feed-form button[type="submit"]')!.click();
+
+    expect(document.querySelector('#add-feed-form')?.getAttribute('aria-busy')).not.toBeNull();
+    expect(document.querySelector('.feed-pending')?.textContent).toContain('Finding and checking feed');
+
+    const applyStatus = app as unknown as { applyRefreshStatus(value: RefreshStatus): void };
+    applyStatus.applyRefreshStatus(status({ refreshing: true, total: 1, completed: 1, succeeded: 1 }));
+    expect(document.querySelector<HTMLInputElement>('#add-feed-url')?.dataset.identity).toBe('original');
+    expect(document.querySelector<HTMLInputElement>('#add-feed-url')?.value).toBe('https://new.example/feed.xml');
+
+    add.reject(new Error('No feed found'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(document.querySelector('#add-feed-status')?.textContent).toContain('No feed found');
+    expect(document.querySelector<HTMLInputElement>('#add-feed-url')?.value).toBe('https://new.example/feed.xml');
   });
 });
 

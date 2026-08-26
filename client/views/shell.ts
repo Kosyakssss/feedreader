@@ -312,7 +312,7 @@ function refreshText(status: RefreshStatus): string {
   }
   if (status.error) return 'Refresh failed';
   const result = status.count ? `${status.count} new` : 'Up to date';
-  return status.failures.length ? `${result} · ${status.failures.length} failed` : result;
+  return status.failed ? `${result} · ${status.failed} failed` : result;
 }
 
 function failureTitle(status: RefreshStatus): string {

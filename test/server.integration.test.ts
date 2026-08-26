@@ -289,7 +289,11 @@ describe('server hardening', () => {
 
   test('skips unsafe feed URLs during OPML import', async () => {
     const feedsPath = join(dataDir, 'feeds.json');
-    const originalFeeds = await readFile(feedsPath, 'utf-8');
+    const cachePath = join(dataDir, 'cache.json');
+    const [originalFeeds, originalCache] = await Promise.all([
+      readFile(feedsPath, 'utf-8'),
+      readFile(cachePath, 'utf-8'),
+    ]);
     const form = new FormData();
     form.append('file', new File([
       `<?xml version="1.0"?>
@@ -308,14 +312,24 @@ describe('server hardening', () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as { added: number; skipped: number };
-      expect(body).toEqual({ added: 1, skipped: 1 });
+      const body = await res.json() as { feeds: Array<{ url: string }>; added: number; skipped: number };
+      expect(body.added).toBe(1);
+      expect(body.skipped).toBe(1);
+      expect(body.feeds.map(feed => feed.url)).toEqual(['https://example.com/feed.xml']);
 
       const feedsRes = await fetch(`http://127.0.0.1:${port}/api/feeds`);
       const feeds = await feedsRes.json() as { feeds: Array<{ url: string }> };
       expect(feeds.feeds.map(feed => feed.url)).toEqual(['https://example.com/feed.xml']);
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const status = await (await fetch(`http://127.0.0.1:${port}/api/refresh/status`)).json() as { refreshing: boolean };
+        if (!status.refreshing) break;
+        await Bun.sleep(20);
+      }
     } finally {
-      await writeFile(feedsPath, originalFeeds);
+      await Promise.all([
+        writeFile(feedsPath, originalFeeds),
+        writeFile(cachePath, originalCache),
+      ]);
     }
   });
 
@@ -501,7 +515,9 @@ describe('server hardening', () => {
       failed: number;
       failures: Array<{ feedId: string; label: string; error: string }>;
       cursor: number;
+      feedCursor: number;
       newEntries: unknown[];
+      feedResults: unknown[];
       removedIds: string[];
       refreshing: boolean;
       entries?: unknown[];
@@ -516,7 +532,9 @@ describe('server hardening', () => {
     expect(typeof body.failed).toBe('number');
     expect(Array.isArray(body.failures)).toBe(true);
     expect(typeof body.cursor).toBe('number');
+    expect(typeof body.feedCursor).toBe('number');
     expect(Array.isArray(body.newEntries)).toBe(true);
+    expect(Array.isArray(body.feedResults)).toBe(true);
     expect(Array.isArray(body.removedIds)).toBe(true);
     expect(body.entries).toBeUndefined();
     expect(body.feeds).toBeUndefined();

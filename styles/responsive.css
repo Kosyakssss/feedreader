@@ -224,6 +224,10 @@
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
+  .add-form-wrap {
+    width: 100%;
+  }
+
   .feed-file-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -232,6 +236,15 @@
   .add-form input {
     min-width: 0;
     font-size: 16px;
+  }
+
+  .feed-import-status {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .feed-import-meter {
+    grid-column: 1;
+    grid-row: auto;
   }
 
   .settings-form input {

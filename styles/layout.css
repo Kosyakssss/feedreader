@@ -196,8 +196,13 @@ body {
   gap: var(--spacing-xs);
 }
 
+.add-form-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
 .feed-tools {
-  align-items: stretch;
+  align-items: flex-start;
   margin-bottom: var(--spacing-md);
 }
 
@@ -207,7 +212,7 @@ body {
 
 .add-form {
   min-width: 0;
-  flex: 1;
+  width: 100%;
 }
 
 .settings-form {

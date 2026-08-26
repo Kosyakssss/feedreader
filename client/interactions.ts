@@ -123,6 +123,10 @@ export function bindInteractions(app: FeedreaderApp): void {
       app.showMore();
       return;
     }
+    if (target.closest('[data-loadmore-feeds]')) {
+      app.showMoreFeeds();
+      return;
+    }
     if (target.closest('[data-openall]')) {
       void app.openAllUnread();
       return;
@@ -156,6 +160,11 @@ export function bindInteractions(app: FeedreaderApp): void {
   root.addEventListener('change', event => {
     const input = event.target;
     if (input instanceof HTMLInputElement && input.id === 'opml-input') void app.importFeeds(input);
+  });
+
+  root.addEventListener('input', event => {
+    const input = event.target;
+    if (input instanceof HTMLInputElement && input.id === 'add-feed-url') app.setFeedAddValue(input.value);
   });
 
   document.addEventListener('click', event => {

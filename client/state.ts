@@ -6,6 +6,7 @@ export interface FeedHealth {
   lastFetched: number | null;
   error: string | null;
   entryCount: number;
+  checking?: boolean;
 }
 
 export interface FeedData extends FeedsFile {
@@ -16,6 +17,14 @@ export interface RefreshFailure {
   feedId: string;
   label: string;
   error: string;
+}
+
+export interface FeedResultChange {
+  sequence: number;
+  feedId: string;
+  entryCount: number | null;
+  error: string | null;
+  completedAt: number;
 }
 
 export interface RefreshStatus {
@@ -29,8 +38,26 @@ export interface RefreshStatus {
   failed: number;
   failures: RefreshFailure[];
   cursor: number;
+  feedCursor: number;
   newEntries: EnrichedEntry[];
+  feedResults: FeedResultChange[];
   removedIds: string[];
+}
+
+export interface FeedAddState {
+  pending: boolean;
+  value: string;
+  error: string | null;
+}
+
+export interface FeedImportProgress {
+  total: number;
+  completed: number;
+  succeeded: number;
+  failed: number;
+  active: boolean;
+  feedIds: Set<string>;
+  completedIds: Set<string>;
 }
 
 export interface SelectionDrag {
@@ -56,6 +83,11 @@ export interface AppState {
   refreshStatus: RefreshStatus | null;
   refreshRunId: string | null;
   refreshCursor: number;
+  feedRefreshCursor: number;
+  feedAdd: FeedAddState;
+  feedImport: FeedImportProgress | null;
+  feedDisplayLimit: number;
+  confirmDeleteFeedId: string | null;
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -84,6 +116,11 @@ export function createInitialState(page: string): AppState {
     refreshStatus: null,
     refreshRunId: null,
     refreshCursor: 0,
+    feedRefreshCursor: 0,
+    feedAdd: { pending: false, value: '', error: null },
+    feedImport: null,
+    feedDisplayLimit: 100,
+    confirmDeleteFeedId: null,
   };
 }
 

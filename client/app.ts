@@ -35,6 +35,7 @@ export class FeedreaderApp {
     this.refreshPoller = new RefreshPoller(
       status => this.applyRefreshStatus(status),
       () => this.state.refreshCursor,
+      () => this.state.feedRefreshCursor,
       client,
     );
   }
@@ -51,7 +52,7 @@ export class FeedreaderApp {
       this.state.config = { ...this.state.config, ...config };
       this.state.feeds = feeds;
       this.state.initialDataLoading = false;
-      this.render({ rebuild: this.state.page === '/feeds' || this.state.page.startsWith('/feed/') });
+      this.render({ rebuild: this.state.page.startsWith('/feed/') });
     } catch (error) {
       this.state.initialDataLoading = false;
       this.render();
@@ -91,11 +92,11 @@ export class FeedreaderApp {
     this.render();
   }
 
-  async refresh(showFailureToast = false): Promise<void> {
+  async refresh(showFailureToast = false, feedIds?: string[]): Promise<void> {
     try {
-      const result = await this.refreshPoller.run();
+      const result = await this.refreshPoller.run(feedIds);
       this.state.feeds = await this.client.feeds();
-      this.render({ rebuild: this.state.page === '/feeds' });
+      this.render();
       if (showFailureToast && result.error) this.shell.toast(`Refresh failed: ${result.error}`);
     } catch (error) {
       this.setRefreshError(error);
@@ -257,6 +258,11 @@ export class FeedreaderApp {
       this.render();
       return;
     }
+    if (this.state.confirmDeleteFeedId) {
+      this.state.confirmDeleteFeedId = null;
+      this.render();
+      return;
+    }
     if (this.state.focusedEntryId) {
       this.state.focusedEntryId = null;
       this.state.keyboardNavigationActive = false;
@@ -269,29 +275,74 @@ export class FeedreaderApp {
 
   async addFeed(form: HTMLFormElement): Promise<void> {
     const input = form.elements.namedItem('url');
-    if (!(input instanceof HTMLInputElement)) return;
+    if (!(input instanceof HTMLInputElement) || this.state.feedAdd.pending) return;
+    const value = input.value.trim();
+    this.state.feedAdd = { pending: true, value, error: null };
+    this.render();
     try {
-      await this.client.addFeed(input.value);
-      [this.state.entries, this.state.feeds] = await Promise.all([this.client.entries(), this.client.feeds()]);
-      input.value = '';
-      this.render({ rebuild: true });
-      this.shell.toast('Feed added');
+      const result = await this.client.addFeed(value);
+      this.state.feeds.feeds = [result.feed, ...this.state.feeds.feeds.filter(feed => feed.id !== result.feed.id)];
+      this.state.feeds.health = { ...this.state.feeds.health, [result.feed.id]: result.health };
+      this.state.entries = mergeRefreshEntries(this.state.entries, result.entries).entries;
+      this.state.feedAdd = { pending: false, value: '', error: null };
+      this.render({ animateFeeds: true, newFeedIds: new Set([result.feed.id]) });
+      this.shell.toast(`Feed added · ${result.entries.length} ${result.entries.length === 1 ? 'entry' : 'entries'} found`);
     } catch (error) {
-      this.shell.toast(`Error: ${errorMessage(error)}`);
+      this.state.feedAdd = { pending: false, value, error: errorMessage(error) };
+      this.render();
+    }
+  }
+
+  setFeedAddValue(value: string): void {
+    this.state.feedAdd.value = value;
+    if (this.state.feedAdd.error) {
+      this.state.feedAdd.error = null;
+      this.render();
     }
   }
 
   async importFeeds(input: HTMLInputElement): Promise<void> {
     const file = input.files?.[0];
-    if (!file) return;
+    if (!file || this.state.feedImport?.active) return;
     const body = new FormData();
     body.append('file', file);
+    this.state.feedImport = {
+      total: 0,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      active: true,
+      feedIds: new Set(),
+      completedIds: new Set(),
+    };
+    this.render();
     try {
       const result = await this.client.importFeeds(body);
-      this.state.feeds = await this.client.feeds();
-      this.render({ rebuild: true });
-      this.shell.toast(`${result.added} feeds imported, ${result.skipped} skipped`);
+      const importedIds = new Set(result.feeds.map(feed => feed.id));
+      this.state.feeds.feeds = [
+        ...result.feeds,
+        ...this.state.feeds.feeds.filter(feed => !importedIds.has(feed.id)),
+      ];
+      const health = { ...this.state.feeds.health };
+      for (const feed of result.feeds) {
+        health[feed.id] = { lastFetched: null, error: null, entryCount: 0, checking: true };
+      }
+      this.state.feeds.health = health;
+      this.state.feedImport = result.added > 0 ? {
+        total: result.added,
+        completed: 0,
+        succeeded: 0,
+        failed: 0,
+        active: true,
+        feedIds: importedIds,
+        completedIds: new Set(),
+      } : null;
+      this.render({ animateFeeds: true, newFeedIds: importedIds });
+      if (result.added > 0) void this.refresh(false, [...importedIds]).catch(() => undefined);
+      else this.shell.toast(`No new feeds · ${result.skipped} skipped`);
     } catch (error) {
+      this.state.feedImport = null;
+      this.render();
       this.shell.toast(`Error: ${errorMessage(error)}`);
     } finally {
       input.value = '';
@@ -299,16 +350,31 @@ export class FeedreaderApp {
   }
 
   async deleteFeed(id: string, label: string): Promise<void> {
-    if (!confirm(`Remove ${label || 'this feed'}?`)) return;
+    if (this.state.confirmDeleteFeedId !== id) {
+      this.state.confirmDeleteFeedId = id;
+      this.render();
+      return;
+    }
     try {
       await this.client.deleteFeed(id);
-      [this.state.entries, this.state.feeds] = await Promise.all([this.client.entries(), this.client.feeds()]);
+      await animateFeedRemoval(id);
+      this.state.feeds.feeds = this.state.feeds.feeds.filter(feed => feed.id !== id);
+      if (this.state.feeds.health) delete this.state.feeds.health[id];
+      this.state.entries = this.state.entries.filter(entry => entry.feedId !== id);
+      this.state.confirmDeleteFeedId = null;
       reconcileTransientState(this.state);
-      this.render({ rebuild: true });
-      this.shell.toast('Feed removed');
+      this.render();
+      this.shell.toast(`${label || 'Feed'} removed`);
     } catch (error) {
+      this.state.confirmDeleteFeedId = null;
+      this.render();
       this.shell.toast(`Error: ${errorMessage(error)}`);
     }
+  }
+
+  showMoreFeeds(): void {
+    this.state.feedDisplayLimit += 100;
+    this.render();
   }
 
   async saveSettings(form: HTMLFormElement): Promise<void> {
@@ -358,6 +424,7 @@ export class FeedreaderApp {
     if (status.runId && status.runId !== this.state.refreshRunId) {
       this.state.refreshRunId = status.runId;
       this.state.refreshCursor = 0;
+      this.state.feedRefreshCursor = 0;
     }
 
     const newIds = new Set<string>();
@@ -376,13 +443,35 @@ export class FeedreaderApp {
       changed = true;
     }
 
+    if (status.feedResults?.length) {
+      const health = { ...this.state.feeds.health };
+      for (const result of status.feedResults) {
+        const previous = health[result.feedId] ?? { lastFetched: null, error: null, entryCount: 0 };
+        health[result.feedId] = {
+          lastFetched: result.completedAt,
+          error: result.error,
+          entryCount: result.entryCount ?? previous.entryCount,
+          checking: false,
+        };
+        const imported = this.state.feedImport;
+        if (imported?.feedIds.has(result.feedId) && !imported.completedIds.has(result.feedId)) {
+          imported.completedIds.add(result.feedId);
+          imported.completed++;
+          if (result.error) imported.failed++;
+          else imported.succeeded++;
+          imported.active = imported.completed < imported.total;
+        }
+      }
+      this.state.feeds.health = health;
+    }
+
     this.state.refreshCursor = Math.max(this.state.refreshCursor, Number(status.cursor) || 0);
+    this.state.feedRefreshCursor = Math.max(this.state.feedRefreshCursor, Number(status.feedCursor) || 0);
     this.state.refreshStatus = status;
     reconcileTransientState(this.state);
     this.render({
       animate: changed && newIds.size > 0,
       newIds,
-      rebuild: changed && this.state.page === '/feeds',
     });
   }
 
@@ -398,7 +487,9 @@ export class FeedreaderApp {
       failed: 0,
       failures: [],
       cursor: this.state.refreshCursor,
+      feedCursor: this.state.feedRefreshCursor,
       newEntries: [],
+      feedResults: [],
       removedIds: [],
     };
     this.render();
@@ -505,4 +596,17 @@ function parseOptionalInteger(value: FormDataEntryValue | null): number | null {
   if (!text) return null;
   const parsed = Number.parseInt(text, 10);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function animateFeedRemoval(id: string): Promise<void> {
+  const row = document.querySelector<HTMLElement>(`.feed-item[data-feed-id="${CSS.escape(id)}"]`);
+  if (!row || typeof row.animate !== 'function' || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const animation = row.animate(
+    [
+      { height: `${row.getBoundingClientRect().height}px`, opacity: 1 },
+      { height: '0px', opacity: 0, transform: 'translateX(8px)', paddingTop: '0px', paddingBottom: '0px' },
+    ],
+    { duration: 220, easing: 'cubic-bezier(0.4, 0, 1, 1)', fill: 'forwards' },
+  );
+  await animation.finished.catch(() => undefined);
 }
