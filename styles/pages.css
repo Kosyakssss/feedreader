@@ -58,7 +58,13 @@
   overflow: hidden;
   color: var(--accent);
   background: var(--accent-soft);
-  border: 0.5px solid var(--accent);
+  border: 0;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 82%, transparent);
+}
+
+.feed-pending-slot {
+  position: relative;
+  z-index: 2;
 }
 
 .feed-pending-spinner {

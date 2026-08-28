@@ -378,6 +378,12 @@ export class FeedreaderApp {
     }
   }
 
+  dismissFeedDeleteConfirmation(): void {
+    if (!this.state.confirmDeleteFeedId || this.state.deletingFeedId) return;
+    this.state.confirmDeleteFeedId = null;
+    this.render();
+  }
+
   showMoreFeeds(): void {
     this.state.feedDisplayLimit += 100;
     this.render();

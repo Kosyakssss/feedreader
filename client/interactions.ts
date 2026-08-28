@@ -170,6 +170,9 @@ export function bindInteractions(app: FeedreaderApp): void {
   document.addEventListener('click', event => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
+    if (app.state.confirmDeleteFeedId && !target.closest('[data-delete-feed]')) {
+      app.dismissFeedDeleteConfirmation();
+    }
     if (target.closest('[data-nav-menu]')) {
       app.shell.setNavigationOpen(!app.shell.navigationOpen());
       return;

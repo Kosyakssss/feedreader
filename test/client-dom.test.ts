@@ -335,11 +335,15 @@ describe('client orchestration', () => {
       animate: (frames: Keyframe[] | PropertyIndexedKeyframes, options?: number | KeyframeAnimationOptions) => Animation;
     };
     const originalAnimate = prototype.animate;
-    prototype.animate = () => ({
+    const animationFrames: Array<Keyframe[] | PropertyIndexedKeyframes | null> = [];
+    prototype.animate = frames => {
+      animationFrames.push(frames);
+      return ({
       finished: Promise.resolve(),
       addEventListener: () => undefined,
       cancel: () => undefined,
-    }) as unknown as Animation;
+      }) as unknown as Animation;
+    };
     const deletion = deferred<{ ok: boolean }>();
     let calls = 0;
     const app = renderedApp(client({ deleteFeed: () => { calls += 1; return deletion.promise; } }));
@@ -356,6 +360,11 @@ describe('client orchestration', () => {
     expect(button.classList.contains('is-confirming')).toBe(true);
     expect(button.getAttribute('aria-label')).toBe('Confirm removal of Feed');
 
+    document.body.click();
+    expect(button.classList.contains('is-confirming')).toBe(false);
+    expect(button.getAttribute('aria-label')).toBe('Remove Feed');
+
+    button.click();
     button.click();
     button.click();
     expect(calls).toBe(1);
@@ -365,6 +374,7 @@ describe('client orchestration', () => {
     deletion.resolve({ ok: true });
     await new Promise(resolve => setTimeout(resolve, 10));
     expect(app.state.feeds.feeds).toHaveLength(0);
+    expect(JSON.stringify(animationFrames)).not.toContain('translateX');
     prototype.animate = originalAnimate;
   });
 });

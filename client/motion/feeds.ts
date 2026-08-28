@@ -65,14 +65,14 @@ export function animatePendingFeedEnter(slot: HTMLElement): void {
 }
 
 export async function animatePendingFeedExit(slot: HTMLElement): Promise<boolean> {
-  return await collapseSlot(slot, slot.querySelector<HTMLElement>('.feed-pending'), 0);
+  return await collapseSlot(slot, slot.querySelector<HTMLElement>('.feed-pending'));
 }
 
 export async function animateFeedRemoval(id: string): Promise<void> {
   const slot = [...document.querySelectorAll<HTMLElement>('.feed-slot[data-feed-id]')]
     .find(candidate => candidate.dataset.feedId === id);
   if (!slot) return;
-  await collapseSlot(slot, slot.querySelector<HTMLElement>('.feed-item'), 8);
+  await collapseSlot(slot, slot.querySelector<HTMLElement>('.feed-item'));
 }
 
 export function cancelFeedSlotMotion(slot: HTMLElement): void {
@@ -80,7 +80,7 @@ export function cancelFeedSlotMotion(slot: HTMLElement): void {
   slot.classList.remove('is-revealing', 'is-exiting');
 }
 
-async function collapseSlot(slot: HTMLElement, content: HTMLElement | null, translateX: number): Promise<boolean> {
+async function collapseSlot(slot: HTMLElement, content: HTMLElement | null): Promise<boolean> {
   if (!motionAllowed() || typeof slot.animate !== 'function') return true;
   cancelAnimations(slot);
   const height = slot.getBoundingClientRect().height;
@@ -91,8 +91,8 @@ async function collapseSlot(slot: HTMLElement, content: HTMLElement | null, tran
   );
   content?.animate(
     [
-      { opacity: 1, transform: 'translateX(0)' },
-      { opacity: 0, transform: `translateX(${translateX}px)` },
+      { opacity: 1 },
+      { opacity: 0 },
     ],
     { duration: EXIT_DURATION_MS, easing: EXIT_EASING, fill: 'forwards' },
   );
