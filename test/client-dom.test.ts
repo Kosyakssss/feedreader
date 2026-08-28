@@ -230,6 +230,68 @@ describe('client orchestration', () => {
     expect(document.querySelector<HTMLInputElement>('#add-feed-url')?.value).toBe('https://new.example/feed.xml');
   });
 
+  test('keeps a retried pending row when its prior exit animation is canceled', async () => {
+    const animations = new WeakMap<HTMLElement, Animation[]>();
+    const prototype = HTMLElement.prototype as HTMLElement & {
+      animate: typeof HTMLElement.prototype.animate;
+      getAnimations: typeof HTMLElement.prototype.getAnimations;
+    };
+    const originalAnimate = prototype.animate;
+    const originalGetAnimations = prototype.getAnimations;
+    prototype.animate = function (_frames, options) {
+      let resolveFinished!: () => void;
+      let rejectFinished!: () => void;
+      const finished = new Promise<void>((resolve, reject) => {
+        resolveFinished = resolve;
+        rejectFinished = () => reject(new DOMException('Canceled', 'AbortError'));
+      });
+      const rejectsOnCancel = (this as unknown as HTMLElement).classList.contains('feed-slot')
+        && typeof options === 'object'
+        && options.fill === 'forwards';
+      const animation = {
+        finished,
+        addEventListener: () => undefined,
+        cancel: () => rejectsOnCancel ? rejectFinished() : resolveFinished(),
+      } as unknown as Animation;
+      const node = this as unknown as HTMLElement;
+      animations.set(node, [...(animations.get(node) ?? []), animation]);
+      return animation;
+    };
+    prototype.getAnimations = function () {
+      return animations.get(this as unknown as HTMLElement) ?? [];
+    };
+
+    try {
+      const first = deferred<Awaited<ReturnType<FeedreaderApi['addFeed']>>>();
+      const second = deferred<Awaited<ReturnType<FeedreaderApi['addFeed']>>>();
+      let calls = 0;
+      const app = renderedApp(client({ addFeed: () => (++calls === 1 ? first.promise : second.promise) }));
+      app.navigate('/feeds', false);
+      const input = document.querySelector<HTMLInputElement>('#add-feed-url')!;
+      input.value = 'example.com/feed.xml';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      const submit = document.querySelector<HTMLButtonElement>('#add-feed-form button[type="submit"]')!;
+
+      submit.click();
+      first.reject(new Error('Try again'));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(document.querySelector('.feed-pending-slot')?.getAttribute('data-exiting')).toBe('true');
+
+      submit.click();
+      await Promise.resolve();
+      expect(calls).toBe(2);
+      expect(document.querySelector('.feed-pending-slot')).not.toBeNull();
+      expect(document.querySelector('.feed-pending-slot')?.hasAttribute('data-exiting')).toBe(false);
+
+      second.reject(new Error('Done'));
+      await Promise.resolve();
+    } finally {
+      prototype.animate = originalAnimate;
+      prototype.getAnimations = originalGetAnimations;
+    }
+  });
+
   test('keeps import progress nodes stable while feed results advance', () => {
     const app = renderedApp();
     app.state.feeds = {

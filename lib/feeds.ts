@@ -1201,10 +1201,7 @@ export async function resolveFeedInput(
     if (document) return document;
   }
 
-  let parsedUrl: URL | null = null;
-  try {
-    parsedUrl = new URL(input);
-  } catch {}
+  const parsedUrl = parseWebInput(input);
 
   if (parsedUrl) {
     const blueskyHandle = extractBlueskyHandle(parsedUrl);
@@ -1234,6 +1231,19 @@ export async function resolveFeedInput(
   if (actor) return actor;
 
   throw new Error('Enter an RSS/Atom URL, website URL, Bluesky handle, or Standard Site link');
+}
+
+function parseWebInput(input: string): URL | null {
+  const candidates = [input];
+  if (!/^[a-z][a-z\d+.-]*:/i.test(input) && !/\s/.test(input)) candidates.push(`https://${input}`);
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed;
+    } catch {}
+  }
+  return null;
 }
 
 export async function discoverFeedUrl(

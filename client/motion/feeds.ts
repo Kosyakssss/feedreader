@@ -64,8 +64,8 @@ export function animatePendingFeedEnter(slot: HTMLElement): void {
   revealSlot(slot, pending, 0);
 }
 
-export async function animatePendingFeedExit(slot: HTMLElement): Promise<void> {
-  await collapseSlot(slot, slot.querySelector<HTMLElement>('.feed-pending'), 0);
+export async function animatePendingFeedExit(slot: HTMLElement): Promise<boolean> {
+  return await collapseSlot(slot, slot.querySelector<HTMLElement>('.feed-pending'), 0);
 }
 
 export async function animateFeedRemoval(id: string): Promise<void> {
@@ -80,8 +80,8 @@ export function cancelFeedSlotMotion(slot: HTMLElement): void {
   slot.classList.remove('is-revealing', 'is-exiting');
 }
 
-async function collapseSlot(slot: HTMLElement, content: HTMLElement | null, translateX: number): Promise<void> {
-  if (!motionAllowed() || typeof slot.animate !== 'function') return;
+async function collapseSlot(slot: HTMLElement, content: HTMLElement | null, translateX: number): Promise<boolean> {
+  if (!motionAllowed() || typeof slot.animate !== 'function') return true;
   cancelAnimations(slot);
   const height = slot.getBoundingClientRect().height;
   slot.classList.add('is-exiting');
@@ -96,5 +96,10 @@ async function collapseSlot(slot: HTMLElement, content: HTMLElement | null, tran
     ],
     { duration: EXIT_DURATION_MS, easing: EXIT_EASING, fill: 'forwards' },
   );
-  await layout.finished.catch(() => undefined);
+  try {
+    await layout.finished;
+    return true;
+  } catch {
+    return false;
+  }
 }

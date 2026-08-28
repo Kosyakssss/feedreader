@@ -261,7 +261,10 @@ function updateFeedsPage(state: AppState, page: HTMLElement, options: PageUpdate
     );
   } else if (pendingSlot && pendingSlot.dataset.exiting !== 'true') {
     pendingSlot.dataset.exiting = 'true';
-    void animatePendingFeedExit(pendingSlot).then(() => pendingSlot?.remove());
+    const exitingSlot = pendingSlot;
+    void animatePendingFeedExit(exitingSlot).then(completed => {
+      if (completed && exitingSlot.dataset.exiting === 'true') exitingSlot.remove();
+    });
   }
 
   const visibleFeeds = state.feeds.feeds.slice(0, state.feedDisplayLimit);
