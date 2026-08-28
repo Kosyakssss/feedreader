@@ -3,6 +3,7 @@ const CONTENT_DURATION_MS = 220;
 const EXIT_DURATION_MS = 180;
 const STAGGER_MS = 30;
 const MAX_STAGGER_MS = 150;
+const REPLACEMENT_DURATION_MS = 260;
 const REVEAL_EASING = 'cubic-bezier(0.2, 0, 0, 1)';
 const EXIT_EASING = 'cubic-bezier(0.4, 0, 1, 1)';
 
@@ -62,6 +63,50 @@ export function animatePendingFeedEnter(slot: HTMLElement): void {
   const pending = slot.querySelector<HTMLElement>('.feed-pending');
   if (!pending || !motionAllowed()) return;
   revealSlot(slot, pending, 0);
+}
+
+export async function animateFeedOverlayReplacement(pendingSlot: HTMLElement, feedSlot: HTMLElement): Promise<void> {
+  const feed = feedSlot.querySelector<HTMLElement>('.feed-item');
+  const pending = pendingSlot.querySelector<HTMLElement>('.feed-pending');
+  const list = pendingSlot.parentElement;
+  if (!feed || !pending || !list) return;
+  if (!motionAllowed() || typeof feed.animate !== 'function') {
+    pendingSlot.remove();
+    return;
+  }
+
+  cancelAnimations(pendingSlot);
+  const top = pendingSlot.offsetTop;
+  const height = feedSlot.getBoundingClientRect().height;
+  pendingSlot.style.height = `${height}px`;
+  feedSlot.classList.add('is-overlay-replacement');
+  Object.assign(feedSlot.style, {
+    left: '0',
+    marginTop: '0',
+    position: 'absolute',
+    right: '0',
+    top: `${top}px`,
+    zIndex: '3',
+  });
+
+  const reveal = feed.animate(
+    [
+      { opacity: 0, transform: 'translateY(-10px)' },
+      { opacity: 1, transform: 'translateY(0)' },
+    ],
+    { duration: REPLACEMENT_DURATION_MS, easing: REVEAL_EASING, fill: 'backwards' },
+  );
+  pending.animate(
+    [{ opacity: 1 }, { opacity: 0 }],
+    { duration: 120, delay: 140, easing: 'ease-out', fill: 'forwards' },
+  );
+  await reveal.finished.catch(() => undefined);
+
+  pendingSlot.remove();
+  feedSlot.classList.remove('is-overlay-replacement');
+  for (const property of ['left', 'margin-top', 'position', 'right', 'top', 'z-index']) {
+    feedSlot.style.removeProperty(property);
+  }
 }
 
 export async function animatePendingFeedExit(slot: HTMLElement): Promise<boolean> {

@@ -292,6 +292,42 @@ describe('client orchestration', () => {
     }
   });
 
+  test('finishes a successful add by overlaying the pending row without a layout gap', async () => {
+    const prototype = HTMLElement.prototype as HTMLElement & { animate: typeof HTMLElement.prototype.animate };
+    const originalAnimate = prototype.animate;
+    prototype.animate = () => ({
+      finished: Promise.resolve(),
+      addEventListener: () => undefined,
+      cancel: () => undefined,
+    }) as unknown as Animation;
+
+    try {
+      const added = deferred<Awaited<ReturnType<FeedreaderApi['addFeed']>>>();
+      const app = renderedApp(client({ addFeed: () => added.promise }));
+      app.navigate('/feeds', false);
+      const input = document.querySelector<HTMLInputElement>('#add-feed-url')!;
+      input.value = 'new.example/feed.xml';
+      document.querySelector<HTMLButtonElement>('#add-feed-form button[type="submit"]')!.click();
+      expect(document.querySelector('.feed-pending-slot')).not.toBeNull();
+
+      added.resolve({
+        feed: { id: 'new', url: 'https://new.example/feed.xml', label: 'New', folderId: null },
+        entries: [],
+        health: { lastFetched: Date.now(), error: null, entryCount: 0 },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const firstSlot = document.querySelector<HTMLElement>('.feed-list > .feed-slot');
+      expect(document.querySelector('.feed-pending-slot')).toBeNull();
+      expect(firstSlot?.dataset.feedId).toBe('new');
+      expect(firstSlot?.style.position).toBe('');
+    } finally {
+      prototype.animate = originalAnimate;
+    }
+  });
+
   test('keeps import progress nodes stable while feed results advance', () => {
     const app = renderedApp();
     app.state.feeds = {

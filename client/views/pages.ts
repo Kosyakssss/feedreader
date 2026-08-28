@@ -1,5 +1,6 @@
 import type { Feed } from '../../lib/types.ts';
 import {
+  animateFeedOverlayReplacement,
   animateFeedRows,
   animatePendingFeedEnter,
   animatePendingFeedExit,
@@ -241,6 +242,7 @@ function updateFeedsPage(state: AppState, page: HTMLElement, options: PageUpdate
 
   let pendingSlot = list.querySelector<HTMLElement>('.feed-pending-slot');
   let createdPending = false;
+  const replacingPending = !!pendingSlot && !!options.animateFeeds && !!options.newFeedIds?.size;
   if (state.feedAdd.pending) {
     if (!pendingSlot) {
       pendingSlot = element('div', 'feed-slot feed-pending-slot');
@@ -259,7 +261,7 @@ function updateFeedsPage(state: AppState, page: HTMLElement, options: PageUpdate
       element('strong', undefined, 'Finding and checking feed…'),
       element('span', undefined, displayFeedUrl(state.feedAdd.value)),
     );
-  } else if (pendingSlot && pendingSlot.dataset.exiting !== 'true') {
+  } else if (pendingSlot && !replacingPending && pendingSlot.dataset.exiting !== 'true') {
     pendingSlot.dataset.exiting = 'true';
     const exitingSlot = pendingSlot;
     void animatePendingFeedExit(exitingSlot).then(completed => {
@@ -298,7 +300,14 @@ function updateFeedsPage(state: AppState, page: HTMLElement, options: PageUpdate
 
   if (createdPending && pendingSlot) animatePendingFeedEnter(pendingSlot);
   if (options.animateFeeds && options.newFeedIds?.size) {
-    animateFeedRows(orderedRows, options.newFeedIds, pendingSlot ? 45 : 0);
+    const replacement = pendingSlot
+      ? orderedRows.find(row => options.newFeedIds?.has(row.dataset.feedId ?? ''))
+      : null;
+    if (replacement && options.newFeedIds.size === 1) {
+      void animateFeedOverlayReplacement(pendingSlot!, replacement);
+    } else {
+      animateFeedRows(orderedRows, options.newFeedIds);
+    }
   }
 }
 

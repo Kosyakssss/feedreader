@@ -60,11 +60,16 @@
   background: var(--accent-soft);
   border: 0;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 82%, transparent);
+  min-height: 58px;
 }
 
 .feed-pending-slot {
   position: relative;
   z-index: 2;
+}
+
+.feed-list {
+  position: relative;
 }
 
 .feed-pending-spinner {
