@@ -27,6 +27,8 @@ export class FeedreaderApp {
   private readonly entryMutationVersions = new Map<string, number>();
   private pendingEntryMutations = 0;
   private stateResyncNeeded = false;
+  private feedAddAttempt = 0;
+  private feedAddRevealTimer: number | null = null;
 
   constructor(root: HTMLElement, client: FeedreaderApi = api) {
     this.state = createInitialState(internalPath(location.pathname));
@@ -278,19 +280,30 @@ export class FeedreaderApp {
     const input = form.elements.namedItem('url');
     if (!(input instanceof HTMLInputElement) || this.state.feedAdd.pending) return;
     const value = input.value.trim();
-    this.state.feedAdd = { pending: true, value, error: null };
+    const attempt = ++this.feedAddAttempt;
+    this.state.feedAdd = { pending: true, pendingVisible: false, value, error: null };
     this.render();
+    this.feedAddRevealTimer = window.setTimeout(() => {
+      if (attempt !== this.feedAddAttempt || !this.state.feedAdd.pending) return;
+      this.state.feedAdd.pendingVisible = true;
+      this.render();
+    }, 120);
     try {
       const result = await this.client.addFeed(value);
       this.state.feeds.feeds = [result.feed, ...this.state.feeds.feeds.filter(feed => feed.id !== result.feed.id)];
       this.state.feeds.health = { ...this.state.feeds.health, [result.feed.id]: result.health };
       this.state.entries = mergeRefreshEntries(this.state.entries, result.entries).entries;
-      this.state.feedAdd = { pending: false, value: '', error: null };
+      this.state.feedAdd = { pending: false, pendingVisible: false, value: '', error: null };
       this.render({ animateFeeds: true, newFeedIds: new Set([result.feed.id]) });
       this.shell.toast(`Feed added · ${result.entries.length} ${result.entries.length === 1 ? 'entry' : 'entries'} found`);
     } catch (error) {
-      this.state.feedAdd = { pending: false, value, error: errorMessage(error) };
+      this.state.feedAdd = { pending: false, pendingVisible: false, value, error: errorMessage(error) };
       this.render();
+    } finally {
+      if (attempt === this.feedAddAttempt && this.feedAddRevealTimer !== null) {
+        window.clearTimeout(this.feedAddRevealTimer);
+        this.feedAddRevealTimer = null;
+      }
     }
   }
 

@@ -1,11 +1,11 @@
 const REVEAL_DURATION_MS = 280;
 const CONTENT_DURATION_MS = 220;
-const EXIT_DURATION_MS = 180;
+const EXIT_DURATION_MS = 165;
 const STAGGER_MS = 30;
 const MAX_STAGGER_MS = 150;
 const REPLACEMENT_DURATION_MS = 260;
 const REVEAL_EASING = 'cubic-bezier(0.2, 0, 0, 1)';
-const EXIT_EASING = 'cubic-bezier(0.4, 0, 1, 1)';
+const EXIT_EASING = 'cubic-bezier(0.55, 0, 0.9, 0.45)';
 
 function motionAllowed(): boolean {
   return !matchMedia('(prefers-reduced-motion: reduce)').matches && document.visibilityState === 'visible';
@@ -91,7 +91,7 @@ export async function animateFeedOverlayReplacement(pendingSlot: HTMLElement, fe
 
   const reveal = feed.animate(
     [
-      { opacity: 0, transform: 'translateY(-10px)' },
+      { opacity: 0, transform: 'translateY(10px)' },
       { opacity: 1, transform: 'translateY(0)' },
     ],
     { duration: REPLACEMENT_DURATION_MS, easing: REVEAL_EASING, fill: 'backwards' },
@@ -131,13 +131,18 @@ async function collapseSlot(slot: HTMLElement, content: HTMLElement | null): Pro
   const height = slot.getBoundingClientRect().height;
   slot.classList.add('is-exiting');
   const layout = slot.animate(
-    [{ height: `${height}px` }, { height: '0px' }],
+    [
+      { height: `${height}px` },
+      { height: `${height + 2}px`, offset: 0.18 },
+      { height: '0px' },
+    ],
     { duration: EXIT_DURATION_MS, easing: EXIT_EASING, fill: 'forwards' },
   );
   content?.animate(
     [
-      { opacity: 1 },
-      { opacity: 0 },
+      { opacity: 1, transform: 'scaleY(1)' },
+      { opacity: 1, transform: 'scaleY(1.018)', offset: 0.18 },
+      { opacity: 0, transform: 'scaleY(0.97)' },
     ],
     { duration: EXIT_DURATION_MS, easing: EXIT_EASING, fill: 'forwards' },
   );

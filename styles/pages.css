@@ -50,17 +50,25 @@
 
 .feed-pending {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 190px 40px;
   align-items: center;
-  gap: 10px;
+  gap: var(--spacing-sm);
   min-height: 58px;
   padding: 9px var(--spacing-md);
   overflow: hidden;
   color: var(--accent);
   background: var(--accent-soft);
-  border: 0;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 82%, transparent);
-  min-height: 58px;
+  border: 0.5px solid transparent;
+  position: relative;
+}
+
+.feed-pending::after {
+  position: absolute;
+  z-index: 1;
+  border: 1px solid color-mix(in srgb, var(--accent) 82%, transparent);
+  content: '';
+  inset: 0;
+  pointer-events: none;
 }
 
 .feed-pending-slot {
@@ -72,6 +80,17 @@
   position: relative;
 }
 
+.feed-pending-label {
+  color: var(--accent);
+}
+
+.feed-pending-activity {
+  display: flex;
+  min-height: 1.6em;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .feed-pending-spinner {
   width: 14px;
   height: 14px;
@@ -79,25 +98,6 @@
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: feed-spin 700ms linear infinite;
-}
-
-.feed-pending-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  line-height: 1.35;
-}
-
-.feed-pending-copy strong {
-  font-size: 0.9em;
-}
-
-.feed-pending-copy span {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 0.78em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .feed-import-slot {
@@ -323,6 +323,7 @@
 .feed-file-actions .btn {
   min-width: 0;
   text-align: center;
+  text-decoration: none;
 }
 
 @keyframes feed-spin {

@@ -214,6 +214,7 @@ describe('client orchestration', () => {
     document.querySelector<HTMLButtonElement>('#add-feed-form button[type="submit"]')!.click();
 
     expect(document.querySelector('#add-feed-form')?.getAttribute('aria-busy')).not.toBeNull();
+    await new Promise(resolve => setTimeout(resolve, 130));
     expect(document.querySelector('.feed-pending')?.textContent).toContain('Finding and checking feed');
     expect(document.querySelector('.feed-pending-slot > .feed-pending')).not.toBeNull();
 
@@ -273,13 +274,14 @@ describe('client orchestration', () => {
       const submit = document.querySelector<HTMLButtonElement>('#add-feed-form button[type="submit"]')!;
 
       submit.click();
+      await new Promise(resolve => setTimeout(resolve, 130));
       first.reject(new Error('Try again'));
       await Promise.resolve();
       await Promise.resolve();
       expect(document.querySelector('.feed-pending-slot')?.getAttribute('data-exiting')).toBe('true');
 
       submit.click();
-      await Promise.resolve();
+      await new Promise(resolve => setTimeout(resolve, 130));
       expect(calls).toBe(2);
       expect(document.querySelector('.feed-pending-slot')).not.toBeNull();
       expect(document.querySelector('.feed-pending-slot')?.hasAttribute('data-exiting')).toBe(false);
@@ -308,6 +310,7 @@ describe('client orchestration', () => {
       const input = document.querySelector<HTMLInputElement>('#add-feed-url')!;
       input.value = 'new.example/feed.xml';
       document.querySelector<HTMLButtonElement>('#add-feed-form button[type="submit"]')!.click();
+      await new Promise(resolve => setTimeout(resolve, 130));
       expect(document.querySelector('.feed-pending-slot')).not.toBeNull();
 
       added.resolve({
@@ -326,6 +329,21 @@ describe('client orchestration', () => {
     } finally {
       prototype.animate = originalAnimate;
     }
+  });
+
+  test('does not flash a searching row for an immediate add error', async () => {
+    const app = renderedApp(client({ addFeed: async () => { throw new Error('No feed found'); } }));
+    app.navigate('/feeds', false);
+    const input = document.querySelector<HTMLInputElement>('#add-feed-url')!;
+    input.value = 'not-a-feed.example';
+    document.querySelector<HTMLButtonElement>('#add-feed-form button[type="submit"]')!.click();
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(document.querySelector('.feed-pending-slot')).toBeNull();
+    expect(document.querySelector('#add-feed-status')?.textContent).toContain('No feed found');
+    expect(input.autocomplete).toBe('off');
+    expect(input.getAttribute('aria-autocomplete')).toBe('none');
   });
 
   test('keeps import progress nodes stable while feed results advance', () => {
@@ -411,6 +429,7 @@ describe('client orchestration', () => {
     await new Promise(resolve => setTimeout(resolve, 10));
     expect(app.state.feeds.feeds).toHaveLength(0);
     expect(JSON.stringify(animationFrames)).not.toContain('translateX');
+    expect(JSON.stringify(animationFrames)).toContain('scaleY');
     prototype.animate = originalAnimate;
   });
 });

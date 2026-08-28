@@ -169,7 +169,10 @@ function buildFeedsPage(state: AppState): HTMLElement {
   input.name = 'url';
   input.placeholder = 'Feed, site URL, or @handle…';
   input.required = true;
-  input.setAttribute('autocomplete', 'url');
+  input.setAttribute('autocomplete', 'off');
+  input.setAttribute('aria-autocomplete', 'none');
+  input.setAttribute('autocapitalize', 'none');
+  input.spellcheck = false;
   const add = button('Add', 'btn btn-primary');
   add.type = 'submit';
   addForm.append(input, add);
@@ -243,12 +246,21 @@ function updateFeedsPage(state: AppState, page: HTMLElement, options: PageUpdate
   let pendingSlot = list.querySelector<HTMLElement>('.feed-pending-slot');
   let createdPending = false;
   const replacingPending = !!pendingSlot && !!options.animateFeeds && !!options.newFeedIds?.size;
-  if (state.feedAdd.pending) {
+  if (state.feedAdd.pendingVisible) {
     if (!pendingSlot) {
       pendingSlot = element('div', 'feed-slot feed-pending-slot');
-      const pending = element('div', 'feed-pending');
+      const pending = element('div', 'feed-item feed-pending');
       pending.setAttribute('role', 'status');
-      pending.append(element('span', 'feed-pending-spinner'), element('div', 'feed-pending-copy'));
+      const info = element('div', 'feed-info');
+      info.append(
+        element('span', 'feed-label feed-pending-label', 'Finding and checking feed…'),
+        element('div', 'feed-meta feed-pending-address'),
+      );
+      const metrics = element('div', 'feed-metrics feed-pending-metrics');
+      const activity = element('span', 'feed-pending-activity');
+      activity.append(element('span', 'feed-pending-spinner'));
+      metrics.append(element('span', 'feed-pending-metric-spacer'), activity);
+      pending.append(info, metrics, element('span', 'feed-pending-action'));
       pendingSlot.append(pending);
       list.prepend(pendingSlot);
       createdPending = true;
@@ -256,11 +268,11 @@ function updateFeedsPage(state: AppState, page: HTMLElement, options: PageUpdate
       pendingSlot.removeAttribute('data-exiting');
       cancelFeedSlotMotion(pendingSlot);
     }
-    const copy = pendingSlot.querySelector<HTMLElement>('.feed-pending-copy');
-    if (copy) copy.replaceChildren(
-      element('strong', undefined, 'Finding and checking feed…'),
-      element('span', undefined, displayFeedUrl(state.feedAdd.value)),
-    );
+    const address = pendingSlot.querySelector<HTMLElement>('.feed-pending-address');
+    if (address) {
+      address.textContent = displayFeedUrl(state.feedAdd.value);
+      address.title = state.feedAdd.value;
+    }
   } else if (pendingSlot && !replacingPending && pendingSlot.dataset.exiting !== 'true') {
     pendingSlot.dataset.exiting = 'true';
     const exitingSlot = pendingSlot;
@@ -287,7 +299,7 @@ function updateFeedsPage(state: AppState, page: HTMLElement, options: PageUpdate
   }
   reconcileFeedRowOrder(list, orderedRows, pendingSlot?.isConnected ? pendingSlot : null);
 
-  if (state.feeds.feeds.length === 0 && !state.feedAdd.pending) {
+  if (state.feeds.feeds.length === 0 && !state.feedAdd.pendingVisible) {
     list.append(element('div', 'empty-state', 'No feeds yet. Add one above!'));
   }
   if (state.feeds.feeds.length > visibleFeeds.length) {

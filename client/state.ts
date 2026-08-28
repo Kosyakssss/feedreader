@@ -46,6 +46,7 @@ export interface RefreshStatus {
 
 export interface FeedAddState {
   pending: boolean;
+  pendingVisible: boolean;
   value: string;
   error: string | null;
 }
@@ -118,7 +119,7 @@ export function createInitialState(page: string): AppState {
     refreshRunId: null,
     refreshCursor: 0,
     feedRefreshCursor: 0,
-    feedAdd: { pending: false, value: '', error: null },
+    feedAdd: { pending: false, pendingVisible: false, value: '', error: null },
     feedImport: null,
     feedDisplayLimit: 100,
     confirmDeleteFeedId: null,
