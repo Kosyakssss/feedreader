@@ -215,6 +215,10 @@ body {
   width: 100%;
 }
 
+.add-form .btn-primary {
+  width: 92px;
+}
+
 .settings-form {
   display: flex;
   width: 100%;

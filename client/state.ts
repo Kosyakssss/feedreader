@@ -88,6 +88,7 @@ export interface AppState {
   feedImport: FeedImportProgress | null;
   feedDisplayLimit: number;
   confirmDeleteFeedId: string | null;
+  deletingFeedId: string | null;
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -121,6 +122,7 @@ export function createInitialState(page: string): AppState {
     feedImport: null,
     feedDisplayLimit: 100,
     confirmDeleteFeedId: null,
+    deletingFeedId: null,
   };
 }
 

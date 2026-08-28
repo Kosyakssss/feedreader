@@ -9,6 +9,7 @@ export const ICON_NAMES = [
   'refresh',
   'star',
   'star-filled',
+  'trash',
 ] as const;
 
 export type IconName = typeof ICON_NAMES[number];
@@ -24,6 +25,7 @@ const symbols: Record<IconName, string> = {
   refresh: '<path d="M15.55 7.25A6 6 0 1 0 16 11m-.45-3.75V3.8m0 3.45H12.1"/>',
   star: '<path d="m10 2.75 2.2 4.45 4.9.72-3.55 3.45.84 4.88L10 13.95l-4.39 2.3.84-4.88L2.9 7.92l4.9-.72L10 2.75Z"/>',
   'star-filled': '<path d="m10 2.75 2.2 4.45 4.9.72-3.55 3.45.84 4.88L10 13.95l-4.39 2.3.84-4.88L2.9 7.92l4.9-.72L10 2.75Z" fill="currentColor"/>',
+  trash: '<path d="M4.75 6.25h10.5m-8.8 0 .55 9h6l.55-9M8 6.25V4.5h4v1.75M8.5 8.75v4.5m3-4.5v4.5"/>',
 };
 
 export function renderIconSprite(): string {

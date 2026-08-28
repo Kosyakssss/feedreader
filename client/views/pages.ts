@@ -1,4 +1,10 @@
 import type { Feed } from '../../lib/types.ts';
+import {
+  animateFeedRows,
+  animatePendingFeedEnter,
+  animatePendingFeedExit,
+  cancelFeedSlotMotion,
+} from '../motion/feeds.ts';
 import { externalPath } from '../router.ts';
 import {
   type AppState,
@@ -169,7 +175,8 @@ function buildFeedsPage(state: AppState): HTMLElement {
   const addStatus = element('div', 'add-feed-status');
   addStatus.id = 'add-feed-status';
   addStatus.setAttribute('aria-live', 'polite');
-  addStatus.hidden = true;
+  addStatus.setAttribute('aria-hidden', 'true');
+  addStatus.append(element('div', 'add-feed-status-inner'));
   addWrap.append(addForm, addStatus);
 
   const fileActions = element('div', 'feed-file-actions');
@@ -186,15 +193,23 @@ function buildFeedsPage(state: AppState): HTMLElement {
   fileActions.append(importButton, opml, exportLink);
   tools.append(addWrap, fileActions);
 
+  const importSlot = element('div', 'feed-import-slot');
+  importSlot.setAttribute('aria-hidden', 'true');
+  const importSlotInner = element('div', 'feed-import-slot-inner');
   const importStatus = element('section', 'feed-import-status');
   importStatus.setAttribute('aria-live', 'polite');
-  importStatus.hidden = true;
+  const importTitle = element('div', 'feed-import-title');
+  const importMeter = element('progress', 'feed-import-meter');
+  importMeter.hidden = true;
+  const importDetail = element('div', 'feed-import-detail');
+  importStatus.append(importTitle, importMeter, importDetail);
+  importSlotInner.append(importStatus);
+  importSlot.append(importSlotInner);
 
   const list = element('div', 'feed-list');
   list.setAttribute('role', 'list');
-  list.append(buildFeedListHeader());
   addForm.prepend(inputLabel);
-  page.append(header, tools, importStatus, list);
+  page.append(header, tools, importSlot, buildFeedListHeader(), list);
   return page;
 }
 
@@ -218,33 +233,41 @@ function updateFeedsPage(state: AppState, page: HTMLElement, options: PageUpdate
 
   const list = page.querySelector<HTMLElement>('.feed-list');
   if (!list) return;
-  const header = list.querySelector<HTMLElement>('.feed-list-header');
+  list.toggleAttribute('aria-busy', state.feedAdd.pending || !!state.feedImport?.active);
+  const header = page.querySelector<HTMLElement>('.feed-list-header');
   if (header) header.hidden = state.feeds.feeds.length === 0;
   list.querySelector('.empty-state')?.remove();
   list.querySelector('.feed-load-more')?.remove();
 
-  let pending = list.querySelector<HTMLElement>('.feed-pending');
+  let pendingSlot = list.querySelector<HTMLElement>('.feed-pending-slot');
+  let createdPending = false;
   if (state.feedAdd.pending) {
-    if (!pending) {
-      pending = element('div', 'feed-pending');
+    if (!pendingSlot) {
+      pendingSlot = element('div', 'feed-slot feed-pending-slot');
+      const pending = element('div', 'feed-pending');
       pending.setAttribute('role', 'status');
       pending.append(element('span', 'feed-pending-spinner'), element('div', 'feed-pending-copy'));
-      header?.after(pending);
+      pendingSlot.append(pending);
+      list.prepend(pendingSlot);
+      createdPending = true;
+    } else if (pendingSlot.dataset.exiting === 'true') {
+      pendingSlot.removeAttribute('data-exiting');
+      cancelFeedSlotMotion(pendingSlot);
     }
-    const copy = pending.querySelector<HTMLElement>('.feed-pending-copy');
+    const copy = pendingSlot.querySelector<HTMLElement>('.feed-pending-copy');
     if (copy) copy.replaceChildren(
       element('strong', undefined, 'Finding and checking feed…'),
       element('span', undefined, displayFeedUrl(state.feedAdd.value)),
     );
-  } else {
-    pending?.remove();
-    pending = null;
+  } else if (pendingSlot && pendingSlot.dataset.exiting !== 'true') {
+    pendingSlot.dataset.exiting = 'true';
+    void animatePendingFeedExit(pendingSlot).then(() => pendingSlot?.remove());
   }
 
   const visibleFeeds = state.feeds.feeds.slice(0, state.feedDisplayLimit);
   const visibleIds = new Set(visibleFeeds.map(feed => feed.id));
   const rows = new Map(
-    [...list.querySelectorAll<HTMLElement>('.feed-item[data-feed-id]')]
+    [...list.querySelectorAll<HTMLElement>('.feed-slot[data-feed-id]')]
       .map(row => [row.dataset.feedId ?? '', row] as const),
   );
   for (const [id, row] of rows) {
@@ -255,9 +278,9 @@ function updateFeedsPage(state: AppState, page: HTMLElement, options: PageUpdate
   for (const feed of visibleFeeds) {
     const row = rows.get(feed.id) ?? buildFeedRow(state, feed, unreadByFeed.get(feed.id) ?? 0);
     updateFeedRow(state, row, feed, unreadByFeed.get(feed.id) ?? 0);
-    list.append(row);
     orderedRows.push(row);
   }
+  reconcileFeedRowOrder(list, orderedRows, pendingSlot?.isConnected ? pendingSlot : null);
 
   if (state.feeds.feeds.length === 0 && !state.feedAdd.pending) {
     list.append(element('div', 'empty-state', 'No feeds yet. Add one above!'));
@@ -270,7 +293,10 @@ function updateFeedsPage(state: AppState, page: HTMLElement, options: PageUpdate
     list.append(more);
   }
 
-  if (options.animateFeeds && options.newFeedIds?.size) animateFeedRows(orderedRows, options.newFeedIds);
+  if (createdPending && pendingSlot) animatePendingFeedEnter(pendingSlot);
+  if (options.animateFeeds && options.newFeedIds?.size) {
+    animateFeedRows(orderedRows, options.newFeedIds, pendingSlot ? 45 : 0);
+  }
 }
 
 function updateAddForm(state: AppState, page: HTMLElement): void {
@@ -285,36 +311,56 @@ function updateAddForm(state: AppState, page: HTMLElement): void {
   add.textContent = state.feedAdd.pending ? 'Checking…' : 'Add';
   add.classList.toggle('is-busy', state.feedAdd.pending);
   if (!state.feedAdd.pending) input.value = state.feedAdd.value;
-  status.hidden = !state.feedAdd.error;
-  status.textContent = state.feedAdd.error ? `Couldn’t add feed: ${state.feedAdd.error}` : '';
+  const visible = !!state.feedAdd.error;
+  status.classList.toggle('is-visible', visible);
+  status.setAttribute('aria-hidden', String(!visible));
+  const inner = status.querySelector<HTMLElement>('.add-feed-status-inner');
+  if (inner) inner.textContent = visible ? `Couldn’t add feed: ${state.feedAdd.error}` : '';
 }
 
 function updateImportStatus(state: AppState, page: HTMLElement): void {
-  const panel = page.querySelector<HTMLElement>('.feed-import-status');
+  const slot = page.querySelector<HTMLElement>('.feed-import-slot');
+  const panel = slot?.querySelector<HTMLElement>('.feed-import-status');
   const buttonNode = page.querySelector<HTMLButtonElement>('[data-import-feeds]');
-  if (!panel || !buttonNode) return;
+  const titleNode = panel?.querySelector<HTMLElement>('.feed-import-title');
+  const detailNode = panel?.querySelector<HTMLElement>('.feed-import-detail');
+  const meter = panel?.querySelector<HTMLProgressElement>('.feed-import-meter');
+  if (!slot || !panel || !buttonNode || !titleNode || !detailNode || !meter) return;
   const progress = state.feedImport;
   buttonNode.disabled = !!progress?.active;
+  slot.classList.toggle('is-visible', !!progress);
+  slot.setAttribute('aria-hidden', String(!progress));
   if (!progress) {
-    panel.hidden = true;
-    panel.replaceChildren();
+    titleNode.textContent = '';
+    detailNode.textContent = '';
+    meter.value = 0;
+    meter.hidden = true;
     return;
   }
-  panel.hidden = false;
   if (progress.total === 0) {
-    panel.replaceChildren(element('div', 'feed-import-title', 'Reading subscriptions…'));
+    titleNode.textContent = 'Reading subscriptions…';
+    detailNode.textContent = '';
+    meter.hidden = true;
     return;
   }
   const title = progress.active
     ? `Checking imported feeds · ${progress.completed} / ${progress.total}`
     : `Import complete · ${progress.succeeded} checked${progress.failed ? ` · ${progress.failed} need attention` : ''}`;
-  const meter = element('progress', 'feed-import-meter');
+  meter.hidden = false;
   meter.max = progress.total;
   meter.value = progress.completed;
-  const detail = element('div', 'feed-import-detail', progress.active
+  titleNode.textContent = title;
+  detailNode.textContent = progress.active
     ? `${progress.succeeded} ready${progress.failed ? ` · ${progress.failed} failed` : ''}`
-    : `${progress.total} subscriptions added`);
-  panel.replaceChildren(element('div', 'feed-import-title', title), meter, detail);
+    : `${progress.total} subscriptions added`;
+}
+
+function reconcileFeedRowOrder(list: HTMLElement, rows: readonly HTMLElement[], pending: HTMLElement | null): void {
+  let current = pending ? pending.nextElementSibling : list.firstElementChild;
+  for (const row of rows) {
+    if (current !== row) list.insertBefore(row, current);
+    current = row.nextElementSibling;
+  }
 }
 
 function buildFeedListHeader(): HTMLElement {
@@ -328,9 +374,10 @@ function buildFeedListHeader(): HTMLElement {
 }
 
 function buildFeedRow(state: AppState, feed: Feed, unread: number): HTMLElement {
+  const slot = element('div', 'feed-slot');
+  slot.dataset.feedId = feed.id;
+  slot.setAttribute('role', 'listitem');
   const row = element('div', 'feed-item');
-  row.dataset.feedId = feed.id;
-  row.setAttribute('role', 'listitem');
   const info = element('div', 'feed-info');
   const label = element('a', 'feed-label', feed.label);
   label.href = externalPath(`/feed/${encodeURIComponent(feed.id)}`);
@@ -358,17 +405,24 @@ function buildFeedRow(state: AppState, feed: Feed, unread: number): HTMLElement 
   metrics.append(unreadMetric, healthMetric);
 
   const remove = button('', 'btn btn-feed-delete');
-  remove.append(icon('close'));
+  remove.append(
+    icon('close', 'ui-icon feed-delete-icon feed-delete-icon-idle'),
+    icon('trash', 'ui-icon feed-delete-icon feed-delete-icon-confirm'),
+    element('span', 'feed-delete-spinner'),
+  );
   remove.dataset.deleteFeed = feed.id;
   remove.dataset.feedLabel = feed.label;
   remove.title = 'Remove feed';
   remove.setAttribute('aria-label', `Remove ${feed.label}`);
   row.append(info, metrics, remove);
-  return row;
+  slot.append(row);
+  return slot;
 }
 
-function updateFeedRow(state: AppState, row: HTMLElement, feed: Feed, unread: number): void {
-  row.dataset.feedId = feed.id;
+function updateFeedRow(state: AppState, slot: HTMLElement, feed: Feed, unread: number): void {
+  slot.dataset.feedId = feed.id;
+  const row = slot.querySelector<HTMLElement>('.feed-item');
+  if (!row) return;
   const label = row.querySelector<HTMLAnchorElement>('.feed-label');
   if (label) {
     label.textContent = feed.label;
@@ -408,36 +462,19 @@ function updateFeedRow(state: AppState, row: HTMLElement, feed: Feed, unread: nu
   const remove = row.querySelector<HTMLButtonElement>('[data-delete-feed]');
   if (remove) {
     const confirming = state.confirmDeleteFeedId === feed.id;
+    const deleting = state.deletingFeedId === feed.id;
     remove.dataset.deleteFeed = feed.id;
     remove.dataset.feedLabel = feed.label;
     remove.classList.toggle('is-confirming', confirming);
-    remove.replaceChildren(confirming ? document.createTextNode('Remove?') : icon('close'));
-    remove.title = confirming ? 'Click again to remove feed' : 'Remove feed';
-    remove.setAttribute('aria-label', confirming ? `Confirm removal of ${feed.label}` : `Remove ${feed.label}`);
+    remove.classList.toggle('is-deleting', deleting);
+    remove.disabled = deleting;
+    remove.toggleAttribute('aria-busy', deleting);
+    remove.title = deleting ? 'Removing feed' : confirming ? 'Click again to remove feed' : 'Remove feed';
+    remove.setAttribute(
+      'aria-label',
+      deleting ? `Removing ${feed.label}` : confirming ? `Confirm removal of ${feed.label}` : `Remove ${feed.label}`,
+    );
   }
-}
-
-function animateFeedRows(rows: readonly HTMLElement[], newIds: ReadonlySet<string>): void {
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches || document.visibilityState !== 'visible') return;
-  rows
-    .filter(row => newIds.has(row.dataset.feedId ?? ''))
-    .filter(row => {
-      const rect = row.getBoundingClientRect();
-      return rect.bottom > 0 && rect.top < innerHeight;
-    })
-    .slice(0, 6)
-    .forEach((row, index) => {
-      const height = row.getBoundingClientRect().height;
-      const delay = Math.min(index * 34, 136);
-      row.animate(
-        [{ height: '0px' }, { height: `${height}px` }],
-        { duration: 280, delay, easing: 'cubic-bezier(0.2, 0, 0, 1)', fill: 'backwards' },
-      );
-      row.animate(
-        [{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'translateY(0)' }],
-        { duration: 220, delay, easing: 'cubic-bezier(0.2, 0, 0, 1)', fill: 'backwards' },
-      );
-    });
 }
 
 function displayFeedUrl(raw: string): string {

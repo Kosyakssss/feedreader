@@ -1,6 +1,7 @@
 import type { EnrichedEntry, EntryState } from '../lib/types.ts';
 import { api, type FeedreaderApi } from './api.ts';
 import { RefreshPoller } from './refresh.ts';
+import { animateFeedRemoval } from './motion/feeds.ts';
 import { internalPath, pushRoute } from './router.ts';
 import {
   type AppState,
@@ -350,11 +351,14 @@ export class FeedreaderApp {
   }
 
   async deleteFeed(id: string, label: string): Promise<void> {
+    if (this.state.deletingFeedId) return;
     if (this.state.confirmDeleteFeedId !== id) {
       this.state.confirmDeleteFeedId = id;
       this.render();
       return;
     }
+    this.state.deletingFeedId = id;
+    this.render();
     try {
       await this.client.deleteFeed(id);
       await animateFeedRemoval(id);
@@ -362,11 +366,13 @@ export class FeedreaderApp {
       if (this.state.feeds.health) delete this.state.feeds.health[id];
       this.state.entries = this.state.entries.filter(entry => entry.feedId !== id);
       this.state.confirmDeleteFeedId = null;
+      this.state.deletingFeedId = null;
       reconcileTransientState(this.state);
       this.render();
       this.shell.toast(`${label || 'Feed'} removed`);
     } catch (error) {
       this.state.confirmDeleteFeedId = null;
+      this.state.deletingFeedId = null;
       this.render();
       this.shell.toast(`Error: ${errorMessage(error)}`);
     }
@@ -596,17 +602,4 @@ function parseOptionalInteger(value: FormDataEntryValue | null): number | null {
   if (!text) return null;
   const parsed = Number.parseInt(text, 10);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-async function animateFeedRemoval(id: string): Promise<void> {
-  const row = document.querySelector<HTMLElement>(`.feed-item[data-feed-id="${CSS.escape(id)}"]`);
-  if (!row || typeof row.animate !== 'function' || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  const animation = row.animate(
-    [
-      { height: `${row.getBoundingClientRect().height}px`, opacity: 1 },
-      { height: '0px', opacity: 0, transform: 'translateX(8px)', paddingTop: '0px', paddingBottom: '0px' },
-    ],
-    { duration: 220, easing: 'cubic-bezier(0.4, 0, 1, 1)', fill: 'forwards' },
-  );
-  await animation.finished.catch(() => undefined);
 }

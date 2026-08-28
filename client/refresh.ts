@@ -14,7 +14,10 @@ export class RefreshPoller {
   ) {}
 
   run(feedIds?: string[]): Promise<RefreshStatus> {
-    if (this.active) return this.active;
+    if (this.active) {
+      const active = this.active;
+      return this.client.startRefresh(feedIds).then(() => active);
+    }
     const run = this.poll(feedIds).finally(() => {
       if (this.active === run) this.active = null;
     });

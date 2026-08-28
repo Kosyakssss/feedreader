@@ -14,6 +14,8 @@ import {
   type FeedFetchResult,
 } from './lib/feeds.ts';
 import { renderApp } from './lib/render.ts';
+import { pageChanges } from './lib/refresh-deltas.ts';
+import { RefreshRequestQueue } from './lib/refresh-requests.ts';
 import { buildClientAssets, encodedAsset, encodedResponse, type ClientAssets, type EncodedAsset } from './lib/client-assets.ts';
 import type { Config, EnrichedEntry, EntryState, Feed } from './lib/types.ts';
 import { isSafeExternalUrl, isSafeObjectKey, sanitizeThemeName } from './lib/security.ts';
@@ -55,7 +57,7 @@ function assertTrustedHost(req: Request): void {
 
 let refreshJob: Promise<number> | null = null;
 let activeRefreshFeedIds = new Set<string>();
-let queuedRefreshFeedIds = new Set<string>();
+const queuedRefreshRequests = new RefreshRequestQueue();
 let lastRefreshResult: { count: number; finishedAt: number; error: string | null } | null = null;
 interface RefreshChange {
   sequence: number;
@@ -219,10 +221,12 @@ async function refreshFeeds(progress: RefreshProgress, initialFeedIds?: Readonly
   let added = 0;
   const removedIds = new Set<string>();
   while (true) {
-    while (queuedRefreshFeedIds.size > 0) {
-      const queuedIds = queuedRefreshFeedIds;
-      queuedRefreshFeedIds = new Set();
+    while (queuedRefreshRequests.pending) {
       const currentFeeds = await readFeeds();
+      const queuedIds = queuedRefreshRequests.take(
+        currentFeeds.feeds.map(feed => feed.id),
+        activeRefreshFeedIds,
+      );
       await fetchBatch(currentFeeds.feeds.filter(feed => queuedIds.has(feed.id)));
     }
 
@@ -237,7 +241,7 @@ async function refreshFeeds(progress: RefreshProgress, initialFeedIds?: Readonly
       progress.removedIds = [...removedIds];
     }
 
-    if (queuedRefreshFeedIds.size === 0) return added;
+    if (!queuedRefreshRequests.pending) return added;
   }
 }
 
@@ -324,13 +328,11 @@ async function mergeFeedResults(
 function startRefresh(feedIds?: readonly string[]): Promise<number> {
   const requestedIds = feedIds ? new Set(feedIds) : undefined;
   if (refreshJob) {
-    for (const id of requestedIds ?? []) {
-      if (!activeRefreshFeedIds.has(id)) queuedRefreshFeedIds.add(id);
-    }
+    queuedRefreshRequests.enqueue(feedIds);
     return refreshJob;
   }
   activeRefreshFeedIds = new Set();
-  queuedRefreshFeedIds = new Set();
+  queuedRefreshRequests.clear();
   const progress: RefreshProgress = {
     runId: generateId(),
     startedAt: Date.now(),
@@ -364,18 +366,16 @@ function startRefresh(feedIds?: readonly string[]): Promise<number> {
     .finally(() => {
       refreshJob = null;
       activeRefreshFeedIds = new Set();
-      queuedRefreshFeedIds = new Set();
+      queuedRefreshRequests.clear();
     });
   return refreshJob;
 }
 
 function getRefreshStatus(since = 0, feedsSince = 0) {
   const progress = refreshProgress;
-  const entryChanges = progress?.changes.filter(change => change.sequence > since).slice(0, MAX_ENTRY_DELTAS) || [];
-  const feedChanges = progress?.feedResults.filter(change => change.sequence > feedsSince).slice(0, MAX_FEED_DELTAS) || [];
-  const cursor = entryChanges.at(-1)?.sequence ?? Math.min(since, progress?.changes.length || 0);
-  const feedCursor = feedChanges.at(-1)?.sequence ?? Math.min(feedsSince, progress?.feedResults.length || 0);
-  const hasMoreDeltas = cursor < (progress?.changes.length || 0) || feedCursor < (progress?.feedResults.length || 0);
+  const entryPage = pageChanges(progress?.changes || [], since, MAX_ENTRY_DELTAS);
+  const feedPage = pageChanges(progress?.feedResults || [], feedsSince, MAX_FEED_DELTAS);
+  const hasMoreDeltas = entryPage.hasMore || feedPage.hasMore;
   const refreshing = !!refreshJob || hasMoreDeltas;
   return {
     refreshing,
@@ -389,10 +389,10 @@ function getRefreshStatus(since = 0, feedsSince = 0) {
     count: progress?.added ?? lastRefreshResult?.count ?? 0,
     error: progress?.error || lastRefreshResult?.error || null,
     failures: progress?.failures.slice(-100) || [],
-    cursor,
-    feedCursor,
-    newEntries: entryChanges.map(change => change.entry),
-    feedResults: feedChanges,
+    cursor: entryPage.cursor,
+    feedCursor: feedPage.cursor,
+    newEntries: entryPage.items.map(change => change.entry),
+    feedResults: feedPage.items,
     removedIds: !refreshing ? progress?.removedIds || [] : [],
   };
 }
