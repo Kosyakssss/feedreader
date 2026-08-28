@@ -246,6 +246,24 @@
       "url": "https://www.tsoon.com/index.xml",
       "label": "www.tsoon.com",
       "folderId": null
+    },
+    {
+      "id": "ed385ccf-a468-4476-86d3-76f23bfe132c",
+      "url": "https://sive.rs/feed.xml",
+      "label": "sive.rs",
+      "folderId": null
+    },
+    {
+      "id": "c5989360-c8cb-45a2-b988-42f045a4afc1",
+      "url": "https://schlarp.com/index.xml",
+      "label": "schlarp.com",
+      "folderId": null
+    },
+    {
+      "id": "60e8ce7b-b60e-4247-a98e-2694fffd8a55",
+      "url": "https://blog.tangled.org/feed.xml",
+      "label": "blog.tangled.org",
+      "folderId": null
     }
   ]
 }
