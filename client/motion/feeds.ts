@@ -1,11 +1,13 @@
 const REVEAL_DURATION_MS = 280;
 const CONTENT_DURATION_MS = 220;
-const EXIT_DURATION_MS = 165;
+const EXIT_DURATION_MS = 260;
 const STAGGER_MS = 30;
 const MAX_STAGGER_MS = 150;
-const REPLACEMENT_DURATION_MS = 260;
+const REPLACEMENT_DURATION_MS = 280;
 const REVEAL_EASING = 'cubic-bezier(0.2, 0, 0, 1)';
-const EXIT_EASING = 'cubic-bezier(0.55, 0, 0.9, 0.45)';
+const EXIT_ANTICIPATION_OFFSET = 0.12;
+const EXIT_ANTICIPATION_EASING = 'cubic-bezier(0.4, 0, 0.6, 1)';
+const EXIT_COLLAPSE_EASING = 'cubic-bezier(0.3, 0, 0.4, 1)';
 
 function motionAllowed(): boolean {
   return !matchMedia('(prefers-reduced-motion: reduce)').matches && document.visibilityState === 'visible';
@@ -91,14 +93,10 @@ export async function animateFeedOverlayReplacement(pendingSlot: HTMLElement, fe
 
   const reveal = feed.animate(
     [
-      { opacity: 0, transform: 'translateY(10px)' },
-      { opacity: 1, transform: 'translateY(0)' },
+      { clipPath: 'inset(100% 0 0 0)', transform: 'translateY(6px)' },
+      { clipPath: 'inset(0 0 0 0)', transform: 'translateY(0)' },
     ],
     { duration: REPLACEMENT_DURATION_MS, easing: REVEAL_EASING, fill: 'backwards' },
-  );
-  pending.animate(
-    [{ opacity: 1 }, { opacity: 0 }],
-    { duration: 120, delay: 140, easing: 'ease-out', fill: 'forwards' },
   );
   await reveal.finished.catch(() => undefined);
 
@@ -132,19 +130,28 @@ async function collapseSlot(slot: HTMLElement, content: HTMLElement | null): Pro
   slot.classList.add('is-exiting');
   const layout = slot.animate(
     [
-      { height: `${height}px` },
-      { height: `${height + 2}px`, offset: 0.18 },
+      { height: `${height}px`, easing: EXIT_ANTICIPATION_EASING },
+      {
+        height: `${height + 1}px`,
+        offset: EXIT_ANTICIPATION_OFFSET,
+        easing: EXIT_COLLAPSE_EASING,
+      },
       { height: '0px' },
     ],
-    { duration: EXIT_DURATION_MS, easing: EXIT_EASING, fill: 'forwards' },
+    { duration: EXIT_DURATION_MS, easing: 'linear', fill: 'forwards' },
   );
   content?.animate(
     [
-      { opacity: 1, transform: 'scaleY(1)' },
-      { opacity: 1, transform: 'scaleY(1.018)', offset: 0.18 },
-      { opacity: 0, transform: 'scaleY(0.97)' },
+      { opacity: 1, transform: 'translateY(0)', easing: EXIT_ANTICIPATION_EASING },
+      {
+        opacity: 1,
+        transform: 'translateY(1px)',
+        offset: EXIT_ANTICIPATION_OFFSET,
+        easing: EXIT_COLLAPSE_EASING,
+      },
+      { opacity: 0, transform: 'translateY(-2px)' },
     ],
-    { duration: EXIT_DURATION_MS, easing: EXIT_EASING, fill: 'forwards' },
+    { duration: EXIT_DURATION_MS, easing: 'linear', fill: 'forwards' },
   );
   try {
     await layout.finished;

@@ -297,11 +297,19 @@ describe('client orchestration', () => {
   test('finishes a successful add by overlaying the pending row without a layout gap', async () => {
     const prototype = HTMLElement.prototype as HTMLElement & { animate: typeof HTMLElement.prototype.animate };
     const originalAnimate = prototype.animate;
-    prototype.animate = () => ({
-      finished: Promise.resolve(),
-      addEventListener: () => undefined,
-      cancel: () => undefined,
-    }) as unknown as Animation;
+    const animations: Array<{
+      node: HTMLElement;
+      frames: Keyframe[] | PropertyIndexedKeyframes | null;
+      options?: number | KeyframeAnimationOptions;
+    }> = [];
+    prototype.animate = function (frames, options) {
+      animations.push({ node: this as unknown as HTMLElement, frames, options });
+      return ({
+        finished: Promise.resolve(),
+        addEventListener: () => undefined,
+        cancel: () => undefined,
+      }) as unknown as Animation;
+    };
 
     try {
       const added = deferred<Awaited<ReturnType<FeedreaderApi['addFeed']>>>();
@@ -312,6 +320,7 @@ describe('client orchestration', () => {
       document.querySelector<HTMLButtonElement>('#add-feed-form button[type="submit"]')!.click();
       await new Promise(resolve => setTimeout(resolve, 130));
       expect(document.querySelector('.feed-pending-slot')).not.toBeNull();
+      const animationsBeforeSuccess = animations.length;
 
       added.resolve({
         feed: { id: 'new', url: 'https://new.example/feed.xml', label: 'New', folderId: null },
@@ -326,6 +335,13 @@ describe('client orchestration', () => {
       expect(document.querySelector('.feed-pending-slot')).toBeNull();
       expect(firstSlot?.dataset.feedId).toBe('new');
       expect(firstSlot?.style.position).toBe('');
+      const replacement = animations.find(animation =>
+        animation.node.classList.contains('feed-item') && !animation.node.classList.contains('feed-pending'));
+      expect(JSON.stringify(replacement?.frames)).toContain('inset(100% 0 0 0)');
+      expect(JSON.stringify(replacement?.frames)).not.toContain('opacity');
+      expect((replacement?.options as KeyframeAnimationOptions | undefined)?.duration).toBe(280);
+      expect(animations.slice(animationsBeforeSuccess)
+        .some(animation => animation.node.classList.contains('feed-pending'))).toBe(false);
     } finally {
       prototype.animate = originalAnimate;
     }
@@ -389,9 +405,12 @@ describe('client orchestration', () => {
       animate: (frames: Keyframe[] | PropertyIndexedKeyframes, options?: number | KeyframeAnimationOptions) => Animation;
     };
     const originalAnimate = prototype.animate;
-    const animationFrames: Array<Keyframe[] | PropertyIndexedKeyframes | null> = [];
-    prototype.animate = frames => {
-      animationFrames.push(frames);
+    const animations: Array<{
+      frames: Keyframe[] | PropertyIndexedKeyframes | null;
+      options?: number | KeyframeAnimationOptions;
+    }> = [];
+    prototype.animate = (frames, options) => {
+      animations.push({ frames, options });
       return ({
       finished: Promise.resolve(),
       addEventListener: () => undefined,
@@ -428,8 +447,12 @@ describe('client orchestration', () => {
     deletion.resolve({ ok: true });
     await new Promise(resolve => setTimeout(resolve, 10));
     expect(app.state.feeds.feeds).toHaveLength(0);
-    expect(JSON.stringify(animationFrames)).not.toContain('translateX');
-    expect(JSON.stringify(animationFrames)).toContain('scaleY');
+    expect(JSON.stringify(animations)).not.toContain('translateX');
+    expect(JSON.stringify(animations)).not.toContain('scaleY');
+    expect(JSON.stringify(animations)).toContain('translateY');
+    const collapse = animations.find(animation => JSON.stringify(animation.frames).includes('height'));
+    expect((collapse?.options as KeyframeAnimationOptions | undefined)?.duration).toBe(260);
+    expect((collapse?.options as KeyframeAnimationOptions | undefined)?.easing).toBe('linear');
     prototype.animate = originalAnimate;
   });
 });
