@@ -53,7 +53,9 @@ function status(overrides: Partial<RefreshStatus> = {}): RefreshStatus {
     failed: 0,
     failures: [],
     cursor: 0,
+    feedCursor: 0,
     newEntries: [],
+    feedResults: [],
     removedIds: [],
     ...overrides,
   };
@@ -68,9 +70,13 @@ function client(overrides: Partial<FeedreaderApi> = {}): FeedreaderApi {
     startRefresh: async () => status(),
     refreshStatus: async () => status(),
     updateEntries: async () => ({ ok: true }),
-    addFeed: async () => ({}),
+    addFeed: async () => ({
+      feed: { id: 'feed', url: 'https://example.com/feed.xml', label: 'Feed', folderId: null },
+      entries: [],
+      health: { lastFetched: Date.now(), error: null, entryCount: 0 },
+    }),
     deleteFeed: async () => ({ ok: true }),
-    importFeeds: async () => ({ added: 0, skipped: 0 }),
+    importFeeds: async () => ({ feeds: [], added: 0, skipped: 0 }),
     ...overrides,
   };
 }
@@ -189,6 +195,265 @@ describe('client orchestration', () => {
 
     expect(reads).toBe(1);
     expect(app.state.entries[0]?.state?.read).toBe(false);
+  });
+
+  test('preserves the add form through refresh updates and shows pending errors inline', async () => {
+    const add = deferred<Awaited<ReturnType<FeedreaderApi['addFeed']>>>();
+    const app = renderedApp(client({ addFeed: () => add.promise }));
+    app.state.feeds = {
+      folders: [],
+      feeds: [{ id: 'feed', url: 'https://example.com/feed.xml', label: 'Feed', folderId: null }],
+      health: { feed: { lastFetched: null, error: null, entryCount: 0 } },
+    };
+    app.navigate('/feeds', false);
+
+    const input = document.querySelector<HTMLInputElement>('#add-feed-url')!;
+    input.value = 'https://new.example/feed.xml';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dataset.identity = 'original';
+    document.querySelector<HTMLButtonElement>('#add-feed-form button[type="submit"]')!.click();
+
+    expect(document.querySelector('#add-feed-form')?.getAttribute('aria-busy')).not.toBeNull();
+    await new Promise(resolve => setTimeout(resolve, 130));
+    expect(document.querySelector('.feed-pending')?.textContent).toContain('Finding and checking feed');
+    expect(document.querySelector('.feed-pending-slot > .feed-pending')).not.toBeNull();
+
+    const applyStatus = app as unknown as { applyRefreshStatus(value: RefreshStatus): void };
+    applyStatus.applyRefreshStatus(status({ refreshing: true, total: 1, completed: 1, succeeded: 1 }));
+    expect(document.querySelector<HTMLInputElement>('#add-feed-url')?.dataset.identity).toBe('original');
+    expect(document.querySelector<HTMLInputElement>('#add-feed-url')?.value).toBe('https://new.example/feed.xml');
+
+    add.reject(new Error('No feed found'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(document.querySelector('#add-feed-status')?.textContent).toContain('No feed found');
+    expect(document.querySelector('#add-feed-status')?.classList.contains('is-visible')).toBe(true);
+    expect(document.querySelector<HTMLInputElement>('#add-feed-url')?.value).toBe('https://new.example/feed.xml');
+  });
+
+  test('keeps a retried pending row when its prior exit animation is canceled', async () => {
+    const animations = new WeakMap<HTMLElement, Animation[]>();
+    const prototype = HTMLElement.prototype as HTMLElement & {
+      animate: typeof HTMLElement.prototype.animate;
+      getAnimations: typeof HTMLElement.prototype.getAnimations;
+    };
+    const originalAnimate = prototype.animate;
+    const originalGetAnimations = prototype.getAnimations;
+    prototype.animate = function (_frames, options) {
+      let resolveFinished!: () => void;
+      let rejectFinished!: () => void;
+      const finished = new Promise<void>((resolve, reject) => {
+        resolveFinished = resolve;
+        rejectFinished = () => reject(new DOMException('Canceled', 'AbortError'));
+      });
+      const rejectsOnCancel = (this as unknown as HTMLElement).classList.contains('feed-slot')
+        && typeof options === 'object'
+        && options.fill === 'forwards';
+      const animation = {
+        finished,
+        addEventListener: () => undefined,
+        cancel: () => rejectsOnCancel ? rejectFinished() : resolveFinished(),
+      } as unknown as Animation;
+      const node = this as unknown as HTMLElement;
+      animations.set(node, [...(animations.get(node) ?? []), animation]);
+      return animation;
+    };
+    prototype.getAnimations = function () {
+      return animations.get(this as unknown as HTMLElement) ?? [];
+    };
+
+    try {
+      const first = deferred<Awaited<ReturnType<FeedreaderApi['addFeed']>>>();
+      const second = deferred<Awaited<ReturnType<FeedreaderApi['addFeed']>>>();
+      let calls = 0;
+      const app = renderedApp(client({ addFeed: () => (++calls === 1 ? first.promise : second.promise) }));
+      app.navigate('/feeds', false);
+      const input = document.querySelector<HTMLInputElement>('#add-feed-url')!;
+      input.value = 'example.com/feed.xml';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      const submit = document.querySelector<HTMLButtonElement>('#add-feed-form button[type="submit"]')!;
+
+      submit.click();
+      await new Promise(resolve => setTimeout(resolve, 130));
+      first.reject(new Error('Try again'));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(document.querySelector('.feed-pending-slot')?.getAttribute('data-exiting')).toBe('true');
+
+      submit.click();
+      await new Promise(resolve => setTimeout(resolve, 130));
+      expect(calls).toBe(2);
+      expect(document.querySelector('.feed-pending-slot')).not.toBeNull();
+      expect(document.querySelector('.feed-pending-slot')?.hasAttribute('data-exiting')).toBe(false);
+
+      second.reject(new Error('Done'));
+      await Promise.resolve();
+    } finally {
+      prototype.animate = originalAnimate;
+      prototype.getAnimations = originalGetAnimations;
+    }
+  });
+
+  test('finishes a successful add by overlaying the pending row without a layout gap', async () => {
+    const prototype = HTMLElement.prototype as HTMLElement & { animate: typeof HTMLElement.prototype.animate };
+    const originalAnimate = prototype.animate;
+    const animations: Array<{
+      node: HTMLElement;
+      frames: Keyframe[] | PropertyIndexedKeyframes | null;
+      options?: number | KeyframeAnimationOptions;
+    }> = [];
+    prototype.animate = function (frames, options) {
+      animations.push({ node: this as unknown as HTMLElement, frames, options });
+      return ({
+        finished: Promise.resolve(),
+        addEventListener: () => undefined,
+        cancel: () => undefined,
+      }) as unknown as Animation;
+    };
+
+    try {
+      const added = deferred<Awaited<ReturnType<FeedreaderApi['addFeed']>>>();
+      const app = renderedApp(client({ addFeed: () => added.promise }));
+      app.navigate('/feeds', false);
+      const input = document.querySelector<HTMLInputElement>('#add-feed-url')!;
+      input.value = 'new.example/feed.xml';
+      document.querySelector<HTMLButtonElement>('#add-feed-form button[type="submit"]')!.click();
+      await new Promise(resolve => setTimeout(resolve, 130));
+      expect(document.querySelector('.feed-pending-slot')).not.toBeNull();
+      const animationsBeforeSuccess = animations.length;
+
+      added.resolve({
+        feed: { id: 'new', url: 'https://new.example/feed.xml', label: 'New', folderId: null },
+        entries: [],
+        health: { lastFetched: Date.now(), error: null, entryCount: 0 },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const firstSlot = document.querySelector<HTMLElement>('.feed-list > .feed-slot');
+      expect(document.querySelector('.feed-pending-slot')).toBeNull();
+      expect(firstSlot?.dataset.feedId).toBe('new');
+      expect(firstSlot?.style.position).toBe('');
+      const replacement = animations.find(animation =>
+        animation.node.classList.contains('feed-item') && !animation.node.classList.contains('feed-pending'));
+      expect(JSON.stringify(replacement?.frames)).toContain('inset(100% 0 0 0)');
+      expect(JSON.stringify(replacement?.frames)).not.toContain('opacity');
+      expect((replacement?.options as KeyframeAnimationOptions | undefined)?.duration).toBe(280);
+      expect(animations.slice(animationsBeforeSuccess)
+        .some(animation => animation.node.classList.contains('feed-pending'))).toBe(false);
+    } finally {
+      prototype.animate = originalAnimate;
+    }
+  });
+
+  test('does not flash a searching row for an immediate add error', async () => {
+    const app = renderedApp(client({ addFeed: async () => { throw new Error('No feed found'); } }));
+    app.navigate('/feeds', false);
+    const input = document.querySelector<HTMLInputElement>('#add-feed-url')!;
+    input.value = 'not-a-feed.example';
+    document.querySelector<HTMLButtonElement>('#add-feed-form button[type="submit"]')!.click();
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(document.querySelector('.feed-pending-slot')).toBeNull();
+    expect(document.querySelector('#add-feed-status')?.textContent).toContain('No feed found');
+    expect(input.autocomplete).toBe('off');
+    expect(input.getAttribute('aria-autocomplete')).toBe('none');
+  });
+
+  test('keeps import progress nodes stable while feed results advance', () => {
+    const app = renderedApp();
+    app.state.feeds = {
+      folders: [],
+      feeds: [
+        { id: 'one', url: 'https://one.example/feed.xml', label: 'One', folderId: null },
+        { id: 'two', url: 'https://two.example/feed.xml', label: 'Two', folderId: null },
+      ],
+      health: {},
+    };
+    app.state.feedImport = {
+      total: 2,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      active: true,
+      feedIds: new Set(['one', 'two']),
+      completedIds: new Set(),
+    };
+    app.navigate('/feeds', false);
+    const meter = document.querySelector<HTMLProgressElement>('.feed-import-meter')!;
+
+    const applyStatus = app as unknown as { applyRefreshStatus(value: RefreshStatus): void };
+    applyStatus.applyRefreshStatus(status({
+      refreshing: true,
+      total: 2,
+      completed: 1,
+      succeeded: 1,
+      feedCursor: 1,
+      feedResults: [{ sequence: 1, feedId: 'one', entryCount: 3, error: null, completedAt: Date.now() }],
+    }));
+
+    expect(document.querySelector('.feed-import-meter')).toBe(meter);
+    expect(meter.value).toBe(1);
+    expect(document.querySelector('.feed-import-slot')?.classList.contains('is-visible')).toBe(true);
+    expect(document.querySelector('.feed-import-title')?.textContent).toContain('1 / 2');
+  });
+
+  test('uses a stable two-step delete control and blocks repeated deletion requests', async () => {
+    const prototype = HTMLElement.prototype as HTMLElement & {
+      animate: (frames: Keyframe[] | PropertyIndexedKeyframes, options?: number | KeyframeAnimationOptions) => Animation;
+    };
+    const originalAnimate = prototype.animate;
+    const animations: Array<{
+      frames: Keyframe[] | PropertyIndexedKeyframes | null;
+      options?: number | KeyframeAnimationOptions;
+    }> = [];
+    prototype.animate = (frames, options) => {
+      animations.push({ frames, options });
+      return ({
+      finished: Promise.resolve(),
+      addEventListener: () => undefined,
+      cancel: () => undefined,
+      }) as unknown as Animation;
+    };
+    const deletion = deferred<{ ok: boolean }>();
+    let calls = 0;
+    const app = renderedApp(client({ deleteFeed: () => { calls += 1; return deletion.promise; } }));
+    app.state.feeds = {
+      folders: [],
+      feeds: [{ id: 'feed', url: 'https://example.com/feed.xml', label: 'Feed', folderId: null }],
+      health: { feed: { lastFetched: null, error: null, entryCount: 0 } },
+    };
+    app.navigate('/feeds', false);
+
+    const button = document.querySelector<HTMLButtonElement>('[data-delete-feed="feed"]')!;
+    expect(button.querySelectorAll('.feed-delete-icon')).toHaveLength(2);
+    button.click();
+    expect(button.classList.contains('is-confirming')).toBe(true);
+    expect(button.getAttribute('aria-label')).toBe('Confirm removal of Feed');
+
+    document.body.click();
+    expect(button.classList.contains('is-confirming')).toBe(false);
+    expect(button.getAttribute('aria-label')).toBe('Remove Feed');
+
+    button.click();
+    button.click();
+    button.click();
+    expect(calls).toBe(1);
+    expect(button.disabled).toBe(true);
+    expect(button.classList.contains('is-deleting')).toBe(true);
+
+    deletion.resolve({ ok: true });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(app.state.feeds.feeds).toHaveLength(0);
+    expect(JSON.stringify(animations)).not.toContain('translateX');
+    expect(JSON.stringify(animations)).not.toContain('scaleY');
+    expect(JSON.stringify(animations)).toContain('translateY');
+    const collapse = animations.find(animation => JSON.stringify(animation.frames).includes('height'));
+    expect((collapse?.options as KeyframeAnimationOptions | undefined)?.duration).toBe(260);
+    expect((collapse?.options as KeyframeAnimationOptions | undefined)?.easing).toBe('linear');
+    prototype.animate = originalAnimate;
   });
 });
 

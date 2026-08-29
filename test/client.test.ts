@@ -89,6 +89,7 @@ describe('code-native interface icons', () => {
   test('renders the shared SVG symbols without platform text glyphs', () => {
     const html = renderApp('/feedreader');
     expect(html).toContain('id="icon-menu"');
+    expect(html).toContain('id="icon-trash"');
     expect(html).toContain('href="#icon-bookmark"');
     expect(html).not.toContain('☰');
     expect(html).not.toContain('🔖');

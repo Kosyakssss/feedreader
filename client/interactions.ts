@@ -123,6 +123,10 @@ export function bindInteractions(app: FeedreaderApp): void {
       app.showMore();
       return;
     }
+    if (target.closest('[data-loadmore-feeds]')) {
+      app.showMoreFeeds();
+      return;
+    }
     if (target.closest('[data-openall]')) {
       void app.openAllUnread();
       return;
@@ -158,9 +162,17 @@ export function bindInteractions(app: FeedreaderApp): void {
     if (input instanceof HTMLInputElement && input.id === 'opml-input') void app.importFeeds(input);
   });
 
+  root.addEventListener('input', event => {
+    const input = event.target;
+    if (input instanceof HTMLInputElement && input.id === 'add-feed-url') app.setFeedAddValue(input.value);
+  });
+
   document.addEventListener('click', event => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
+    if (app.state.confirmDeleteFeedId && !target.closest('[data-delete-feed]')) {
+      app.dismissFeedDeleteConfirmation();
+    }
     if (target.closest('[data-nav-menu]')) {
       app.shell.setNavigationOpen(!app.shell.navigationOpen());
       return;

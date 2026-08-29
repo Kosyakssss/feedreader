@@ -575,7 +575,38 @@ describe('fetchAllFeeds', () => {
   });
 });
 
-describe('ATProto feeds', () => {
+describe('feed input resolution and ATProto feeds', () => {
+  test('accepts a scheme-less feed URL and assumes HTTPS', async () => {
+    let fetched = false;
+    const externalFetch: ExternalFetch = async () => {
+      fetched = true;
+      return new Response('', { status: 404 });
+    };
+
+    await expect(resolveFeedInput('blog.decryption.net.au/feed.xml', externalFetch)).resolves.toEqual({
+      url: 'https://blog.decryption.net.au/feed.xml',
+      label: 'blog.decryption.net.au',
+    });
+    expect(fetched).toBe(false);
+  });
+
+  test('discovers feeds from scheme-less website addresses over HTTPS', async () => {
+    const calls: string[] = [];
+    const externalFetch: ExternalFetch = async url => {
+      calls.push(String(url));
+      return new Response('<link rel="alternate" type="application/rss+xml" href="/feed.xml">', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    };
+
+    await expect(resolveFeedInput('notes.example.com', externalFetch)).resolves.toEqual({
+      url: 'https://notes.example.com/feed.xml',
+      label: 'notes.example.com',
+    });
+    expect(calls).toEqual(['https://notes.example.com/']);
+  });
+
   test('parses internal ATProto feed URLs', () => {
     expect(parseAtprotoFeedUrl('atproto://profile/kote-pdj.bsky.social')).toEqual({
       type: 'profile',

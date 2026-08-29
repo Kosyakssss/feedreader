@@ -1136,7 +1136,20 @@ async function resolveDocumentInput(documentUri: string, externalFetch: External
   };
 }
 
-async function resolveAtprotoPageInput(pageUrl: string, externalFetch: ExternalFetch): Promise<ResolvedFeedInput | null> {
+function extractFeedLink(html: string, pageUrl: string): string | null {
+  const linkRe = /<link[^>]+(?:application\/(?:rss|atom)\+xml|application\/feed\+json|text\/xml)[^>]*>/gi;
+  const matches = html.match(linkRe);
+  if (!matches) return null;
+  for (const match of matches) {
+    const href = match.match(/href\s*=\s*["']([^"']+)["']/i);
+    if (!href?.[1]) continue;
+    const discovered = new URL(href[1], pageUrl).href;
+    if (isSafeExternalUrl(discovered).ok) return discovered;
+  }
+  return null;
+}
+
+async function resolvePageInput(pageUrl: string, externalFetch: ExternalFetch): Promise<ResolvedFeedInput | null> {
   const res = await externalFetch(pageUrl, {
     headers: { 'User-Agent': UA, Accept: 'text/html, application/xhtml+xml' },
     signal: AbortSignal.timeout(10000),
@@ -1152,6 +1165,9 @@ async function resolveAtprotoPageInput(pageUrl: string, externalFetch: ExternalF
 
   const documentUri = extractLinkedAtUri(html, ATPROTO_DOCUMENT_COLLECTION);
   if (documentUri) return await resolveDocumentInput(documentUri, externalFetch);
+
+  const feedUrl = extractFeedLink(html, pageUrl);
+  if (feedUrl) return { url: feedUrl, label: new URL(feedUrl).hostname };
 
   return null;
 }
@@ -1185,10 +1201,7 @@ export async function resolveFeedInput(
     if (document) return document;
   }
 
-  let parsedUrl: URL | null = null;
-  try {
-    parsedUrl = new URL(input);
-  } catch {}
+  const parsedUrl = parseWebInput(input);
 
   if (parsedUrl) {
     const blueskyHandle = extractBlueskyHandle(parsedUrl);
@@ -1198,14 +1211,14 @@ export async function resolveFeedInput(
     }
 
     if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
-      const standardSite = await resolveAtprotoPageInput(parsedUrl.href, externalFetch).catch(() => null);
-      if (standardSite) return standardSite;
-
       const isDirectFeed = DIRECT_FEED_PATH_RE.test(parsedUrl.pathname) || DIRECT_FEED_ROUTE_RE.test(parsedUrl.pathname);
-      const discoveredFeed = isDirectFeed
-        ? parsedUrl.href
-        : await discoverFeedUrl(parsedUrl.href, externalFetch);
-      if (discoveredFeed) return { url: discoveredFeed, label: new URL(discoveredFeed).hostname };
+      if (isDirectFeed) return { url: parsedUrl.href, label: parsedUrl.hostname };
+
+      const pageInput = await resolvePageInput(parsedUrl.href, externalFetch).catch(() => null);
+      if (pageInput) return pageInput;
+
+      const guessedFeed = await discoverCommonFeedUrl(parsedUrl.href, externalFetch);
+      if (guessedFeed) return { url: guessedFeed, label: new URL(guessedFeed).hostname };
 
       const hostnameActor = await resolveActorInput(parsedUrl.hostname, externalFetch).catch(() => null);
       if (hostnameActor) return hostnameActor;
@@ -1220,6 +1233,19 @@ export async function resolveFeedInput(
   throw new Error('Enter an RSS/Atom URL, website URL, Bluesky handle, or Standard Site link');
 }
 
+function parseWebInput(input: string): URL | null {
+  const candidates = [input];
+  if (!/^[a-z][a-z\d+.-]*:/i.test(input) && !/\s/.test(input)) candidates.push(`https://${input}`);
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed;
+    } catch {}
+  }
+  return null;
+}
+
 export async function discoverFeedUrl(
   pageUrl: string,
   externalFetch: ExternalFetch = safeFetchExternal,
@@ -1231,35 +1257,33 @@ export async function discoverFeedUrl(
     });
     if (!res.ok) return null;
     const html = await readResponseText(res, MAX_DISCOVERY_BYTES);
-
-    const linkRe = /<link[^>]+(?:application\/(?:rss|atom)\+xml|application\/feed\+json|text\/xml)[^>]*>/gi;
-    const matches = html.match(linkRe);
-    if (matches) {
-      for (const m of matches) {
-        const href = m.match(/href\s*=\s*["']([^"']+)["']/i);
-        if (href?.[1]) {
-          const discovered = new URL(href[1], pageUrl).href;
-          if (isSafeExternalUrl(discovered).ok) return discovered;
-        }
-      }
-    }
+    const discovered = extractFeedLink(html, pageUrl);
+    if (discovered) return discovered;
   } catch {}
 
+  return await discoverCommonFeedUrl(pageUrl, externalFetch);
+}
+
+async function discoverCommonFeedUrl(pageUrl: string, externalFetch: ExternalFetch): Promise<string | null> {
   const base = new URL(pageUrl).origin;
   const guesses = ['/feed', '/rss', '/feed.xml', '/atom.xml', '/index.xml', '/rss.xml'];
-  for (const path of guesses) {
-    try {
+  const controller = new AbortController();
+  try {
+    return await Promise.any(guesses.map(async path => {
       const res = await externalFetch(base + path, {
         method: 'HEAD',
         headers: { 'User-Agent': UA },
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]),
       });
       const ct = res.headers.get('content-type') || '';
       if (res.ok && (ct.includes('xml') || ct.includes('rss') || ct.includes('atom') || ct.includes('feed+json'))) {
         return base + path;
       }
-    } catch {}
+      throw new Error('Not a feed');
+    }));
+  } catch {
+    return null;
+  } finally {
+    controller.abort();
   }
-
-  return null;
 }

@@ -10,10 +10,12 @@ import {
   type ConfigPatch,
 } from './lib/data.ts';
 import {
-  fetchAllFeeds, parseOPML, decodeHtmlEntities, probeFeed, publishedTime, resolveFeedInput,
+  fetchAllFeeds, fetchFeed, parseOPML, decodeHtmlEntities, publishedTime, resolveFeedInput,
   type FeedFetchResult,
 } from './lib/feeds.ts';
 import { renderApp } from './lib/render.ts';
+import { pageChanges } from './lib/refresh-deltas.ts';
+import { RefreshRequestQueue } from './lib/refresh-requests.ts';
 import { buildClientAssets, encodedAsset, encodedResponse, type ClientAssets, type EncodedAsset } from './lib/client-assets.ts';
 import type { Config, EnrichedEntry, EntryState, Feed } from './lib/types.ts';
 import { isSafeExternalUrl, isSafeObjectKey, sanitizeThemeName } from './lib/security.ts';
@@ -23,6 +25,8 @@ const DEFAULT_HOST = '127.0.0.1';
 const SERVE_BASE_PATH = '/feedreader';
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const SHUTDOWN_TIMEOUT_MS = 10_000;
+const MAX_ENTRY_DELTAS = 500;
+const MAX_FEED_DELTAS = 250;
 let allowedHosts = new Set<string>();
 let allowedOrigins = new Set<string>();
 let clientAssets: ClientAssets | null = null;
@@ -52,10 +56,20 @@ function assertTrustedHost(req: Request): void {
 }
 
 let refreshJob: Promise<number> | null = null;
+let activeRefreshFeedIds = new Set<string>();
+const queuedRefreshRequests = new RefreshRequestQueue();
 let lastRefreshResult: { count: number; finishedAt: number; error: string | null } | null = null;
 interface RefreshChange {
   sequence: number;
   entry: EnrichedEntry;
+}
+
+interface FeedResultChange {
+  sequence: number;
+  feedId: string;
+  entryCount: number | null;
+  error: string | null;
+  completedAt: number;
 }
 
 interface RefreshProgress {
@@ -70,6 +84,7 @@ interface RefreshProgress {
   error: string | null;
   failures: { feedId: string; label: string; error: string }[];
   changes: RefreshChange[];
+  feedResults: FeedResultChange[];
   removedIds: string[];
 }
 
@@ -130,7 +145,7 @@ async function getFeedsWithHealth() {
   });
 }
 
-async function refreshFeeds(progress: RefreshProgress): Promise<number> {
+async function refreshFeeds(progress: RefreshProgress, initialFeedIds?: ReadonlySet<string>): Promise<number> {
   await mergeSyncConflicts();
   const { feedsFile, startingCache, startingState } = await runDataRead(async () => {
     const [nextFeeds, nextCache] = await Promise.all([readFeeds(), readCache()]);
@@ -140,8 +155,6 @@ async function refreshFeeds(progress: RefreshProgress): Promise<number> {
       startingState: await readState(nextCache),
     };
   });
-  const feedsToFetch = feedsFile.feeds;
-  progress.total = feedsToFetch.length;
 
   const existing = new Set(startingCache.entries.map(entry => entry.id));
   const existingSources = new Set(startingCache.entries.flatMap(entry => entry.sourceId ? [`${entry.feedId}\t${entry.sourceId}`] : []));
@@ -149,53 +162,104 @@ async function refreshFeeds(progress: RefreshProgress): Promise<number> {
   const existingNoUrlTitles = new Set(startingCache.entries.flatMap(entry => !entry.url && entry.title ? [`${entry.feedId}\t${entry.title}`] : []));
   const completedResults: CompletedFeedResult[] = [];
 
-  await fetchAllFeeds(feedsToFetch, startingCache.feedMeta, async (feed, result) => {
-    completedResults.push({ feed, result, completedAt: Date.now() });
-    progress.completed++;
-    if (result.error) {
-      progress.failed++;
-      progress.failures.push({ feedId: feed.id, label: feed.label, error: result.error });
-    } else {
-      progress.succeeded++;
-    }
+  async function fetchBatch(feeds: Feed[]): Promise<void> {
+    const batch = feeds.filter(feed => !activeRefreshFeedIds.has(feed.id));
+    if (batch.length === 0) return;
+    for (const feed of batch) activeRefreshFeedIds.add(feed.id);
+    progress.total += batch.length;
 
-    for (const entry of result.entries) {
-      if (entry.feedId !== feed.id || existing.has(entry.id)) continue;
-      if (entry.sourceId && existingSources.has(`${entry.feedId}\t${entry.sourceId}`)) continue;
-      if (entry.url && existingUrls.has(`${entry.feedId}\t${entry.url}`)) continue;
-      if (!entry.url && entry.title && existingNoUrlTitles.has(`${entry.feedId}\t${entry.title}`)) continue;
-
-      existing.add(entry.id);
-      if (entry.sourceId) existingSources.add(`${entry.feedId}\t${entry.sourceId}`);
-      if (entry.url) existingUrls.add(`${entry.feedId}\t${entry.url}`);
-      if (!entry.url && entry.title) existingNoUrlTitles.add(`${entry.feedId}\t${entry.title}`);
-
-      progress.changes.push({
-        sequence: progress.changes.length + 1,
-        entry: {
-          ...entry,
-          url: safeEntryUrl(entry.url),
-          title: decodeHtmlEntities(entry.title),
-          feedLabel: feed.label,
-          state: startingState[entry.id] || {},
-        },
+    await fetchAllFeeds(batch, startingCache.feedMeta, async (feed, result) => {
+      const completedAt = Date.now();
+      completedResults.push({ feed, result, completedAt });
+      progress.completed++;
+      progress.feedResults.push({
+        sequence: progress.feedResults.length + 1,
+        feedId: feed.id,
+        entryCount: result.notModified ? null : result.entries.length,
+        error: result.error || null,
+        completedAt,
       });
-      progress.added++;
-    }
-  });
+      if (result.error) {
+        progress.failed++;
+        progress.failures.push({ feedId: feed.id, label: feed.label, error: result.error });
+      } else {
+        progress.succeeded++;
+      }
 
-  const provisionalIds = new Set(progress.changes.map(change => change.entry.id));
-  const merged = await mergeFeedResults(completedResults, provisionalIds);
-  progress.added = merged.count;
-  progress.removedIds = merged.removedIds;
-  return merged.count;
+      for (const entry of result.entries) {
+        if (entry.feedId !== feed.id || existing.has(entry.id)) continue;
+        if (entry.sourceId && existingSources.has(`${entry.feedId}\t${entry.sourceId}`)) continue;
+        if (entry.url && existingUrls.has(`${entry.feedId}\t${entry.url}`)) continue;
+        if (!entry.url && entry.title && existingNoUrlTitles.has(`${entry.feedId}\t${entry.title}`)) continue;
+
+        existing.add(entry.id);
+        if (entry.sourceId) existingSources.add(`${entry.feedId}\t${entry.sourceId}`);
+        if (entry.url) existingUrls.add(`${entry.feedId}\t${entry.url}`);
+        if (!entry.url && entry.title) existingNoUrlTitles.add(`${entry.feedId}\t${entry.title}`);
+
+        progress.changes.push({
+          sequence: progress.changes.length + 1,
+          entry: {
+            ...entry,
+            url: safeEntryUrl(entry.url),
+            title: decodeHtmlEntities(entry.title),
+            feedLabel: feed.label,
+            state: startingState[entry.id] || {},
+          },
+        });
+        progress.added++;
+      }
+    });
+  }
+
+  const initialFeeds = initialFeedIds
+    ? feedsFile.feeds.filter(feed => initialFeedIds.has(feed.id))
+    : feedsFile.feeds;
+  await fetchBatch(initialFeeds);
+
+  let mergedThrough = 0;
+  let added = 0;
+  const removedIds = new Set<string>();
+  while (true) {
+    while (queuedRefreshRequests.pending) {
+      const currentFeeds = await readFeeds();
+      const queuedIds = queuedRefreshRequests.take(
+        currentFeeds.feeds.map(feed => feed.id),
+        activeRefreshFeedIds,
+      );
+      await fetchBatch(currentFeeds.feeds.filter(feed => queuedIds.has(feed.id)));
+    }
+
+    const pendingResults = completedResults.slice(mergedThrough);
+    if (pendingResults.length > 0) {
+      const provisionalIds = new Set(progress.changes.map(change => change.entry.id));
+      const merged = await mergeFeedResults(pendingResults, provisionalIds);
+      mergedThrough = completedResults.length;
+      added += merged.count;
+      for (const id of merged.removedIds) removedIds.add(id);
+      progress.added = added;
+      progress.removedIds = [...removedIds];
+    }
+
+    if (!queuedRefreshRequests.pending) return added;
+  }
 }
 
-async function mergeFeedResults(completedResults: CompletedFeedResult[], provisionalIds: Set<string>): Promise<{ count: number; removedIds: string[] }> {
+async function mergeFeedResults(
+  completedResults: CompletedFeedResult[],
+  provisionalIds: Set<string>,
+  feedToAdd?: Feed,
+): Promise<{ count: number; removedIds: string[] }> {
   return runDataMutation(async () => {
     const [feedsFile, cache, config] = await Promise.all([
       readFeeds(), readCache(), readConfig(),
     ]);
+    if (feedToAdd) {
+      if (feedsFile.feeds.some(existingFeed => existingFeed.url === feedToAdd.url)) {
+        throw new HttpError(409, 'Feed already exists');
+      }
+      feedsFile.feeds.unshift(feedToAdd);
+    }
     const currentFeedIds = new Set(feedsFile.feeds.map(feed => feed.id));
     const originalIds = new Set(cache.entries.map(entry => entry.id));
     const existing = new Set(cache.entries.map(e => e.id));
@@ -250,15 +314,25 @@ async function mergeFeedResults(completedResults: CompletedFeedResult[], provisi
 
     const state = await readState(cache);
     const pruned = pruneEntries(cache, state, config);
-    await writeDataFiles({ 'cache.json': pruned.cache, 'state.json': pruned.state });
+    await writeDataFiles({
+      ...(feedToAdd ? { 'feeds.json': feedsFile } : {}),
+      'cache.json': pruned.cache,
+      'state.json': pruned.state,
+    });
     const retainedIds = new Set(pruned.cache.entries.map(entry => entry.id));
     const removedIds = [...new Set([...originalIds, ...provisionalIds])].filter(id => !retainedIds.has(id));
     return { count: addedIds.filter(id => retainedIds.has(id)).length, removedIds };
   });
 }
 
-function startRefresh(): Promise<number> {
-  if (refreshJob) return refreshJob;
+function startRefresh(feedIds?: readonly string[]): Promise<number> {
+  const requestedIds = feedIds ? new Set(feedIds) : undefined;
+  if (refreshJob) {
+    queuedRefreshRequests.enqueue(feedIds);
+    return refreshJob;
+  }
+  activeRefreshFeedIds = new Set();
+  queuedRefreshRequests.clear();
   const progress: RefreshProgress = {
     runId: generateId(),
     startedAt: Date.now(),
@@ -271,10 +345,11 @@ function startRefresh(): Promise<number> {
     error: null,
     failures: [],
     changes: [],
+    feedResults: [],
     removedIds: [],
   };
   refreshProgress = progress;
-  refreshJob = refreshFeeds(progress)
+  refreshJob = refreshFeeds(progress, requestedIds)
     .then(count => {
       progress.finishedAt = Date.now();
       lastRefreshResult = { count, finishedAt: progress.finishedAt, error: null };
@@ -290,15 +365,20 @@ function startRefresh(): Promise<number> {
     })
     .finally(() => {
       refreshJob = null;
+      activeRefreshFeedIds = new Set();
+      queuedRefreshRequests.clear();
     });
   return refreshJob;
 }
 
-function getRefreshStatus(since = 0) {
+function getRefreshStatus(since = 0, feedsSince = 0) {
   const progress = refreshProgress;
-  const cursor = progress?.changes.length || 0;
+  const entryPage = pageChanges(progress?.changes || [], since, MAX_ENTRY_DELTAS);
+  const feedPage = pageChanges(progress?.feedResults || [], feedsSince, MAX_FEED_DELTAS);
+  const hasMoreDeltas = entryPage.hasMore || feedPage.hasMore;
+  const refreshing = !!refreshJob || hasMoreDeltas;
   return {
-    refreshing: !!refreshJob,
+    refreshing,
     runId: progress?.runId || null,
     startedAt: progress?.startedAt || null,
     finishedAt: progress?.finishedAt || lastRefreshResult?.finishedAt || null,
@@ -308,10 +388,12 @@ function getRefreshStatus(since = 0) {
     failed: progress?.failed || 0,
     count: progress?.added ?? lastRefreshResult?.count ?? 0,
     error: progress?.error || lastRefreshResult?.error || null,
-    failures: progress?.failures || [],
-    cursor,
-    newEntries: progress?.changes.filter(change => change.sequence > since).map(change => change.entry) || [],
-    removedIds: !refreshJob ? progress?.removedIds || [] : [],
+    failures: progress?.failures.slice(-100) || [],
+    cursor: entryPage.cursor,
+    feedCursor: feedPage.cursor,
+    newEntries: entryPage.items.map(change => change.entry),
+    feedResults: feedPage.items,
+    removedIds: !refreshing ? progress?.removedIds || [] : [],
   };
 }
 
@@ -589,27 +671,28 @@ async function addFeed(req: Request, server: Bun.Server<undefined>): Promise<Res
   const resolved = await resolveFeedInput(body.url).catch(error => {
     throw new HttpError(400, (error as Error).message || 'Could not resolve feed');
   });
-  const probe = await probeFeed(resolved.url, resolved.label).catch((error: unknown) => {
+  const duplicate = await runDataRead(async () => (await readFeeds()).feeds.some(feed => feed.url === resolved.url));
+  if (duplicate) throw new HttpError(409, 'Feed already exists');
+
+  const created: Feed = {
+    id: generateId(),
+    url: resolved.url,
+    label: resolved.label,
+    folderId: null,
+  };
+  const result = await fetchFeed(created).catch((error: unknown) => {
     throw new HttpError(400, `Feed could not be read: ${(error as Error)?.message || 'unknown error'}`);
   });
-  if (!probe.ok) throw new HttpError(400, `Feed could not be read: ${probe.error}`);
+  if (result.error) throw new HttpError(400, `Feed could not be read: ${result.error}`);
 
-  const feed = await runDataMutation(async () => {
-    const feedsFile = await readFeeds();
-    if (feedsFile.feeds.some(existing => existing.url === resolved.url)) {
-      throw new HttpError(409, 'Feed already exists');
-    }
-    const created = {
-      id: generateId(),
-      url: resolved.url,
-      label: resolved.label,
-      folderId: null,
-    };
-    feedsFile.feeds.push(created);
-    await writeDataFiles({ 'feeds.json': feedsFile });
-    return created;
-  });
-  return json(feed, 201);
+  const completedAt = Date.now();
+  await mergeFeedResults([{ feed: created, result, completedAt }], new Set(), created);
+  const entries = await getEntries(created.id);
+  return json({
+    feed: created,
+    entries,
+    health: { lastFetched: completedAt, error: null, entryCount: entries.length },
+  }, 201);
 }
 
 async function deleteFeed(id: string): Promise<Response> {
@@ -646,10 +729,10 @@ async function importFeeds(req: Request): Promise<Response> {
   }
 
   const imported = parseOPML(opmlText);
-  const added = await runDataMutation(async () => {
+  const addedFeeds = await runDataMutation(async () => {
     const feedsFile = await readFeeds();
     const existingUrls = new Set(feedsFile.feeds.map(feed => feed.url));
-    let count = 0;
+    const created: Feed[] = [];
     for (const candidate of imported) {
       let feedUrl: string;
       try {
@@ -658,19 +741,22 @@ async function importFeeds(req: Request): Promise<Response> {
         continue;
       }
       if (existingUrls.has(feedUrl)) continue;
-      feedsFile.feeds.push({
+      created.push({
         id: generateId(),
         url: feedUrl,
         label: candidate.label || new URL(feedUrl).hostname,
         folderId: null,
       });
       existingUrls.add(feedUrl);
-      count++;
     }
+    feedsFile.feeds.unshift(...created);
     await writeDataFiles({ 'feeds.json': feedsFile });
-    return count;
+    return created;
   });
-  return json({ added, skipped: imported.length - added });
+  if (addedFeeds.length > 0) {
+    void startRefresh(addedFeeds.map(feed => feed.id)).catch(error => console.error('Imported feed scan error:', error));
+  }
+  return json({ feeds: addedFeeds, added: addedFeeds.length, skipped: imported.length - addedFeeds.length });
 }
 
 async function exportFeeds(): Promise<Response> {
@@ -712,14 +798,24 @@ async function handleRequest(req: Request, server: Bun.Server<undefined>): Promi
     }
 
     if (path === '/api/refresh' && method === 'POST') {
-      startRefresh().catch(error => console.error('Refresh error:', error));
+      let feedIds: string[] | undefined;
+      if (req.headers.get('content-type')?.toLowerCase().startsWith('application/json')) {
+        const body = await parseJSONBody(req);
+        if (!isRecord(body) || !Array.isArray(body.feedIds) || !body.feedIds.every(id => typeof id === 'string')) {
+          throw new HttpError(400, 'Invalid refresh payload');
+        }
+        feedIds = body.feedIds;
+      }
+      startRefresh(feedIds).catch(error => console.error('Refresh error:', error));
       return json(await getRefreshStatus(), 202);
     }
 
     if (path === '/api/refresh/status' && method === 'GET') {
       const rawSince = Number(url.searchParams.get('since') || 0);
       const since = Number.isSafeInteger(rawSince) && rawSince >= 0 ? rawSince : 0;
-      return json(getRefreshStatus(since));
+      const rawFeedsSince = Number(url.searchParams.get('feedsSince') || 0);
+      const feedsSince = Number.isSafeInteger(rawFeedsSince) && rawFeedsSince >= 0 ? rawFeedsSince : 0;
+      return json(getRefreshStatus(since, feedsSince));
     }
 
     if (path === '/api/state' && method === 'POST') {
