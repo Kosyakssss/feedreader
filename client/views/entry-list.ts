@@ -23,18 +23,20 @@ interface EntryRow {
   metadata: HTMLSpanElement;
   star: HTMLButtonElement;
   mark: HTMLButtonElement;
-  rendered: {
-    index: number;
-    read: boolean;
-    starred: boolean;
-    selected: boolean;
-    focused: boolean;
-    title: string;
-    url: string;
-    safeUrl: string;
-    feedLabel: string;
-    published: string;
-  } | null;
+  rendered: RenderedEntry | null;
+}
+
+interface RenderedEntry {
+  index: number;
+  read: boolean;
+  starred: boolean;
+  selected: boolean;
+  focused: boolean;
+  title: string;
+  url: string;
+  safeUrl: string;
+  feedLabel: string;
+  published: string;
 }
 
 export class EntryListView {
@@ -185,84 +187,83 @@ export class EntryListView {
     const focused = options.focusedEntryId === entry.id;
     const title = entry.title || 'Untitled';
     const previous = row.rendered;
-
-    if (!previous) {
-      row.slot.dataset.id = entry.id;
-      row.card.dataset.id = entry.id;
-      row.checkbox.dataset.select = entry.id;
-      row.star.dataset.star = entry.id;
-      row.mark.dataset.mark = entry.id;
-    }
-    if (!previous || previous.index !== index) row.card.dataset.idx = String(index);
-
-    if (!previous || previous.read !== read || previous.selected !== selected || previous.focused !== focused) {
-      row.card.className = `entry-card ${read ? 'entry-read' : 'entry-unread'}${selected ? ' entry-selected' : ''}${focused ? ' entry-focused' : ''}`;
-    }
-    if (!previous || previous.selected !== selected) row.checkbox.checked = selected;
-    if (!previous || previous.title !== title) row.checkbox.setAttribute('aria-label', `Select ${entry.title || 'entry'}`);
-
     const titleChanged = !previous || previous.title !== title || previous.url !== entry.url;
-    const safeUrl = titleChanged ? safeHttpUrl(entry.url) : previous.safeUrl;
-    if (titleChanged) {
-      const needsLink = !!safeUrl;
-      const current = row.titleNode;
-      const titleNode = current && (needsLink ? current instanceof HTMLAnchorElement : current instanceof HTMLSpanElement)
-        ? current
-        : needsLink ? element('a') : element('span');
-      titleNode.className = 'entry-title';
-      titleNode.textContent = title;
-      titleNode.setAttribute('dir', 'auto');
-      if (titleNode instanceof HTMLAnchorElement) {
-        titleNode.href = safeUrl;
-        titleNode.target = '_blank';
-        titleNode.rel = 'noopener';
-        titleNode.dataset.entryLink = entry.id;
-      }
-      if (titleNode !== current) row.titleSlot.replaceChildren(titleNode);
-      row.titleNode = titleNode;
-    }
+    const rendered: RenderedEntry = {
+      index,
+      read,
+      starred,
+      selected,
+      focused,
+      title,
+      url: entry.url,
+      safeUrl: titleChanged ? safeHttpUrl(entry.url) : previous.safeUrl,
+      feedLabel: entry.feedLabel,
+      published: entry.published,
+    };
 
-    if (!previous || previous.feedLabel !== entry.feedLabel || previous.published !== entry.published) {
+    if (!previous) updateRowIdentity(row, entry);
+    updateRowState(row, entry, rendered, previous);
+    if (titleChanged) updateRowTitle(row, entry.id, rendered);
+    if (!previous || previous.feedLabel !== rendered.feedLabel || previous.published !== rendered.published) {
       row.metadata.textContent = `${entry.feedLabel || 'Unknown'} · ${timeAgo(entry.published)}`;
     }
+    updateRowActions(row, rendered, previous);
+    row.rendered = rendered;
+  }
+}
 
-    if (!previous || previous.starred !== starred) {
-      row.star.classList.toggle('starred', starred);
-      setIcon(row.star, starred ? 'star-filled' : 'star');
-      row.star.setAttribute('aria-pressed', String(starred));
-      row.star.title = starred ? 'Unstar' : 'Star';
-    }
-    if (!previous || previous.read !== read) {
-      setIcon(row.mark, read ? 'circle' : 'circle-filled');
-      row.mark.title = read ? 'Mark unread' : 'Mark read';
-      row.mark.setAttribute('aria-pressed', String(read));
-    }
+function updateRowIdentity(row: EntryRow, entry: EnrichedEntry): void {
+  row.slot.dataset.id = entry.id;
+  row.card.dataset.id = entry.id;
+  row.checkbox.dataset.select = entry.id;
+  row.star.dataset.star = entry.id;
+  row.mark.dataset.mark = entry.id;
+}
 
-    if (previous) {
-      previous.index = index;
-      previous.read = read;
-      previous.starred = starred;
-      previous.selected = selected;
-      previous.focused = focused;
-      previous.title = title;
-      previous.url = entry.url;
-      previous.safeUrl = safeUrl;
-      previous.feedLabel = entry.feedLabel;
-      previous.published = entry.published;
-    } else {
-      row.rendered = {
-        index,
-        read,
-        starred,
-        selected,
-        focused,
-        title,
-        url: entry.url,
-        safeUrl,
-        feedLabel: entry.feedLabel,
-        published: entry.published,
-      };
-    }
+function updateRowState(
+  row: EntryRow,
+  entry: EnrichedEntry,
+  current: RenderedEntry,
+  previous: RenderedEntry | null,
+): void {
+  if (!previous || previous.index !== current.index) row.card.dataset.idx = String(current.index);
+  if (!previous || previous.read !== current.read || previous.selected !== current.selected || previous.focused !== current.focused) {
+    row.card.className = `entry-card ${current.read ? 'entry-read' : 'entry-unread'}${current.selected ? ' entry-selected' : ''}${current.focused ? ' entry-focused' : ''}`;
+  }
+  if (!previous || previous.selected !== current.selected) row.checkbox.checked = current.selected;
+  if (!previous || previous.title !== current.title) row.checkbox.setAttribute('aria-label', `Select ${entry.title || 'entry'}`);
+}
+
+function updateRowTitle(row: EntryRow, entryId: string, current: RenderedEntry): void {
+  const needsLink = !!current.safeUrl;
+  const previous = row.titleNode;
+  const title = previous && (needsLink ? previous instanceof HTMLAnchorElement : previous instanceof HTMLSpanElement)
+    ? previous
+    : needsLink ? element('a') : element('span');
+  title.className = 'entry-title';
+  title.textContent = current.title;
+  title.setAttribute('dir', 'auto');
+  if (title instanceof HTMLAnchorElement) {
+    title.href = current.safeUrl;
+    title.target = '_blank';
+    title.rel = 'noopener';
+    title.dataset.entryLink = entryId;
+  }
+  if (title !== previous) row.titleSlot.replaceChildren(title);
+  row.titleNode = title;
+}
+
+function updateRowActions(row: EntryRow, current: RenderedEntry, previous: RenderedEntry | null): void {
+  if (!previous || previous.starred !== current.starred) {
+    row.star.classList.toggle('starred', current.starred);
+    setIcon(row.star, current.starred ? 'star-filled' : 'star');
+    row.star.setAttribute('aria-pressed', String(current.starred));
+    row.star.title = current.starred ? 'Unstar' : 'Star';
+  }
+  if (!previous || previous.read !== current.read) {
+    setIcon(row.mark, current.read ? 'circle' : 'circle-filled');
+    row.mark.title = current.read ? 'Mark unread' : 'Mark read';
+    row.mark.setAttribute('aria-pressed', String(current.read));
   }
 }
 

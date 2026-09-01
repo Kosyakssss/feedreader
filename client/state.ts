@@ -13,13 +13,13 @@ export interface FeedData extends FeedsFile {
   health?: Record<string, FeedHealth>;
 }
 
-export interface RefreshFailure {
+interface RefreshFailure {
   feedId: string;
   label: string;
   error: string;
 }
 
-export interface FeedResultChange {
+interface FeedResultChange {
   sequence: number;
   feedId: string;
   entryCount: number | null;
@@ -51,14 +51,14 @@ export interface SharedEventPayload {
   entryStates?: Record<string, EntryState>;
 }
 
-export interface FeedAddState {
+interface FeedAddState {
   pending: boolean;
   pendingVisible: boolean;
   value: string;
   error: string | null;
 }
 
-export interface FeedImportProgress {
+interface FeedImportProgress {
   total: number;
   completed: number;
   succeeded: number;
@@ -68,7 +68,7 @@ export interface FeedImportProgress {
   completedIds: Set<string>;
 }
 
-export interface SelectionDrag {
+interface SelectionDrag {
   pointerId: number;
   selecting: boolean;
   lastIndex: number;
@@ -99,7 +99,7 @@ export interface AppState {
   deletingFeedId: string | null;
 }
 
-export const DEFAULT_CONFIG: Config = {
+const DEFAULT_CONFIG: Config = {
   maxBulkOpen: 20,
   retention: { maxEntries: 3000, maxDays: null },
   theme: 'system',

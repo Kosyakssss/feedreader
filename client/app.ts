@@ -35,6 +35,7 @@ export class FeedreaderApp {
   private sharedSyncJob: Promise<void> | null = null;
   private readonly pendingSharedTopics = new Set<SharedTopic>();
   private sharedEntriesResyncNeeded = false;
+  private sharedResumeScheduled = false;
 
   constructor(root: HTMLElement, client: FeedreaderApi = api) {
     this.state = createInitialState(internalPath(location.pathname));
@@ -47,6 +48,10 @@ export class FeedreaderApp {
       () => this.state.feedRefreshCursor,
       client,
     );
+    const resume = () => this.scheduleSharedResume();
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('pageshow', resume);
+    window.addEventListener('online', resume);
   }
 
   async start(): Promise<void> {
@@ -515,6 +520,18 @@ export class FeedreaderApp {
     this.sharedEvents = events;
   }
 
+  private scheduleSharedResume(): void {
+    if (document.visibilityState === 'hidden' || this.sharedResumeScheduled) return;
+    this.sharedResumeScheduled = true;
+    queueMicrotask(() => {
+      this.sharedResumeScheduled = false;
+      this.sharedEvents?.close();
+      this.sharedEvents = null;
+      this.connectSharedEvents();
+      this.queueSharedSync(['sync']);
+    });
+  }
+
   private receiveSharedEvent(raw: string): void {
     let payload: SharedEventPayload;
     try {
@@ -645,12 +662,12 @@ export class FeedreaderApp {
       payload[id] = updates;
       const entry = this.entry(id);
       if (!entry) continue;
-      previous.set(id, { ...(entry.state ?? {}) });
+      previous.set(id, { ...entry.state });
       const version = (this.entryMutationVersions.get(id) ?? 0) + 1;
       this.entryMutationVersions.set(id, version);
       versions.set(id, version);
       entry.state = {
-        ...(entry.state ?? {}),
+        ...entry.state,
         ...updates,
         ...('read' in updates ? { readAt: now } : {}),
         ...('starred' in updates ? { starredAt: now } : {}),

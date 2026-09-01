@@ -20,7 +20,3 @@ export function requiredElement<T extends Element>(selector: string, root: Paren
   if (!node) throw new Error(`Required interface element is missing: ${selector}`);
   return node;
 }
-
-export function replace(node: Element, children: Iterable<Node>): void {
-  node.replaceChildren(...children);
-}

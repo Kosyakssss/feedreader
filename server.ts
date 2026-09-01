@@ -364,7 +364,7 @@ async function mergeFeedResults(
       } else {
         cache.feedMeta[feed.id] = {
           ...priorMeta,
-          ...(result.validators || {}),
+          ...result.validators,
           failureCount: 0,
         };
         delete cache.feedErrors[feed.id];
@@ -444,27 +444,46 @@ function startRefresh(feedIds?: readonly string[]): Promise<number> {
 
 function getRefreshStatus(since = 0, feedsSince = 0) {
   const progress = refreshProgress;
-  const entryPage = pageChanges(progress?.changes || [], since, MAX_ENTRY_DELTAS);
-  const feedPage = pageChanges(progress?.feedResults || [], feedsSince, MAX_FEED_DELTAS);
+  const entryPage = pageChanges(progress ? progress.changes : [], since, MAX_ENTRY_DELTAS);
+  const feedPage = pageChanges(progress ? progress.feedResults : [], feedsSince, MAX_FEED_DELTAS);
   const hasMoreDeltas = entryPage.hasMore || feedPage.hasMore;
   const refreshing = !!refreshJob || hasMoreDeltas;
+  const summary = refreshStatusSummary(progress);
   return {
     refreshing,
-    runId: progress?.runId || null,
-    startedAt: progress?.startedAt || null,
-    finishedAt: progress?.finishedAt || lastRefreshResult?.finishedAt || null,
-    total: progress?.total || 0,
-    completed: progress?.completed || 0,
-    succeeded: progress?.succeeded || 0,
-    failed: progress?.failed || 0,
-    count: progress?.added ?? lastRefreshResult?.count ?? 0,
-    error: progress?.error || lastRefreshResult?.error || null,
-    failures: progress?.failures.slice(-100) || [],
+    ...summary,
     cursor: entryPage.cursor,
     feedCursor: feedPage.cursor,
     newEntries: entryPage.items.map(change => change.entry),
     feedResults: feedPage.items,
-    removedIds: !refreshing ? progress?.removedIds || [] : [],
+    removedIds: !refreshing && progress ? progress.removedIds : [],
+  };
+}
+
+function refreshStatusSummary(progress: RefreshProgress | null) {
+  if (progress) return {
+    runId: progress.runId,
+    startedAt: progress.startedAt,
+    finishedAt: progress.finishedAt,
+    total: progress.total,
+    completed: progress.completed,
+    succeeded: progress.succeeded,
+    failed: progress.failed,
+    count: progress.added,
+    error: progress.error,
+    failures: progress.failures.slice(-100),
+  };
+  return {
+    runId: null,
+    startedAt: null,
+    finishedAt: lastRefreshResult ? lastRefreshResult.finishedAt : null,
+    total: 0,
+    completed: 0,
+    succeeded: 0,
+    failed: 0,
+    count: lastRefreshResult ? lastRefreshResult.count : 0,
+    error: lastRefreshResult ? lastRefreshResult.error : null,
+    failures: [],
   };
 }
 
@@ -864,6 +883,79 @@ async function exportFeeds(): Promise<Response> {
   }});
 }
 
+type RouteHandler = (req: Request, server: Bun.Server<undefined>, url: URL, path: string) => Response | Promise<Response>;
+
+const API_ROUTES: Record<string, Record<string, RouteHandler>> = {
+  '/api/health': { GET: async () => json(await getHealth()) },
+  '/api/entries': { GET: (req, _server, url) => entriesResponse(req, url.searchParams.get('feed') || undefined) },
+  '/api/events': { GET: (req, server) => sharedEventsResponse(req, server) },
+  '/api/refresh': { POST: req => startRefreshRequest(req) },
+  '/api/refresh/status': { GET: (_req, _server, url) => refreshStatusResponse(url) },
+  '/api/state': { POST: req => updateEntryState(req) },
+  '/api/feeds': {
+    GET: async () => json(await getFeedsWithHealth()),
+    POST: (req, server) => addFeed(req, server),
+  },
+  '/api/feeds/import': { POST: req => importFeeds(req) },
+  '/api/feeds/export': { GET: () => exportFeeds() },
+  '/api/config': {
+    GET: async () => json(await readConfig()),
+    PUT: req => updateConfig(req),
+  },
+  '/api/theme': { GET: () => themeResponse() },
+};
+
+const API_PATHS = new Set(Object.keys(API_ROUTES));
+
+async function startRefreshRequest(req: Request): Promise<Response> {
+  let feedIds: string[] | undefined;
+  if (req.headers.get('content-type')?.toLowerCase().startsWith('application/json')) {
+    const body = await parseJSONBody(req);
+    if (!isRecord(body) || !Array.isArray(body.feedIds) || !body.feedIds.every(id => typeof id === 'string')) {
+      throw new HttpError(400, 'Invalid refresh payload');
+    }
+    feedIds = body.feedIds;
+  }
+  startRefresh(feedIds).catch(error => console.error('Refresh error:', error));
+  return json(getRefreshStatus(), 202);
+}
+
+function refreshStatusResponse(url: URL): Response {
+  const cursor = nonNegativeInteger(url.searchParams.get('since'));
+  const feedCursor = nonNegativeInteger(url.searchParams.get('feedsSince'));
+  return json(getRefreshStatus(cursor, feedCursor));
+}
+
+function nonNegativeInteger(value: string | null): number {
+  const parsed = Number(value || 0);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+async function themeResponse(): Promise<Response> {
+  const config = await readConfig();
+  const css = await readThemeCSS(config.theme || 'system');
+  return new Response(css, { headers: { 'content-type': 'text/css' } });
+}
+
+async function routeApiRequest(
+  req: Request,
+  server: Bun.Server<undefined>,
+  url: URL,
+  path: string,
+): Promise<Response | null> {
+  const handler = API_ROUTES[path]?.[req.method];
+  if (handler) return await handler(req, server, url, path);
+  if (req.method === 'DELETE' && /^\/api\/feeds\/[^/]+$/.test(path)) {
+    return await deleteFeed(path.slice('/api/feeds/'.length));
+  }
+  return null;
+}
+
+function unmatchedApiResponse(path: string): Response {
+  const known = API_PATHS.has(path) || /^\/api\/feeds\/[^/]+$/.test(path);
+  return err(known ? 'Method not allowed' : 'Not found', known ? 405 : 404);
+}
+
 async function handleRequest(req: Request, server: Bun.Server<undefined>): Promise<Response> {
   try {
     assertTrustedHost(req);
@@ -873,77 +965,9 @@ async function handleRequest(req: Request, server: Bun.Server<undefined>): Promi
 
     if (MUTATING_METHODS.has(method)) assertTrustedRequest(req);
 
-    if (path === '/api/health' && method === 'GET') {
-      return json(await getHealth());
-    }
-
-    if (path === '/api/entries' && method === 'GET') {
-      const feed = url.searchParams.get('feed') || undefined;
-      return await entriesResponse(req, feed);
-    }
-
-    if (path === '/api/events' && method === 'GET') {
-      return sharedEventsResponse(req, server);
-    }
-
-    if (path === '/api/refresh' && method === 'POST') {
-      let feedIds: string[] | undefined;
-      if (req.headers.get('content-type')?.toLowerCase().startsWith('application/json')) {
-        const body = await parseJSONBody(req);
-        if (!isRecord(body) || !Array.isArray(body.feedIds) || !body.feedIds.every(id => typeof id === 'string')) {
-          throw new HttpError(400, 'Invalid refresh payload');
-        }
-        feedIds = body.feedIds;
-      }
-      startRefresh(feedIds).catch(error => console.error('Refresh error:', error));
-      return json(await getRefreshStatus(), 202);
-    }
-
-    if (path === '/api/refresh/status' && method === 'GET') {
-      const rawSince = Number(url.searchParams.get('since') || 0);
-      const since = Number.isSafeInteger(rawSince) && rawSince >= 0 ? rawSince : 0;
-      const rawFeedsSince = Number(url.searchParams.get('feedsSince') || 0);
-      const feedsSince = Number.isSafeInteger(rawFeedsSince) && rawFeedsSince >= 0 ? rawFeedsSince : 0;
-      return json(getRefreshStatus(since, feedsSince));
-    }
-
-    if (path === '/api/state' && method === 'POST') {
-      return await updateEntryState(req);
-    }
-
-    if (path === '/api/feeds' && method === 'GET') {
-      return json(await getFeedsWithHealth());
-    }
-
-    if (path === '/api/feeds' && method === 'POST') {
-      return await addFeed(req, server);
-    }
-
-    if (path.startsWith('/api/feeds/') && method === 'DELETE') {
-      return await deleteFeed(path.slice('/api/feeds/'.length));
-    }
-
-    if (path === '/api/feeds/import' && method === 'POST') {
-      return await importFeeds(req);
-    }
-
-    if (path === '/api/feeds/export' && method === 'GET') {
-      return await exportFeeds();
-    }
-
-    if (path === '/api/config' && method === 'GET') {
-      return json(await readConfig());
-    }
-
-    if (path === '/api/config' && method === 'PUT') {
-      return await updateConfig(req);
-    }
-
-    if (path === '/api/theme' && method === 'GET') {
-      const config = await readConfig();
-      const themeName = config.theme || 'system';
-      const css = await readThemeCSS(themeName);
-      return new Response(css, { headers: { 'content-type': 'text/css' } });
+    if (path.startsWith('/api/')) {
+      const response = await routeApiRequest(req, server, url, path);
+      return response || unmatchedApiResponse(path);
     }
 
     if (path === '/app.js' && method === 'GET') {
@@ -952,14 +976,6 @@ async function handleRequest(req: Request, server: Bun.Server<undefined>): Promi
 
     if (path === '/app.css' && method === 'GET') {
       return clientAssetResponse(req, 'style');
-    }
-
-    if (path.startsWith('/api/')) {
-      // Known API resources respond 405 (not 404) on wrong methods.
-      const known = ['/api/health', '/api/entries', '/api/events', '/api/refresh', '/api/refresh/status', '/api/state',
-        '/api/feeds', '/api/feeds/import', '/api/feeds/export', '/api/config', '/api/theme'];
-      const isKnownResource = known.includes(path) || /^\/api\/feeds\/[^/]+$/.test(path);
-      return err(isKnownResource ? 'Method not allowed' : 'Not found', isKnownResource ? 405 : 404);
     }
 
     // SPA: serve the app for all non-API routes

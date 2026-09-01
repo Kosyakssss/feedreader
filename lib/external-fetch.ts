@@ -5,7 +5,7 @@ import { isNonPublicAddress, isSafeExternalUrl } from './security.ts';
 
 const MAX_REDIRECTS = 5;
 
-export interface ResolvedAddress {
+interface ResolvedAddress {
   address: string;
   family: number;
 }

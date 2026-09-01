@@ -427,8 +427,6 @@ function normalizeStateFile(state: StateFile, cache: CacheFile): StateFile {
   return normalized;
 }
 
-export const writeFeeds = (d: FeedsFile) => runDataMutation(() => writeJSON('feeds.json', normalizeFeedsFile(d)));
-
 async function readRawState(): Promise<StateFile> {
   return normalizeStateShape(await readJSON<unknown>('state.json', {}));
 }
@@ -440,7 +438,7 @@ export async function readState(cache?: CacheFile): Promise<StateFile> {
   });
 }
 
-export const writeState = (d: StateFile) => runDataMutation(() => writeJSON('state.json', normalizeStateShape(d)));
+const writeState = (d: StateFile) => runDataMutation(() => writeJSON('state.json', normalizeStateShape(d)));
 
 export async function updateState(mutator: (state: StateFile) => StateFile | void | Promise<StateFile | void>, cache?: CacheFile): Promise<StateFile> {
   return runDataMutation(async () => {
@@ -456,7 +454,6 @@ export const readFeeds = () => runDataRead(async () =>
   normalizeFeedsFile(await readJSON<unknown>('feeds.json', { folders: [], feeds: [] })));
 export const readCache = () => runDataRead(async () =>
   normalizeCacheFile(await readJSON<unknown>('cache.json', { entries: [], lastFetched: {}, feedErrors: {} })));
-export const writeCache = (d: CacheFile) => runDataMutation(() => writeJSON('cache.json', normalizeCacheFile(d)));
 
 export async function readConfig(): Promise<Config> {
   return runDataRead(async () => normalizeConfig(await readJSON<unknown>('config.json', {})));

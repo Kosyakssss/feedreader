@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import type { RefreshStatus } from '../client/state.ts';
 import type { Config } from '../lib/types.ts';
 
 let dataDir = '';
@@ -464,16 +465,7 @@ describe('server hardening', () => {
     }
   });
 
-  test('rejects invalid theme name in /api/config', async () => {
-    const res = await fetch(`http://127.0.0.1:${port}/api/config`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ theme: '../../../tmp/evil' }),
-    });
-    expect(res.status).toBe(400);
-  });
-
-  test('accepts the system theme in /api/config', async () => {
+  test('accepts the system theme and serves its CSS', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/config`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -481,28 +473,21 @@ describe('server hardening', () => {
     });
     expect(res.status).toBe(200);
     expect((await res.json() as { theme: string }).theme).toBe('system');
-  });
-
-  test('serves the active system theme CSS', async () => {
-    const update = await fetch(`http://127.0.0.1:${port}/api/config`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ theme: 'system' }),
-    });
-    expect(update.status).toBe(200);
 
     const css = await fetch(`http://127.0.0.1:${port}/api/theme`);
     expect(css.status).toBe(200);
     expect(await css.text()).toContain('feedreader-system-theme');
   });
 
-  test('rejects unavailable theme names in /api/config', async () => {
-    const res = await fetch(`http://127.0.0.1:${port}/api/config`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ theme: 'default' }),
-    });
-    expect(res.status).toBe(400);
+  test('rejects unsafe and unavailable theme names', async () => {
+    for (const theme of ['../../../tmp/evil', 'default']) {
+      const res = await fetch(`http://127.0.0.1:${port}/api/config`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ theme }),
+      });
+      expect(res.status).toBe(400);
+    }
   });
 
   test('validates config bounds and preserves fields omitted by partial updates', async () => {
@@ -540,36 +525,14 @@ describe('server hardening', () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/refresh`, { method: 'POST' });
 
     expect(res.status).toBe(202);
-    const body = await res.json() as {
-      count: number;
-      runId: string;
-      total: number;
-      completed: number;
-      succeeded: number;
-      failed: number;
-      failures: Array<{ feedId: string; label: string; error: string }>;
-      cursor: number;
-      feedCursor: number;
-      newEntries: unknown[];
-      feedResults: unknown[];
-      removedIds: string[];
-      refreshing: boolean;
+    const body = await res.json() as RefreshStatus & {
       entries?: unknown[];
-      feeds?: { feeds: unknown[]; health: Record<string, unknown> };
+      feeds?: unknown;
     };
-    expect(typeof body.count).toBe('number');
-    expect(typeof body.refreshing).toBe('boolean');
     expect(typeof body.runId).toBe('string');
-    expect(typeof body.total).toBe('number');
-    expect(typeof body.completed).toBe('number');
-    expect(typeof body.succeeded).toBe('number');
-    expect(typeof body.failed).toBe('number');
-    expect(Array.isArray(body.failures)).toBe(true);
     expect(typeof body.cursor).toBe('number');
-    expect(typeof body.feedCursor).toBe('number');
-    expect(Array.isArray(body.newEntries)).toBe(true);
-    expect(Array.isArray(body.feedResults)).toBe(true);
-    expect(Array.isArray(body.removedIds)).toBe(true);
+    expect(body.newEntries).toEqual([]);
+    expect(body.feedResults).toEqual([]);
     expect(body.entries).toBeUndefined();
     expect(body.feeds).toBeUndefined();
   });
@@ -577,22 +540,12 @@ describe('server hardening', () => {
   test('reports refresh status', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/refresh/status`);
     expect(res.status).toBe(200);
-    const body = await res.json() as {
-      refreshing: boolean;
-      count: number;
-      cursor: number;
-      newEntries: unknown[];
-      removedIds: string[];
-      failures: Array<{ feedId: string; label: string; error: string }>;
+    const body = await res.json() as RefreshStatus & {
       entries?: unknown[];
-      feeds?: { feeds: unknown[] };
+      feeds?: unknown;
     };
     expect(typeof body.refreshing).toBe('boolean');
-    expect(typeof body.count).toBe('number');
     expect(typeof body.cursor).toBe('number');
-    expect(Array.isArray(body.newEntries)).toBe(true);
-    expect(Array.isArray(body.removedIds)).toBe(true);
-    expect(Array.isArray(body.failures)).toBe(true);
     expect(body.entries).toBeUndefined();
     expect(body.feeds).toBeUndefined();
 

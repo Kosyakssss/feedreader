@@ -9,6 +9,7 @@ import {
 import { externalPath } from '../router.ts';
 import {
   type AppState,
+  type FeedHealth,
   currentSource,
   entryCounts,
   feedById,
@@ -63,7 +64,7 @@ export class PageView {
   }
 
   private build(state: AppState, key: string): MountedPage {
-    if (key === 'feeds') return { key, node: buildFeedsPage(state), entryList: null };
+    if (key === 'feeds') return { key, node: buildFeedsPage(), entryList: null };
     if (key === 'settings') return { key, node: buildSettingsPage(state), entryList: null };
 
     const page = element('div', 'page');
@@ -150,7 +151,7 @@ function buildToolbar(state: AppState, showActions: boolean): HTMLElement {
   return toolbar;
 }
 
-function buildFeedsPage(state: AppState): HTMLElement {
+function buildFeedsPage(): HTMLElement {
   const page = element('div', 'page feeds-page');
   page.dataset.page = 'feeds';
   const header = element('div', 'page-header feeds-header');
@@ -243,25 +244,59 @@ function updateFeedsPage(state: AppState, page: HTMLElement, options: PageUpdate
   list.querySelector('.empty-state')?.remove();
   list.querySelector('.feed-load-more')?.remove();
 
+  const pending = updatePendingFeed(state, list, options);
+  const visibleFeeds = state.feeds.feeds.slice(0, state.feedDisplayLimit);
+  const visibleIds = new Set(visibleFeeds.map(feed => feed.id));
+  const rows = new Map(
+    [...list.querySelectorAll<HTMLElement>('.feed-slot[data-feed-id]')]
+      .map(row => [row.dataset.feedId ?? '', row] as const),
+  );
+  for (const [id, row] of rows) {
+    if (!visibleIds.has(id)) row.remove();
+  }
+  const orderedRows = visibleFeeds.map(feed => {
+    const row = rows.get(feed.id) ?? buildFeedRow(feed);
+    updateFeedRow(state, row, feed, unreadByFeed.get(feed.id) ?? 0);
+    return row;
+  });
+  reconcileFeedRowOrder(list, orderedRows, pending.slot);
+
+  if (visibleFeeds.length === 0 && !state.feedAdd.pendingVisible) {
+    list.append(element('div', 'empty-state', 'No feeds yet. Add one above!'));
+  }
+  if (state.feeds.feeds.length > visibleFeeds.length) {
+    const remaining = state.feeds.feeds.length - visibleFeeds.length;
+    const more = element('div', 'feed-load-more');
+    const buttonNode = button(`Show ${Math.min(100, remaining)} more (${remaining} remaining)`);
+    buttonNode.dataset.loadmoreFeeds = '';
+    more.append(buttonNode);
+    list.append(more);
+  }
+
+  if (pending.created && pending.slot) animatePendingFeedEnter(pending.slot);
+  if (options.animateFeeds && options.newFeedIds?.size) {
+    const replacement = pending.slot
+      ? orderedRows.find(row => options.newFeedIds?.has(row.dataset.feedId ?? ''))
+      : null;
+    if (replacement && pending.slot && options.newFeedIds.size === 1) {
+      void animateFeedOverlayReplacement(pending.slot, replacement);
+    } else {
+      animateFeedRows(orderedRows, options.newFeedIds);
+    }
+  }
+}
+
+function updatePendingFeed(
+  state: AppState,
+  list: HTMLElement,
+  options: PageUpdateOptions,
+): { slot: HTMLElement | null; created: boolean } {
   let pendingSlot = list.querySelector<HTMLElement>('.feed-pending-slot');
   let createdPending = false;
   const replacingPending = !!pendingSlot && !!options.animateFeeds && !!options.newFeedIds?.size;
   if (state.feedAdd.pendingVisible) {
     if (!pendingSlot) {
-      pendingSlot = element('div', 'feed-slot feed-pending-slot');
-      const pending = element('div', 'feed-item feed-pending');
-      pending.setAttribute('role', 'status');
-      const info = element('div', 'feed-info');
-      info.append(
-        element('span', 'feed-label feed-pending-label', 'Finding and checking feed…'),
-        element('div', 'feed-meta feed-pending-address'),
-      );
-      const metrics = element('div', 'feed-metrics feed-pending-metrics');
-      const activity = element('span', 'feed-pending-activity');
-      activity.append(element('span', 'feed-pending-spinner'));
-      metrics.append(element('span', 'feed-pending-metric-spacer'), activity);
-      pending.append(info, metrics, element('span', 'feed-pending-action'));
-      pendingSlot.append(pending);
+      pendingSlot = buildPendingFeedSlot();
       list.prepend(pendingSlot);
       createdPending = true;
     } else if (pendingSlot.dataset.exiting === 'true') {
@@ -280,47 +315,25 @@ function updateFeedsPage(state: AppState, page: HTMLElement, options: PageUpdate
       if (completed && exitingSlot.dataset.exiting === 'true') exitingSlot.remove();
     });
   }
+  return { slot: pendingSlot?.isConnected ? pendingSlot : null, created: createdPending };
+}
 
-  const visibleFeeds = state.feeds.feeds.slice(0, state.feedDisplayLimit);
-  const visibleIds = new Set(visibleFeeds.map(feed => feed.id));
-  const rows = new Map(
-    [...list.querySelectorAll<HTMLElement>('.feed-slot[data-feed-id]')]
-      .map(row => [row.dataset.feedId ?? '', row] as const),
+function buildPendingFeedSlot(): HTMLElement {
+  const slot = element('div', 'feed-slot feed-pending-slot');
+  const pending = element('div', 'feed-item feed-pending');
+  pending.setAttribute('role', 'status');
+  const info = element('div', 'feed-info');
+  info.append(
+    element('span', 'feed-label feed-pending-label', 'Finding and checking feed…'),
+    element('div', 'feed-meta feed-pending-address'),
   );
-  for (const [id, row] of rows) {
-    if (!visibleIds.has(id)) row.remove();
-  }
-
-  const orderedRows: HTMLElement[] = [];
-  for (const feed of visibleFeeds) {
-    const row = rows.get(feed.id) ?? buildFeedRow(state, feed, unreadByFeed.get(feed.id) ?? 0);
-    updateFeedRow(state, row, feed, unreadByFeed.get(feed.id) ?? 0);
-    orderedRows.push(row);
-  }
-  reconcileFeedRowOrder(list, orderedRows, pendingSlot?.isConnected ? pendingSlot : null);
-
-  if (state.feeds.feeds.length === 0 && !state.feedAdd.pendingVisible) {
-    list.append(element('div', 'empty-state', 'No feeds yet. Add one above!'));
-  }
-  if (state.feeds.feeds.length > visibleFeeds.length) {
-    const more = element('div', 'feed-load-more');
-    const buttonNode = button(`Show ${Math.min(100, state.feeds.feeds.length - visibleFeeds.length)} more (${state.feeds.feeds.length - visibleFeeds.length} remaining)`);
-    buttonNode.dataset.loadmoreFeeds = '';
-    more.append(buttonNode);
-    list.append(more);
-  }
-
-  if (createdPending && pendingSlot) animatePendingFeedEnter(pendingSlot);
-  if (options.animateFeeds && options.newFeedIds?.size) {
-    const replacement = pendingSlot
-      ? orderedRows.find(row => options.newFeedIds?.has(row.dataset.feedId ?? ''))
-      : null;
-    if (replacement && options.newFeedIds.size === 1) {
-      void animateFeedOverlayReplacement(pendingSlot!, replacement);
-    } else {
-      animateFeedRows(orderedRows, options.newFeedIds);
-    }
-  }
+  const metrics = element('div', 'feed-metrics feed-pending-metrics');
+  const activity = element('span', 'feed-pending-activity');
+  activity.append(element('span', 'feed-pending-spinner'));
+  metrics.append(element('span', 'feed-pending-metric-spacer'), activity);
+  pending.append(info, metrics, element('span', 'feed-pending-action'));
+  slot.append(pending);
+  return slot;
 }
 
 function updateAddForm(state: AppState, page: HTMLElement): void {
@@ -397,36 +410,21 @@ function buildFeedListHeader(): HTMLElement {
   return header;
 }
 
-function buildFeedRow(state: AppState, feed: Feed, unread: number): HTMLElement {
+function buildFeedRow(feed: Feed): HTMLElement {
   const slot = element('div', 'feed-slot');
   slot.dataset.feedId = feed.id;
   slot.setAttribute('role', 'listitem');
   const row = element('div', 'feed-item');
   const info = element('div', 'feed-info');
-  const label = element('a', 'feed-label', feed.label);
-  label.href = externalPath(`/feed/${encodeURIComponent(feed.id)}`);
+  const label = element('a', 'feed-label');
   label.dataset.link = '';
   label.dir = 'auto';
-  const meta = element('div', 'feed-meta', displayFeedUrl(feed.url));
-  meta.title = feed.url;
-  info.append(label, meta);
+  info.append(label, element('div', 'feed-meta'));
 
   const metrics = element('div', 'feed-metrics');
-  const unreadMetric = element('span', `feed-unread${unread > 0 ? ' has-unread' : ''}`);
-  unreadMetric.setAttribute('aria-label', `${unread} unread ${unread === 1 ? 'entry' : 'entries'}`);
-  unreadMetric.append(element('span', 'feed-unread-value', unread > 0 ? String(unread) : '—'), element('span', 'feed-unread-context', ' unread'));
-  const health = state.feeds.health?.[feed.id];
-  const lastFetch = health?.lastFetched ? timeAgo(new Date(health.lastFetched).toISOString()) : 'never';
-  const healthMetric = element('span', `feed-health${health?.error ? ' has-error' : ''}`);
-  if (health?.error) {
-    healthMetric.textContent = 'Error';
-    healthMetric.title = health.error;
-  } else {
-    if (lastFetch === 'never') healthMetric.textContent = 'Not checked';
-    else healthMetric.append(element('span', 'feed-health-prefix', 'Checked '), document.createTextNode(lastFetch));
-    if (health?.entryCount === 0 && lastFetch !== 'never') healthMetric.title = 'Feed returned no entries';
-  }
-  metrics.append(unreadMetric, healthMetric);
+  const unreadMetric = element('span', 'feed-unread');
+  unreadMetric.append(element('span', 'feed-unread-value'), element('span', 'feed-unread-context', ' unread'));
+  metrics.append(unreadMetric, element('span', 'feed-health'));
 
   const remove = button('', 'btn btn-feed-delete');
   remove.append(
@@ -434,10 +432,6 @@ function buildFeedRow(state: AppState, feed: Feed, unread: number): HTMLElement 
     icon('trash', 'ui-icon feed-delete-icon feed-delete-icon-confirm'),
     element('span', 'feed-delete-spinner'),
   );
-  remove.dataset.deleteFeed = feed.id;
-  remove.dataset.feedLabel = feed.label;
-  remove.title = 'Remove feed';
-  remove.setAttribute('aria-label', `Remove ${feed.label}`);
   row.append(info, metrics, remove);
   slot.append(row);
   return slot;
@@ -466,39 +460,45 @@ function updateFeedRow(state: AppState, slot: HTMLElement, feed: Feed, unread: n
   }
   const health = state.feeds.health?.[feed.id];
   const healthMetric = row.querySelector<HTMLElement>('.feed-health');
-  if (healthMetric) {
-    healthMetric.classList.toggle('has-error', !!health?.error);
-    healthMetric.classList.toggle('is-checking', !!health?.checking);
-    healthMetric.replaceChildren();
-    healthMetric.removeAttribute('title');
-    if (health?.checking) {
-      healthMetric.textContent = 'Checking…';
-    } else if (health?.error) {
-      healthMetric.textContent = 'Error';
-      healthMetric.title = health.error;
-    } else {
-      const lastFetch = health?.lastFetched ? timeAgo(new Date(health.lastFetched).toISOString()) : 'never';
-      if (lastFetch === 'never') healthMetric.textContent = 'Not checked';
-      else healthMetric.append(element('span', 'feed-health-prefix', 'Checked '), document.createTextNode(lastFetch));
-      if (health?.entryCount === 0 && lastFetch !== 'never') healthMetric.title = 'Feed returned no entries';
-    }
+  if (healthMetric) updateFeedHealth(healthMetric, health);
+  const remove = row.querySelector<HTMLButtonElement>('.btn-feed-delete');
+  if (remove) updateFeedDelete(remove, state, feed);
+}
+
+function updateFeedHealth(node: HTMLElement, health: FeedHealth | undefined): void {
+  node.classList.toggle('has-error', !!health?.error);
+  node.classList.toggle('is-checking', !!health?.checking);
+  node.replaceChildren();
+  node.removeAttribute('title');
+  if (health?.checking) {
+    node.textContent = 'Checking…';
+    return;
   }
-  const remove = row.querySelector<HTMLButtonElement>('[data-delete-feed]');
-  if (remove) {
-    const confirming = state.confirmDeleteFeedId === feed.id;
-    const deleting = state.deletingFeedId === feed.id;
-    remove.dataset.deleteFeed = feed.id;
-    remove.dataset.feedLabel = feed.label;
-    remove.classList.toggle('is-confirming', confirming);
-    remove.classList.toggle('is-deleting', deleting);
-    remove.disabled = deleting;
-    remove.toggleAttribute('aria-busy', deleting);
-    remove.title = deleting ? 'Removing feed' : confirming ? 'Click again to remove feed' : 'Remove feed';
-    remove.setAttribute(
-      'aria-label',
-      deleting ? `Removing ${feed.label}` : confirming ? `Confirm removal of ${feed.label}` : `Remove ${feed.label}`,
-    );
+  if (health?.error) {
+    node.textContent = 'Error';
+    node.title = health.error;
+    return;
   }
+  const lastFetch = health?.lastFetched ? timeAgo(new Date(health.lastFetched).toISOString()) : 'never';
+  if (lastFetch === 'never') node.textContent = 'Not checked';
+  else node.append(element('span', 'feed-health-prefix', 'Checked '), document.createTextNode(lastFetch));
+  if (health?.entryCount === 0 && lastFetch !== 'never') node.title = 'Feed returned no entries';
+}
+
+function updateFeedDelete(remove: HTMLButtonElement, state: AppState, feed: Feed): void {
+  const confirming = state.confirmDeleteFeedId === feed.id;
+  const deleting = state.deletingFeedId === feed.id;
+  remove.dataset.deleteFeed = feed.id;
+  remove.dataset.feedLabel = feed.label;
+  remove.classList.toggle('is-confirming', confirming);
+  remove.classList.toggle('is-deleting', deleting);
+  remove.disabled = deleting;
+  remove.toggleAttribute('aria-busy', deleting);
+  remove.title = deleting ? 'Removing feed' : confirming ? 'Click again to remove feed' : 'Remove feed';
+  remove.setAttribute(
+    'aria-label',
+    deleting ? `Removing ${feed.label}` : confirming ? `Confirm removal of ${feed.label}` : `Remove ${feed.label}`,
+  );
 }
 
 function displayFeedUrl(raw: string): string {

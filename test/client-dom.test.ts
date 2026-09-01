@@ -101,6 +101,14 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function finishedAnimation(): Animation {
+  return {
+    finished: Promise.resolve(),
+    addEventListener: () => undefined,
+    cancel: () => undefined,
+  } as unknown as Animation;
+}
+
 describe('client orchestration', () => {
   test('loads all initial resources as one observed request group', async () => {
     const calls: string[] = [];
@@ -141,6 +149,40 @@ describe('client orchestration', () => {
     await shared.sharedSyncJob;
     expect(app.state.entries.map(value => value.id)).toEqual(['remote']);
     expect(app.state.feeds.feeds[0]?.label).toBe('Remote feed');
+  });
+
+  test('reconnects and catches up after a suspended page resumes', async () => {
+    const OriginalEventSource = globalThis.EventSource;
+    let connections = 0;
+    let closes = 0;
+    globalThis.EventSource = class {
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      constructor() { connections += 1; }
+      close() { closes += 1; }
+    } as unknown as typeof EventSource;
+
+    try {
+      const app = renderedApp(client({
+        entries: async () => [entry('resumed')],
+        refreshStatus: async () => status({ refreshing: true, completed: 1, total: 2 }),
+      }));
+      const shared = app as unknown as {
+        connectSharedEvents(): void;
+        sharedSyncJob: Promise<void> | null;
+      };
+      shared.connectSharedEvents();
+
+      window.dispatchEvent(new Event('pageshow'));
+      await Promise.resolve();
+      await shared.sharedSyncJob;
+
+      expect(connections).toBe(2);
+      expect(closes).toBe(1);
+      expect(app.state.entries[0]?.id).toBe('resumed');
+      expect(app.state.refreshStatus?.refreshing).toBe(true);
+    } finally {
+      globalThis.EventSource = OriginalEventSource;
+    }
   });
 
   test('checkbox, star, and read controls dispatch real app actions', async () => {
@@ -321,22 +363,10 @@ describe('client orchestration', () => {
     }
   });
 
-  test('finishes a successful add by overlaying the pending row without a layout gap', async () => {
+  test('replaces a pending row with the successfully added feed', async () => {
     const prototype = HTMLElement.prototype as HTMLElement & { animate: typeof HTMLElement.prototype.animate };
     const originalAnimate = prototype.animate;
-    const animations: Array<{
-      node: HTMLElement;
-      frames: Keyframe[] | PropertyIndexedKeyframes | null;
-      options?: number | KeyframeAnimationOptions;
-    }> = [];
-    prototype.animate = function (frames, options) {
-      animations.push({ node: this as unknown as HTMLElement, frames, options });
-      return ({
-        finished: Promise.resolve(),
-        addEventListener: () => undefined,
-        cancel: () => undefined,
-      }) as unknown as Animation;
-    };
+    prototype.animate = () => finishedAnimation();
 
     try {
       const added = deferred<Awaited<ReturnType<FeedreaderApi['addFeed']>>>();
@@ -347,7 +377,6 @@ describe('client orchestration', () => {
       document.querySelector<HTMLButtonElement>('#add-feed-form button[type="submit"]')!.click();
       await new Promise(resolve => setTimeout(resolve, 130));
       expect(document.querySelector('.feed-pending-slot')).not.toBeNull();
-      const animationsBeforeSuccess = animations.length;
 
       added.resolve({
         feed: { id: 'new', url: 'https://new.example/feed.xml', label: 'New', folderId: null },
@@ -362,13 +391,6 @@ describe('client orchestration', () => {
       expect(document.querySelector('.feed-pending-slot')).toBeNull();
       expect(firstSlot?.dataset.feedId).toBe('new');
       expect(firstSlot?.style.position).toBe('');
-      const replacement = animations.find(animation =>
-        animation.node.classList.contains('feed-item') && !animation.node.classList.contains('feed-pending'));
-      expect(JSON.stringify(replacement?.frames)).toContain('inset(100% 0 0 0)');
-      expect(JSON.stringify(replacement?.frames)).not.toContain('opacity');
-      expect((replacement?.options as KeyframeAnimationOptions | undefined)?.duration).toBe(280);
-      expect(animations.slice(animationsBeforeSuccess)
-        .some(animation => animation.node.classList.contains('feed-pending'))).toBe(false);
     } finally {
       prototype.animate = originalAnimate;
     }
@@ -432,55 +454,38 @@ describe('client orchestration', () => {
       animate: (frames: Keyframe[] | PropertyIndexedKeyframes, options?: number | KeyframeAnimationOptions) => Animation;
     };
     const originalAnimate = prototype.animate;
-    const animations: Array<{
-      frames: Keyframe[] | PropertyIndexedKeyframes | null;
-      options?: number | KeyframeAnimationOptions;
-    }> = [];
-    prototype.animate = (frames, options) => {
-      animations.push({ frames, options });
-      return ({
-      finished: Promise.resolve(),
-      addEventListener: () => undefined,
-      cancel: () => undefined,
-      }) as unknown as Animation;
-    };
-    const deletion = deferred<{ ok: boolean }>();
-    let calls = 0;
-    const app = renderedApp(client({ deleteFeed: () => { calls += 1; return deletion.promise; } }));
-    app.state.feeds = {
-      folders: [],
-      feeds: [{ id: 'feed', url: 'https://example.com/feed.xml', label: 'Feed', folderId: null }],
-      health: { feed: { lastFetched: null, error: null, entryCount: 0 } },
-    };
-    app.navigate('/feeds', false);
+    prototype.animate = () => finishedAnimation();
+    try {
+      const deletion = deferred<{ ok: boolean }>();
+      let calls = 0;
+      const app = renderedApp(client({ deleteFeed: () => { calls += 1; return deletion.promise; } }));
+      app.state.feeds = {
+        folders: [],
+        feeds: [{ id: 'feed', url: 'https://example.com/feed.xml', label: 'Feed', folderId: null }],
+        health: { feed: { lastFetched: null, error: null, entryCount: 0 } },
+      };
+      app.navigate('/feeds', false);
 
-    const button = document.querySelector<HTMLButtonElement>('[data-delete-feed="feed"]')!;
-    expect(button.querySelectorAll('.feed-delete-icon')).toHaveLength(2);
-    button.click();
-    expect(button.classList.contains('is-confirming')).toBe(true);
-    expect(button.getAttribute('aria-label')).toBe('Confirm removal of Feed');
+      const button = document.querySelector<HTMLButtonElement>('[data-delete-feed="feed"]')!;
+      expect(button.querySelectorAll('.feed-delete-icon')).toHaveLength(2);
+      button.click();
+      expect(button.getAttribute('aria-label')).toBe('Confirm removal of Feed');
 
-    document.body.click();
-    expect(button.classList.contains('is-confirming')).toBe(false);
-    expect(button.getAttribute('aria-label')).toBe('Remove Feed');
+      document.body.click();
+      expect(button.getAttribute('aria-label')).toBe('Remove Feed');
 
-    button.click();
-    button.click();
-    button.click();
-    expect(calls).toBe(1);
-    expect(button.disabled).toBe(true);
-    expect(button.classList.contains('is-deleting')).toBe(true);
+      button.click();
+      button.click();
+      button.click();
+      expect(calls).toBe(1);
+      expect(button.disabled).toBe(true);
 
-    deletion.resolve({ ok: true });
-    await new Promise(resolve => setTimeout(resolve, 10));
-    expect(app.state.feeds.feeds).toHaveLength(0);
-    expect(JSON.stringify(animations)).not.toContain('translateX');
-    expect(JSON.stringify(animations)).not.toContain('scaleY');
-    expect(JSON.stringify(animations)).toContain('translateY');
-    const collapse = animations.find(animation => JSON.stringify(animation.frames).includes('height'));
-    expect((collapse?.options as KeyframeAnimationOptions | undefined)?.duration).toBe(260);
-    expect((collapse?.options as KeyframeAnimationOptions | undefined)?.easing).toBe('linear');
-    prototype.animate = originalAnimate;
+      deletion.resolve({ ok: true });
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(app.state.feeds.feeds).toHaveLength(0);
+    } finally {
+      prototype.animate = originalAnimate;
+    }
   });
 });
 

@@ -266,7 +266,7 @@ function prepareXmlForBun(xml: string): string {
     } else {
       tagEnd = markupEnd(xml, tagStart);
       const tag = xml.slice(tagStart, tagEnd);
-      if (/^<\//.test(tag)) {
+      if (tag.startsWith('</')) {
         depth = Math.max(0, depth - 1);
       } else if (!/\/\s*>$/.test(tag)) {
         depth++;
@@ -675,7 +675,7 @@ async function fetchJson<T>(rawUrl: string, init: RequestInit = {}, externalFetc
     headers: {
       'User-Agent': UA,
       Accept: 'application/json',
-      ...(init.headers || {}),
+      ...init.headers,
     },
     signal: init.signal || AbortSignal.timeout(FEED_FETCH_TIMEOUT_MS),
   });
@@ -748,7 +748,7 @@ function decodeWith(label: string, bytes: Buffer): string {
   return new TextDecoder(label, { fatal: false }).decode(bytes);
 }
 
-export type FeedFormat = 'rss' | 'atom' | 'rdf' | 'json' | 'unrecognized';
+type FeedFormat = 'rss' | 'atom' | 'rdf' | 'json' | 'unrecognized';
 
 export interface ParsedFeed {
   format: FeedFormat;
@@ -1041,7 +1041,7 @@ export async function fetchAllFeeds(
   onFeedResult?: (feed: Feed, result: FeedFetchResult) => Promise<void>,
   externalFetch: ExternalFetch = safeFetchExternal,
 ): Promise<{ entries: Entry[]; errors: Record<string, string>; feedMeta: Record<string, FeedCacheMeta> }> {
-  const results: PromiseSettledResult<FeedFetchResult>[] = new Array(feeds.length);
+  const results: PromiseSettledResult<FeedFetchResult>[] = Array.from({ length: feeds.length });
   let nextFeedIndex = 0;
 
   async function worker() {
@@ -1244,24 +1244,6 @@ function parseWebInput(input: string): URL | null {
     } catch {}
   }
   return null;
-}
-
-export async function discoverFeedUrl(
-  pageUrl: string,
-  externalFetch: ExternalFetch = safeFetchExternal,
-): Promise<string | null> {
-  try {
-    const res = await externalFetch(pageUrl, {
-      headers: { 'User-Agent': UA },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) return null;
-    const html = await readResponseText(res, MAX_DISCOVERY_BYTES);
-    const discovered = extractFeedLink(html, pageUrl);
-    if (discovered) return discovered;
-  } catch {}
-
-  return await discoverCommonFeedUrl(pageUrl, externalFetch);
 }
 
 async function discoverCommonFeedUrl(pageUrl: string, externalFetch: ExternalFetch): Promise<string | null> {

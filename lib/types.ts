@@ -10,7 +10,7 @@ export interface FeedsFile {
   feeds: Feed[];
 }
 
-export interface Folder {
+interface Folder {
   id: string;
   name: string;
 }

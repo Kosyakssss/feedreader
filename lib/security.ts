@@ -10,26 +10,33 @@ export function isSafeObjectKey(key: string): boolean {
   return key !== '__proto__' && key !== 'constructor' && key !== 'prototype';
 }
 
-function isNonPublicIPv4(host: string): boolean {
-  const parts = host.split('.').map(Number);
-  if (parts.length !== 4 || parts.some(n => Number.isNaN(n) || n < 0 || n > 255)) return true;
+const NON_PUBLIC_IPV4_BLOCKS: ReadonlyArray<readonly [network: number, mask: number]> = [
+  [0x00000000, 0xff000000], // 0.0.0.0/8
+  [0x0a000000, 0xff000000], // 10.0.0.0/8
+  [0x64400000, 0xffc00000], // 100.64.0.0/10
+  [0x7f000000, 0xff000000], // 127.0.0.0/8
+  [0xa9fe0000, 0xffff0000], // 169.254.0.0/16
+  [0xac100000, 0xfff00000], // 172.16.0.0/12
+  [0xc0000000, 0xffffff00], // 192.0.0.0/24
+  [0xc0000200, 0xffffff00], // 192.0.2.0/24
+  [0xc0586300, 0xffffff00], // 192.88.99.0/24
+  [0xc0a80000, 0xffff0000], // 192.168.0.0/16
+  [0xc6120000, 0xfffe0000], // 198.18.0.0/15
+  [0xc6336400, 0xffffff00], // 198.51.100.0/24
+  [0xcb007100, 0xffffff00], // 203.0.113.0/24
+  [0xe0000000, 0xf0000000], // 224.0.0.0/4
+];
 
-  const [a, b, c] = parts;
-  if (a === undefined || b === undefined || c === undefined) return true;
-  if (a === 10) return true;
-  if (a === 127) return true;
-  if (a === 0) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 192 && b === 0 && (c === 0 || c === 2)) return true;
-  if (a === 192 && b === 88 && c === 99) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true;
-  if (a === 198 && (b === 18 || b === 19)) return true;
-  if (a === 198 && b === 51 && c === 100) return true;
-  if (a === 203 && b === 0 && c === 113) return true;
-  if (a >= 224) return true;
-  return false;
+function parseIPv4(host: string): number | null {
+  const octets = host.split('.').map(Number);
+  if (octets.length !== 4 || octets.some(value => !Number.isInteger(value) || value < 0 || value > 255)) return null;
+  const [a, b, c, d] = octets as [number, number, number, number];
+  return (((a * 256 + b) * 256 + c) * 256 + d) >>> 0;
+}
+
+function isNonPublicIPv4(host: string): boolean {
+  const address = parseIPv4(host);
+  return address === null || NON_PUBLIC_IPV4_BLOCKS.some(([network, mask]) => ((address & mask) >>> 0) === network);
 }
 
 function parseIPv6Groups(host: string): number[] | null {

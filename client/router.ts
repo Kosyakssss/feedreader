@@ -1,6 +1,6 @@
 const SERVE_BASE_PATH = '/feedreader';
 
-export function basePathForLocation(pathname = location.pathname): string {
+function basePathForLocation(pathname = location.pathname): string {
   return pathname === SERVE_BASE_PATH || pathname.startsWith(`${SERVE_BASE_PATH}/`)
     ? SERVE_BASE_PATH
     : '';

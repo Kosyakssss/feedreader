@@ -1,4 +1,4 @@
-export const REFRESH_SEGMENT_COUNT = 4;
+const REFRESH_SEGMENT_COUNT = 4;
 
 export function filledRefreshSegments(completed: number, total: number): readonly boolean[] {
   const safeTotal = Math.max(0, Math.floor(total));

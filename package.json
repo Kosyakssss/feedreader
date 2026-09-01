@@ -3,12 +3,14 @@
   "devDependencies": {
     "@types/bun": "^1.4.0",
     "happy-dom": "^20.11.6",
+    "oxlint": "1.80.0",
     "typescript": "^7.0.2"
   },
   "scripts": {
     "start": "bun server.ts",
     "unread": "bun scripts/unread.ts",
-    "test": "tsc --noEmit && bun test --isolate"
+    "lint": "oxlint --deny-warnings .",
+    "test": "tsc --noEmit && bun run lint && bun test --isolate"
   },
   "packageManager": "bun@1.4.0",
   "type": "module"
