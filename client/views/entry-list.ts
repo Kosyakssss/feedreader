@@ -17,12 +17,31 @@ export interface EntryListOptions {
 interface EntryRow {
   slot: HTMLDivElement;
   card: HTMLDivElement;
+  checkbox: HTMLInputElement;
+  titleSlot: HTMLSpanElement;
+  titleNode: HTMLAnchorElement | HTMLSpanElement | null;
+  metadata: HTMLSpanElement;
+  star: HTMLButtonElement;
+  mark: HTMLButtonElement;
+  rendered: {
+    index: number;
+    read: boolean;
+    starred: boolean;
+    selected: boolean;
+    focused: boolean;
+    title: string;
+    url: string;
+    safeUrl: string;
+    feedLabel: string;
+    published: string;
+  } | null;
 }
 
 export class EntryListView {
   readonly element = element('div');
   private list: HTMLDivElement | null = null;
   private rows = new Map<string, EntryRow>();
+  private orderedRows: EntryRow[] = [];
 
   constructor() {
     this.element.id = 'entry-list';
@@ -61,7 +80,8 @@ export class EntryListView {
       this.updateRow(row, entry, index, options);
       orderedRows.push(row);
     });
-    reconcileRowOrder(this.list, orderedRows.map(row => row.slot));
+    reconcileRowOrder(this.list, this.orderedRows, orderedRows);
+    this.orderedRows = orderedRows;
 
     this.updateLoadMore(options.totalCount, options.loadLimit);
 
@@ -81,6 +101,7 @@ export class EntryListView {
   private showMessage(message: string): void {
     this.list = null;
     this.rows.clear();
+    this.orderedRows = [];
     this.element.replaceChildren(element('div', 'empty-state', message));
   }
 
@@ -134,36 +155,57 @@ export class EntryListView {
     const mark = button('', 'btn-icon btn-mark');
     mark.append(icon('circle-filled'));
     mark.dataset.mark = entry.id;
+    mark.setAttribute('aria-label', 'Read entry');
     actions.append(star, mark);
 
     card.append(checkboxLabel, leading, content, actions);
     slot.append(card);
-    return { slot, card };
+    return {
+      slot,
+      card,
+      checkbox,
+      titleSlot,
+      titleNode: null,
+      metadata,
+      star,
+      mark,
+      rendered: null,
+    };
   }
 
-  private updateRow(row: EntryRow, entry: EnrichedEntry, index: number, options: EntryListOptions): void {
+  private updateRow(
+    row: EntryRow,
+    entry: EnrichedEntry,
+    index: number,
+    options: EntryListOptions,
+  ): void {
     const read = !!entry.state?.read;
     const starred = !!entry.state?.starred;
     const selected = options.selectedIds.has(entry.id);
     const focused = options.focusedEntryId === entry.id;
-    row.slot.dataset.id = entry.id;
-    row.card.className = `entry-card ${read ? 'entry-read' : 'entry-unread'}${selected ? ' entry-selected' : ''}${focused ? ' entry-focused' : ''}`;
-    row.card.dataset.id = entry.id;
-    row.card.dataset.idx = String(index);
+    const title = entry.title || 'Untitled';
+    const previous = row.rendered;
 
-    const checkbox = row.card.querySelector<HTMLInputElement>('[data-select]');
-    if (checkbox) {
-      checkbox.dataset.select = entry.id;
-      checkbox.checked = selected;
-      checkbox.setAttribute('aria-label', `Select ${entry.title || 'entry'}`);
+    if (!previous) {
+      row.slot.dataset.id = entry.id;
+      row.card.dataset.id = entry.id;
+      row.checkbox.dataset.select = entry.id;
+      row.star.dataset.star = entry.id;
+      row.mark.dataset.mark = entry.id;
     }
+    if (!previous || previous.index !== index) row.card.dataset.idx = String(index);
 
-    const titleSlot = row.card.querySelector<HTMLElement>('.entry-title-slot');
-    if (titleSlot) {
-      const safeUrl = safeHttpUrl(entry.url);
-      const title = entry.title || 'Untitled';
-      const current = titleSlot.firstElementChild;
+    if (!previous || previous.read !== read || previous.selected !== selected || previous.focused !== focused) {
+      row.card.className = `entry-card ${read ? 'entry-read' : 'entry-unread'}${selected ? ' entry-selected' : ''}${focused ? ' entry-focused' : ''}`;
+    }
+    if (!previous || previous.selected !== selected) row.checkbox.checked = selected;
+    if (!previous || previous.title !== title) row.checkbox.setAttribute('aria-label', `Select ${entry.title || 'entry'}`);
+
+    const titleChanged = !previous || previous.title !== title || previous.url !== entry.url;
+    const safeUrl = titleChanged ? safeHttpUrl(entry.url) : previous.safeUrl;
+    if (titleChanged) {
       const needsLink = !!safeUrl;
+      const current = row.titleNode;
       const titleNode = current && (needsLink ? current instanceof HTMLAnchorElement : current instanceof HTMLSpanElement)
         ? current
         : needsLink ? element('a') : element('span');
@@ -176,35 +218,61 @@ export class EntryListView {
         titleNode.rel = 'noopener';
         titleNode.dataset.entryLink = entry.id;
       }
-      if (titleNode !== current) titleSlot.replaceChildren(titleNode);
+      if (titleNode !== current) row.titleSlot.replaceChildren(titleNode);
+      row.titleNode = titleNode;
     }
 
-    const metadata = row.card.querySelector<HTMLElement>('.entry-meta');
-    if (metadata) metadata.textContent = `${entry.feedLabel || 'Unknown'} · ${timeAgo(entry.published)}`;
-
-    const star = row.card.querySelector<HTMLButtonElement>('.btn-star');
-    if (star) {
-      star.dataset.star = entry.id;
-      star.classList.toggle('starred', starred);
-      setIcon(star, starred ? 'star-filled' : 'star');
-      star.setAttribute('aria-pressed', String(starred));
-      star.title = starred ? 'Unstar' : 'Star';
-      star.setAttribute('aria-label', 'Star entry');
+    if (!previous || previous.feedLabel !== entry.feedLabel || previous.published !== entry.published) {
+      row.metadata.textContent = `${entry.feedLabel || 'Unknown'} · ${timeAgo(entry.published)}`;
     }
-    const mark = row.card.querySelector<HTMLButtonElement>('.btn-mark');
-    if (mark) {
-      mark.dataset.mark = entry.id;
-      setIcon(mark, read ? 'circle' : 'circle-filled');
-      mark.title = read ? 'Mark unread' : 'Mark read';
-      mark.setAttribute('aria-label', 'Read entry');
-      mark.setAttribute('aria-pressed', String(read));
+
+    if (!previous || previous.starred !== starred) {
+      row.star.classList.toggle('starred', starred);
+      setIcon(row.star, starred ? 'star-filled' : 'star');
+      row.star.setAttribute('aria-pressed', String(starred));
+      row.star.title = starred ? 'Unstar' : 'Star';
+    }
+    if (!previous || previous.read !== read) {
+      setIcon(row.mark, read ? 'circle' : 'circle-filled');
+      row.mark.title = read ? 'Mark unread' : 'Mark read';
+      row.mark.setAttribute('aria-pressed', String(read));
+    }
+
+    if (previous) {
+      previous.index = index;
+      previous.read = read;
+      previous.starred = starred;
+      previous.selected = selected;
+      previous.focused = focused;
+      previous.title = title;
+      previous.url = entry.url;
+      previous.safeUrl = safeUrl;
+      previous.feedLabel = entry.feedLabel;
+      previous.published = entry.published;
+    } else {
+      row.rendered = {
+        index,
+        read,
+        starred,
+        selected,
+        focused,
+        title,
+        url: entry.url,
+        safeUrl,
+        feedLabel: entry.feedLabel,
+        published: entry.published,
+      };
     }
   }
 }
 
-function reconcileRowOrder(list: HTMLDivElement, rows: readonly HTMLDivElement[]): void {
-  rows.forEach((row, index) => {
+function reconcileRowOrder(list: HTMLDivElement, previous: readonly EntryRow[], rows: readonly EntryRow[]): void {
+  let index = 0;
+  const stableLength = Math.min(previous.length, rows.length);
+  while (index < stableLength && previous[index] === rows[index]) index++;
+  for (; index < rows.length; index++) {
+    const row = rows[index]!.slot;
     const current = list.children.item(index);
     if (current !== row) list.insertBefore(row, current);
-  });
+  }
 }

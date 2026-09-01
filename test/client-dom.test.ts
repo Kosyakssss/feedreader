@@ -458,6 +458,31 @@ describe('client orchestration', () => {
 });
 
 describe('keyed entry rendering and motion', () => {
+  test('updates existing rows through cached nodes', () => {
+    const view = new EntryListView();
+    document.querySelector('#app')!.append(view.element);
+    const item = entry('cached');
+    const options = {
+      loading: false,
+      selectedIds: new Set<string>(),
+      focusedEntryId: null,
+      totalCount: 1,
+      loadLimit: 50,
+    };
+    view.update([item], options);
+    const card = view.element.querySelector<HTMLElement>('.entry-card')!;
+    card.querySelector = () => { throw new Error('existing card was queried again'); };
+
+    item.title = 'Changed title';
+    item.state.starred = true;
+    view.update([item], { ...options, selectedIds: new Set(['cached']) });
+
+    expect(card.querySelector).toBeDefined();
+    expect(view.element.querySelector('.entry-title')?.textContent).toBe('Changed title');
+    expect(view.element.querySelector<HTMLInputElement>('[data-select="cached"]')?.checked).toBe(true);
+    expect(view.element.querySelector('[data-star="cached"]')?.classList.contains('starred')).toBe(true);
+  });
+
   test('preserves existing nodes, inserts in the middle, and animates the new row', () => {
     const prototype = HTMLElement.prototype as HTMLElement & {
       animate: (frames: Keyframe[] | PropertyIndexedKeyframes, options?: number | KeyframeAnimationOptions) => Animation;

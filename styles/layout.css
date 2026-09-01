@@ -83,6 +83,8 @@ body {
 .entry-slot {
   flex: none;
   min-height: 0;
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 58px;
 }
 
 .entry-slot.is-revealing {
