@@ -116,6 +116,33 @@ describe('client orchestration', () => {
     expect(document.querySelector('[data-id="loaded"]')).not.toBeNull();
   });
 
+  test('applies pushed state changes and resynchronizes missed shared events', async () => {
+    const app = renderedApp(client({
+      entries: async () => [entry('remote', { starred: true, starredAt: 20 })],
+      feeds: async () => ({
+        folders: [],
+        feeds: [{ id: 'feed', url: 'https://example.com/feed.xml', label: 'Remote feed', folderId: null }],
+        health: {},
+      }),
+      refreshStatus: async () => status(),
+    }));
+    const shared = app as unknown as {
+      receiveSharedEvent(raw: string): void;
+      sharedSyncJob: Promise<void> | null;
+    };
+
+    shared.receiveSharedEvent(JSON.stringify({
+      topics: ['entry-state'],
+      entryStates: { one: { read: true, readAt: 10 } },
+    }));
+    expect(app.state.entries[0]?.state?.read).toBe(true);
+
+    shared.receiveSharedEvent(JSON.stringify({ topics: ['sync'] }));
+    await shared.sharedSyncJob;
+    expect(app.state.entries.map(value => value.id)).toEqual(['remote']);
+    expect(app.state.feeds.feeds[0]?.label).toBe('Remote feed');
+  });
+
   test('checkbox, star, and read controls dispatch real app actions', async () => {
     const updates: Record<string, { read?: boolean; starred?: boolean }>[] = [];
     const app = renderedApp(client({

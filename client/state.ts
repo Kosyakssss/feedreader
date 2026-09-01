@@ -1,4 +1,4 @@
-import type { Config, EnrichedEntry, Feed, FeedsFile } from '../lib/types.ts';
+import type { Config, EnrichedEntry, EntryState, Feed, FeedsFile } from '../lib/types.ts';
 
 export type EntryFilter = 'all' | 'unread' | 'read';
 
@@ -42,6 +42,13 @@ export interface RefreshStatus {
   newEntries: EnrichedEntry[];
   feedResults: FeedResultChange[];
   removedIds: string[];
+}
+
+export type SharedTopic = 'sync' | 'refresh' | 'entries' | 'feeds' | 'config' | 'entry-state';
+
+export interface SharedEventPayload {
+  topics: SharedTopic[];
+  entryStates?: Record<string, EntryState>;
 }
 
 export interface FeedAddState {

@@ -92,6 +92,7 @@ All runtime data lives in `data/`. The feed list and system theme are versioned;
 - **OPML import**: paste or upload OPML to add feeds in bulk; unsafe/local URLs are skipped
 - **Incremental rendering**: keyed DOM reconciliation preserves entry identity, while targeted Web Animations reveal only newly inserted entries
 - **Keyed live updates**: refreshed entries appear at their sorted position without rebuilding unchanged rows or moving a scrolled reading position
+- **Live UI synchronization**: refresh progress and saved changes stream to every connected browser instance through native server-sent events
 - **Retention**: default 3000 entries, configurable by count and/or max days (whichever hits first)
 
 ## API Notes

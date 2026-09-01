@@ -107,6 +107,40 @@ describe('server hardening', () => {
     expect(typeof body.refreshing).toBe('boolean');
   });
 
+  test('streams an initial snapshot signal and subsequent shared-state changes', async () => {
+    const abort = new AbortController();
+    const res = await fetch(`http://127.0.0.1:${port}/api/events`, { signal: abort.signal });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let received = '';
+
+    const readUntil = async (text: string): Promise<void> => {
+      const deadline = Date.now() + 3000;
+      while (!received.includes(text) && Date.now() < deadline) {
+        const next = await reader.read();
+        if (next.done) break;
+        received += decoder.decode(next.value, { stream: true });
+      }
+      expect(received).toContain(text);
+    };
+
+    try {
+      await readUntil('"topics":["sync"]');
+      const update = await fetch(`http://127.0.0.1:${port}/api/config`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ maxBulkOpen: 20 }),
+      });
+      expect(update.status).toBe(200);
+      await readUntil('"topics":["config"]');
+    } finally {
+      abort.abort();
+      await reader.cancel().catch(() => undefined);
+    }
+  });
+
   test('rejects cross-origin mutating requests', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/refresh`, {
       method: 'POST',

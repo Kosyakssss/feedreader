@@ -27,10 +27,77 @@ const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 const MAX_ENTRY_DELTAS = 500;
 const MAX_FEED_DELTAS = 250;
+const SSE_KEEPALIVE_MS = 15_000;
 let allowedHosts = new Set<string>();
 let allowedOrigins = new Set<string>();
 let clientAssets: ClientAssets | null = null;
 let entriesSnapshot: { fingerprint: string; asset: EncodedAsset } | null = null;
+
+type SharedTopic = 'sync' | 'refresh' | 'entries' | 'feeds' | 'config' | 'entry-state';
+
+interface SharedEventPayload {
+  topics: SharedTopic[];
+  entryStates?: Record<string, EntryState>;
+}
+
+const sharedEventEncoder = new TextEncoder();
+const sharedEventSubscribers = new Set<ReadableStreamDefaultController<Uint8Array>>();
+let sharedEventId = 0;
+
+function sharedEventChunk(id: number, payload: SharedEventPayload): Uint8Array {
+  return sharedEventEncoder.encode(`id: ${id}\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+
+function enqueueSharedEvent(
+  subscriber: ReadableStreamDefaultController<Uint8Array>,
+  chunk: Uint8Array,
+): boolean {
+  try {
+    subscriber.enqueue(chunk);
+    return true;
+  } catch {
+    sharedEventSubscribers.delete(subscriber);
+    return false;
+  }
+}
+
+function publishSharedEvent(payload: SharedEventPayload): void {
+  const chunk = sharedEventChunk(++sharedEventId, payload);
+  for (const subscriber of sharedEventSubscribers) enqueueSharedEvent(subscriber, chunk);
+}
+
+function sharedEventsResponse(req: Request, server: Bun.Server<undefined>): Response {
+  server.timeout(req, 0);
+  let cleanup = () => {};
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let closed = false;
+      const keepalive = setInterval(() => {
+        enqueueSharedEvent(controller, sharedEventEncoder.encode(': keepalive\n\n'));
+      }, SSE_KEEPALIVE_MS);
+      keepalive.unref?.();
+      cleanup = () => {
+        if (closed) return;
+        closed = true;
+        clearInterval(keepalive);
+        sharedEventSubscribers.delete(controller);
+      };
+      sharedEventSubscribers.add(controller);
+      enqueueSharedEvent(controller, sharedEventEncoder.encode('retry: 2000\n'));
+      enqueueSharedEvent(controller, sharedEventChunk(sharedEventId, { topics: ['sync'] }));
+      req.signal.addEventListener('abort', cleanup, { once: true });
+    },
+    cancel() {
+      cleanup();
+    },
+  });
+  return new Response(stream, { headers: {
+    'cache-control': 'no-cache, no-transform',
+    'connection': 'keep-alive',
+    'content-type': 'text/event-stream; charset=utf-8',
+    'x-accel-buffering': 'no',
+  }});
+}
 
 function configureTrust(port: number, trustedOrigins: readonly string[]): void {
   allowedHosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`]);
@@ -209,6 +276,7 @@ async function refreshFeeds(progress: RefreshProgress, initialFeedIds?: Readonly
         });
         progress.added++;
       }
+      publishSharedEvent({ topics: ['refresh'] });
     });
   }
 
@@ -239,6 +307,7 @@ async function refreshFeeds(progress: RefreshProgress, initialFeedIds?: Readonly
       for (const id of merged.removedIds) removedIds.add(id);
       progress.added = added;
       progress.removedIds = [...removedIds];
+      publishSharedEvent({ topics: ['refresh'] });
     }
 
     if (!queuedRefreshRequests.pending) return added;
@@ -349,6 +418,7 @@ function startRefresh(feedIds?: readonly string[]): Promise<number> {
     removedIds: [],
   };
   refreshProgress = progress;
+  publishSharedEvent({ topics: ['refresh'] });
   refreshJob = refreshFeeds(progress, requestedIds)
     .then(count => {
       progress.finishedAt = Date.now();
@@ -367,6 +437,7 @@ function startRefresh(feedIds?: readonly string[]): Promise<number> {
       refreshJob = null;
       activeRefreshFeedIds = new Set();
       queuedRefreshRequests.clear();
+      publishSharedEvent({ topics: ['refresh'] });
     });
   return refreshJob;
 }
@@ -609,6 +680,15 @@ async function updateEntryState(req: Request): Promise<Response> {
       return state;
     }, cache);
   });
+  const entryStates: Record<string, EntryState> = Object.create(null);
+  for (const [id, update] of Object.entries(updates)) {
+    entryStates[id] = {
+      ...update,
+      ...(update.read !== undefined ? { readAt: now } : {}),
+      ...(update.starred !== undefined ? { starredAt: now } : {}),
+    };
+  }
+  publishSharedEvent({ topics: ['entry-state'], entryStates });
   return json({ ok: true });
 }
 
@@ -661,7 +741,9 @@ function parseConfigPatch(body: unknown): ConfigPatch {
 
 async function updateConfig(req: Request): Promise<Response> {
   const patch = parseConfigPatch(await parseJSONBody(req));
-  return json(await writeConfig(patch));
+  const config = await writeConfig(patch);
+  publishSharedEvent({ topics: ['config'] });
+  return json(config);
 }
 
 async function addFeed(req: Request, server: Bun.Server<undefined>): Promise<Response> {
@@ -688,6 +770,7 @@ async function addFeed(req: Request, server: Bun.Server<undefined>): Promise<Res
   const completedAt = Date.now();
   await mergeFeedResults([{ feed: created, result, completedAt }], new Set(), created);
   const entries = await getEntries(created.id);
+  publishSharedEvent({ topics: ['feeds', 'entries'] });
   return json({
     feed: created,
     entries,
@@ -709,6 +792,7 @@ async function deleteFeed(id: string): Promise<Response> {
     for (const removedId of removedIds) delete state[removedId];
     await writeDataFiles({ 'feeds.json': feedsFile, 'cache.json': cache, 'state.json': state });
   });
+  publishSharedEvent({ topics: ['feeds', 'entries'] });
   return json({ ok: true });
 }
 
@@ -754,6 +838,7 @@ async function importFeeds(req: Request): Promise<Response> {
     return created;
   });
   if (addedFeeds.length > 0) {
+    publishSharedEvent({ topics: ['feeds'] });
     void startRefresh(addedFeeds.map(feed => feed.id)).catch(error => console.error('Imported feed scan error:', error));
   }
   return json({ feeds: addedFeeds, added: addedFeeds.length, skipped: imported.length - addedFeeds.length });
@@ -795,6 +880,10 @@ async function handleRequest(req: Request, server: Bun.Server<undefined>): Promi
     if (path === '/api/entries' && method === 'GET') {
       const feed = url.searchParams.get('feed') || undefined;
       return await entriesResponse(req, feed);
+    }
+
+    if (path === '/api/events' && method === 'GET') {
+      return sharedEventsResponse(req, server);
     }
 
     if (path === '/api/refresh' && method === 'POST') {
@@ -867,7 +956,7 @@ async function handleRequest(req: Request, server: Bun.Server<undefined>): Promi
 
     if (path.startsWith('/api/')) {
       // Known API resources respond 405 (not 404) on wrong methods.
-      const known = ['/api/health', '/api/entries', '/api/refresh', '/api/refresh/status', '/api/state',
+      const known = ['/api/health', '/api/entries', '/api/events', '/api/refresh', '/api/refresh/status', '/api/state',
         '/api/feeds', '/api/feeds/import', '/api/feeds/export', '/api/config', '/api/theme'];
       const isKnownResource = known.includes(path) || /^\/api\/feeds\/[^/]+$/.test(path);
       return err(isKnownResource ? 'Method not allowed' : 'Not found', isKnownResource ? 405 : 404);

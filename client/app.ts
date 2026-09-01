@@ -2,10 +2,12 @@ import type { EnrichedEntry, EntryState } from '../lib/types.ts';
 import { api, type FeedreaderApi } from './api.ts';
 import { RefreshPoller } from './refresh.ts';
 import { animateFeedRemoval } from './motion/feeds.ts';
-import { internalPath, pushRoute } from './router.ts';
+import { externalPath, internalPath, pushRoute } from './router.ts';
 import {
   type AppState,
   type EntryFilter,
+  type SharedEventPayload,
+  type SharedTopic,
   createInitialState,
   filteredEntries,
   mergeRefreshEntries,
@@ -29,6 +31,10 @@ export class FeedreaderApp {
   private stateResyncNeeded = false;
   private feedAddAttempt = 0;
   private feedAddRevealTimer: number | null = null;
+  private sharedEvents: EventSource | null = null;
+  private sharedSyncJob: Promise<void> | null = null;
+  private readonly pendingSharedTopics = new Set<SharedTopic>();
+  private sharedEntriesResyncNeeded = false;
 
   constructor(root: HTMLElement, client: FeedreaderApi = api) {
     this.state = createInitialState(internalPath(location.pathname));
@@ -62,6 +68,8 @@ export class FeedreaderApp {
       this.shell.toast(`Could not load saved data: ${errorMessage(error)}`);
       return;
     }
+
+    this.connectSharedEvents();
 
     try {
       await this.refresh();
@@ -500,6 +508,114 @@ export class FeedreaderApp {
     });
   }
 
+  private connectSharedEvents(): void {
+    if (this.sharedEvents || typeof EventSource === 'undefined') return;
+    const events = new EventSource(externalPath('/api/events'));
+    events.onmessage = event => this.receiveSharedEvent(event.data);
+    this.sharedEvents = events;
+  }
+
+  private receiveSharedEvent(raw: string): void {
+    let payload: SharedEventPayload;
+    try {
+      payload = JSON.parse(raw) as SharedEventPayload;
+    } catch {
+      return;
+    }
+    if (!Array.isArray(payload.topics)) return;
+
+    if (payload.topics.includes('entry-state') && payload.entryStates) {
+      let changed = false;
+      for (const [id, update] of Object.entries(payload.entryStates)) {
+        const entry = this.entry(id);
+        if (!entry) continue;
+        const current = entry.state ?? {};
+        const next = { ...current };
+        if (update.read !== undefined && (update.readAt ?? 0) >= (current.readAt ?? 0)) {
+          next.read = update.read;
+          next.readAt = update.readAt;
+        }
+        if (update.starred !== undefined && (update.starredAt ?? 0) >= (current.starredAt ?? 0)) {
+          next.starred = update.starred;
+          next.starredAt = update.starredAt;
+        }
+        entry.state = next;
+        changed = true;
+      }
+      if (changed) this.render();
+    }
+
+    const reloadTopics = payload.topics.filter(topic => topic !== 'entry-state');
+    if (reloadTopics.length > 0) this.queueSharedSync(reloadTopics);
+  }
+
+  private queueSharedSync(topics: readonly SharedTopic[]): void {
+    for (const topic of topics) this.pendingSharedTopics.add(topic);
+    if (this.sharedSyncJob) return;
+    const job = this.drainSharedSync().catch(error => {
+      console.warn('Could not synchronize shared UI state:', error);
+    }).finally(() => {
+      if (this.sharedSyncJob === job) this.sharedSyncJob = null;
+      if (this.pendingSharedTopics.size > 0) this.queueSharedSync([]);
+    });
+    this.sharedSyncJob = job;
+  }
+
+  private async drainSharedSync(): Promise<void> {
+    while (this.pendingSharedTopics.size > 0) {
+      const topics = new Set(this.pendingSharedTopics);
+      this.pendingSharedTopics.clear();
+      const fullSync = topics.has('sync');
+      const reloadEntries = fullSync || topics.has('entries');
+      const reloadFeeds = fullSync || topics.has('feeds');
+      const reloadConfig = fullSync || topics.has('config');
+
+      const entriesRequest = reloadEntries && this.pendingEntryMutations === 0
+        ? this.client.entries()
+        : null;
+      if (reloadEntries && !entriesRequest) this.sharedEntriesResyncNeeded = true;
+      const feedsRequest = reloadFeeds ? this.client.feeds() : null;
+      const configRequest = reloadConfig ? this.client.config() : null;
+      const [entries, feeds, config] = await Promise.all([
+        entriesRequest, feedsRequest, configRequest,
+      ]);
+
+      if (entries) {
+        this.state.entries = entries;
+        reconcileTransientState(this.state);
+      }
+      if (feeds) this.state.feeds = feeds;
+      if (config) this.state.config = { ...this.state.config, ...config };
+      if (entries || feeds || config) this.render({ rebuild: reloadFeeds && this.state.page.startsWith('/feed/') });
+
+      if (fullSync || topics.has('refresh') || topics.has('entries')) {
+        await this.syncRefreshStatus(fullSync || topics.has('entries'));
+      }
+    }
+  }
+
+  private async syncRefreshStatus(fromStart: boolean): Promise<void> {
+    if (fromStart) {
+      this.state.refreshCursor = 0;
+      this.state.feedRefreshCursor = 0;
+    }
+    while (true) {
+      const priorRunId = this.state.refreshRunId;
+      const requestedCursor = this.state.refreshCursor;
+      const requestedFeedCursor = this.state.feedRefreshCursor;
+      let status = await this.client.refreshStatus(requestedCursor, requestedFeedCursor);
+      if (status.runId && priorRunId && status.runId !== priorRunId &&
+        (requestedCursor > 0 || requestedFeedCursor > 0)) {
+        this.state.refreshCursor = 0;
+        this.state.feedRefreshCursor = 0;
+        status = await this.client.refreshStatus(0, 0);
+      }
+      this.applyRefreshStatus(status);
+      const receivedDeltas = status.newEntries.length > 0 || status.feedResults.length > 0;
+      if (!status.refreshing || !receivedDeltas) return;
+    }
+  }
+
   private setRefreshError(error: unknown): void {
     this.state.refreshStatus = {
       count: 0,
@@ -563,6 +679,10 @@ export class FeedreaderApp {
       if (this.pendingEntryMutations === 0 && this.stateResyncNeeded) {
         this.stateResyncNeeded = false;
         await this.resyncEntryStates();
+      }
+      if (this.pendingEntryMutations === 0 && this.sharedEntriesResyncNeeded) {
+        this.sharedEntriesResyncNeeded = false;
+        this.queueSharedSync(['entries', 'refresh']);
       }
     }
   }
