@@ -1,4 +1,4 @@
-import type { Config, EnrichedEntry, Feed } from '../lib/types.ts';
+import type { Config, EnrichedEntry, EntryState, Feed } from '../lib/types.ts';
 import { externalPath } from './router.ts';
 import type { FeedData, FeedHealth, RefreshStatus } from './state.ts';
 
@@ -35,7 +35,7 @@ export const api = {
   refreshStatus: (cursor: number, feedCursor: number) =>
     request<RefreshStatus>('GET', `/api/refresh/status?since=${cursor}&feedsSince=${feedCursor}`),
   updateEntries: (entries: Record<string, { read?: boolean; starred?: boolean }>) =>
-    request<{ ok: boolean }>('POST', '/api/state', { entries }),
+    request<{ ok: boolean; entryStates?: Record<string, EntryState> }>('POST', '/api/state', { entries }),
   addFeed: (url: string) => request<{ feed: Feed; entries: EnrichedEntry[]; health: FeedHealth }>('POST', '/api/feeds', { url: url.trim() }),
   deleteFeed: (id: string) => request<{ ok: boolean }>('DELETE', `/api/feeds/${encodeURIComponent(id)}`),
   importFeeds: (body: FormData) => request<{ feeds: Feed[]; added: number; skipped: number }>('POST', '/api/feeds/import', body),

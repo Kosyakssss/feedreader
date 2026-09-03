@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test';
 
 import { exceedsSelectionDragThreshold } from '../client/interactions.ts';
 import { activeRefreshSegment, filledRefreshSegments } from '../client/refresh-progress.ts';
-import { mergeRefreshEntries } from '../client/state.ts';
+import { mergeEntrySnapshots, mergeRefreshEntries } from '../client/state.ts';
 import { renderApp } from '../lib/render.ts';
-import type { EnrichedEntry } from '../lib/types.ts';
+import type { EnrichedEntry, EntryState } from '../lib/types.ts';
 
 describe('refresh progress segments', () => {
   test('each segment is always entirely empty or entirely filled', () => {
@@ -64,6 +64,14 @@ describe('refresh entry reconciliation', () => {
     expect(result.entries).toEqual([updated]);
     expect(result.newIds.size).toBe(0);
   });
+
+  test('preserves newer state across stale deltas and snapshots', () => {
+    const current = entry('same', '2026-08-24T10:00:00Z', { read: true, readAt: 200 });
+    const stale = entry('same', '2026-08-24T10:00:00Z', { read: false, readAt: 100 });
+
+    expect(mergeRefreshEntries([current], [stale]).entries[0]?.state).toEqual({ read: true, readAt: 200 });
+    expect(mergeEntrySnapshots([current], [stale])[0]?.state).toEqual({ read: true, readAt: 200 });
+  });
 });
 
 describe('selection gesture threshold', () => {
@@ -96,7 +104,7 @@ describe('code-native interface icons', () => {
   });
 });
 
-function entry(id: string, published: string): EnrichedEntry {
+function entry(id: string, published: string, state: EntryState = {}): EnrichedEntry {
   return {
     id,
     feedId: 'feed',
@@ -104,6 +112,6 @@ function entry(id: string, published: string): EnrichedEntry {
     title: id,
     url: `https://example.com/${id}`,
     published,
-    state: {},
+    state,
   };
 }

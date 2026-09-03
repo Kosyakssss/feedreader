@@ -204,6 +204,18 @@ describe('client orchestration', () => {
     expect(updates).toEqual([{ one: { starred: true } }, { one: { read: true } }]);
   });
 
+  test('replaces optimistic timestamps with authoritative server timestamps', async () => {
+    const app = renderedApp(client({
+      updateEntries: async () => ({
+        ok: true,
+        entryStates: { one: { read: true, readAt: 10 } },
+      }),
+    }));
+
+    await app.toggleRead('one');
+    expect(app.state.entries[0]?.state).toEqual({ read: true, readAt: 10 });
+  });
+
   test('touch movement crosses the drag threshold and ends cleanly', () => {
     const app = renderedApp();
     const checkbox = document.querySelector<HTMLInputElement>('[data-select="one"]')!;

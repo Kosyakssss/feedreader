@@ -401,6 +401,11 @@ describe('server hardening', () => {
     try {
       const responses = await Promise.all(requests);
       expect(responses.every(response => response.status === 200)).toBe(true);
+      const first = await responses[0]!.json() as {
+        entryStates: Record<string, { read?: boolean; readAt?: number }>;
+      };
+      expect(first.entryStates['f:a']?.read).toBe(true);
+      expect(typeof first.entryStates['f:a']?.readAt).toBe('number');
       const state = JSON.parse(await readFile(statePath, 'utf-8')) as Record<string, { read?: boolean; starred?: boolean }>;
       expect(state['f:a']?.read).toBe(true);
       expect(state['f:b']?.starred).toBe(true);

@@ -708,7 +708,7 @@ async function updateEntryState(req: Request): Promise<Response> {
     };
   }
   publishSharedEvent({ topics: ['entry-state'], entryStates });
-  return json({ ok: true });
+  return json({ ok: true, entryStates });
 }
 
 function parseConfigPatch(body: unknown): ConfigPatch {

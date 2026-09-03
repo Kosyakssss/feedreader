@@ -10,6 +10,8 @@ import {
   type SharedTopic,
   createInitialState,
   filteredEntries,
+  mergeEntrySnapshots,
+  mergeEntryState,
   mergeRefreshEntries,
   reconcileTransientState,
   safeHttpUrl,
@@ -546,17 +548,7 @@ export class FeedreaderApp {
       for (const [id, update] of Object.entries(payload.entryStates)) {
         const entry = this.entry(id);
         if (!entry) continue;
-        const current = entry.state ?? {};
-        const next = { ...current };
-        if (update.read !== undefined && (update.readAt ?? 0) >= (current.readAt ?? 0)) {
-          next.read = update.read;
-          next.readAt = update.readAt;
-        }
-        if (update.starred !== undefined && (update.starredAt ?? 0) >= (current.starredAt ?? 0)) {
-          next.starred = update.starred;
-          next.starredAt = update.starredAt;
-        }
-        entry.state = next;
+        entry.state = mergeEntryState(entry.state, update);
         changed = true;
       }
       if (changed) this.render();
@@ -598,7 +590,7 @@ export class FeedreaderApp {
       ]);
 
       if (entries) {
-        this.state.entries = entries;
+        this.state.entries = mergeEntrySnapshots(this.state.entries, entries);
         reconcileTransientState(this.state);
       }
       if (feeds) this.state.feeds = feeds;
@@ -677,7 +669,15 @@ export class FeedreaderApp {
     this.pendingEntryMutations += 1;
     this.render();
     try {
-      await this.client.updateEntries(payload);
+      const result = await this.client.updateEntries(payload);
+      if (result.entryStates) {
+        for (const [id, state] of Object.entries(result.entryStates)) {
+          if (this.entryMutationVersions.get(id) !== versions.get(id)) continue;
+          const entry = this.entry(id);
+          if (entry) entry.state = { ...entry.state, ...state };
+        }
+        this.render();
+      }
       return true;
     } catch (error) {
       for (const [id, state] of previous) {

@@ -171,6 +171,35 @@ export function reconcileTransientState(state: AppState): void {
   if (state.selectionAnchorId && !entryIds.has(state.selectionAnchorId)) state.selectionAnchorId = null;
 }
 
+function acceptsEntryState(currentAt: number | undefined, incomingAt: number | undefined): boolean {
+  return currentAt === undefined || (incomingAt !== undefined && incomingAt >= currentAt);
+}
+
+export function mergeEntryState(current: EntryState = {}, incoming: EntryState = {}): EntryState {
+  const merged = { ...current };
+  if (incoming.read !== undefined && acceptsEntryState(current.readAt, incoming.readAt)) {
+    merged.read = incoming.read;
+    merged.readAt = incoming.readAt;
+  }
+  if (incoming.starred !== undefined && acceptsEntryState(current.starredAt, incoming.starredAt)) {
+    merged.starred = incoming.starred;
+    merged.starredAt = incoming.starredAt;
+  }
+  return merged;
+}
+
+function mergeEntry(current: EnrichedEntry | undefined, incoming: EnrichedEntry): EnrichedEntry {
+  return current ? { ...incoming, state: mergeEntryState(current.state, incoming.state) } : incoming;
+}
+
+export function mergeEntrySnapshots(
+  current: readonly EnrichedEntry[],
+  incoming: readonly EnrichedEntry[],
+): EnrichedEntry[] {
+  const currentById = new Map(current.map(entry => [entry.id, entry]));
+  return incoming.map(entry => mergeEntry(currentById.get(entry.id), entry));
+}
+
 export function mergeRefreshEntries(
   current: readonly EnrichedEntry[],
   updates: readonly EnrichedEntry[],
@@ -179,8 +208,9 @@ export function mergeRefreshEntries(
   const byId = new Map(current.map(entry => [entry.id, entry]));
   const newIds = new Set<string>();
   for (const entry of updates) {
-    if (!byId.has(entry.id)) newIds.add(entry.id);
-    byId.set(entry.id, entry);
+    const currentEntry = byId.get(entry.id);
+    if (!currentEntry) newIds.add(entry.id);
+    byId.set(entry.id, mergeEntry(currentEntry, entry));
   }
   const entries = [...byId.values()].sort((a, b) => Date.parse(b.published) - Date.parse(a.published));
   return { entries, newIds };
