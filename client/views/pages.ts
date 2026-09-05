@@ -46,6 +46,7 @@ export class PageView {
       this.root.replaceChildren(this.mounted.node);
     }
 
+    if (key === 'settings') this.updateSettings(state);
     if (key === 'feeds') updateFeedsPage(state, this.mounted.node, options);
     this.updateToolbar(state, this.mounted.node);
     const list = this.mounted.entryList;
@@ -60,6 +61,16 @@ export class PageView {
         newIds: options.newIds,
         animate: options.animate,
       });
+    }
+  }
+
+  updateSettings(state: AppState): void {
+    if (this.mounted?.key !== 'settings') return;
+    this.mounted.node.querySelector<HTMLButtonElement>('button[type=submit]')!.disabled = state.initialDataLoading;
+    const values = { maxBulkOpen: state.config.maxBulkOpen, ...state.config.retention };
+    for (const [name, value] of Object.entries(values)) {
+      const input = this.mounted.node.querySelector<HTMLInputElement>(`[name="${name}"]`);
+      if (input && (input.value === input.defaultValue || input.value === String(value ?? ''))) input.value = input.defaultValue = String(value ?? '');
     }
   }
 
@@ -529,7 +540,7 @@ function settingsField(labelText: string, name: string, value: number | string, 
   input.name = name;
   input.type = 'number';
   input.min = String(min);
-  input.value = String(value);
+  input.value = input.defaultValue = String(value);
   label.htmlFor = `setting-${name}`;
   input.id = `setting-${name}`;
   field.append(label, input);

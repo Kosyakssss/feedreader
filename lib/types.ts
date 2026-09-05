@@ -62,5 +62,51 @@ export interface EnrichedEntry extends Entry {
 export interface FeedCacheMeta {
   etag?: string;
   lastModified?: string;
-  failureCount?: number;
 }
+
+export const DEFAULT_CONFIG: Config = {
+  maxBulkOpen: 20,
+  retention: { maxEntries: 3000, maxDays: null },
+  theme: 'system',
+  port: 8787,
+  trustedOrigins: [],
+};
+
+interface RefreshFailure {
+  feedId: string;
+  label: string;
+  error: string;
+}
+
+export interface FeedResultChange {
+  sequence: number;
+  feedId: string;
+  entryCount: number | null;
+  error: string | null;
+  completedAt: number;
+}
+
+export interface RefreshStatus {
+  count: number;
+  refreshing: boolean;
+  error: string | null;
+  runId: string | null;
+  total: number;
+  completed: number;
+  succeeded: number;
+  failed: number;
+  failures: RefreshFailure[];
+  cursor: number;
+  feedCursor: number;
+  newEntries: EnrichedEntry[];
+  feedResults: FeedResultChange[];
+  removedIds: string[];
+}
+
+export type SharedTopic = 'sync' | 'refresh' | 'entries' | 'feeds' | 'config' | 'entry-state';
+
+export interface SharedEventPayload {
+  topics: SharedTopic[];
+  entryStates?: Record<string, EntryState>;
+}
+

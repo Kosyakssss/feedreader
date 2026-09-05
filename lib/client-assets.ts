@@ -47,7 +47,7 @@ export function encodedResponse(
   req: Request,
   asset: EncodedAsset,
   contentType: string,
-  options: { allowRange?: boolean; cacheControl?: string } = {},
+  options: { cacheControl?: string } = {},
 ): Response {
   const headers = new Headers({
     'cache-control': options.cacheControl ?? 'no-cache',
@@ -55,18 +55,7 @@ export function encodedResponse(
     etag: asset.etag,
     vary: 'accept-encoding',
   });
-  if (options.allowRange) headers.set('accept-ranges', 'bytes');
   if (req.headers.get('if-none-match') === asset.etag) return new Response(null, { status: 304, headers });
-
-  const range = options.allowRange ? parseRange(req.headers.get('range'), asset.identity.byteLength) : null;
-  if (range === 'invalid') {
-    headers.set('content-range', `bytes */${asset.identity.byteLength}`);
-    return new Response(null, { status: 416, headers });
-  }
-  if (range) {
-    headers.set('content-range', `bytes ${range.start}-${range.end}/${asset.identity.byteLength}`);
-    return new Response(asset.identity.slice(range.start, range.end + 1).buffer, { status: 206, headers });
-  }
 
   if (acceptsGzip(req)) {
     headers.set('content-encoding', 'gzip');
@@ -81,18 +70,6 @@ function acceptsGzip(req: Request): boolean {
     if (encoding !== 'gzip' && encoding !== '*') return false;
     return !parameters.some(parameter => /^q=0(?:\.0*)?$/.test(parameter.trim()));
   });
-}
-
-function parseRange(value: string | null, size: number): { start: number; end: number } | 'invalid' | null {
-  if (!value) return null;
-  const match = /^bytes=(\d*)-(\d*)$/.exec(value);
-  if (!match) return 'invalid';
-  const rawStart = match[1] ? Number(match[1]) : null;
-  const rawEnd = match[2] ? Number(match[2]) : null;
-  const start = rawStart ?? Math.max(0, size - (rawEnd ?? 0));
-  const end = rawStart === null ? size - 1 : Math.min(rawEnd ?? size - 1, size - 1);
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= size) return 'invalid';
-  return { start, end };
 }
 
 async function assetFromBlob(blob: Blob): Promise<EncodedAsset> {

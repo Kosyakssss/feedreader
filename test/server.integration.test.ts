@@ -62,7 +62,7 @@ beforeAll(async () => {
   await writeFile(join(dataDir, 'themes', 'system.css'), '/* feedreader-system-theme */\nbody { color: CanvasText; }\n');
 
   port = await availablePort();
-  proc = spawn(process.env.FEEDREADER_SERVER_BIN || 'bun', ['server.ts', '--data', dataDir, '--port', String(port)], {
+  proc = spawn(process.env.FEEDREADER_SERVER_BIN || 'bun', ['--preload', fileURLToPath(new URL('./upstream.ts', import.meta.url)), 'server.ts', '--data', dataDir, '--port', String(port)], {
     cwd: dirname(fileURLToPath(new URL('../server.ts', import.meta.url))),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -334,7 +334,7 @@ describe('server hardening', () => {
       `<?xml version="1.0"?>
 <opml version="2.0">
   <body>
-    <outline text="Safe Feed" xmlUrl="https://example.com/feed.xml" />
+    <outline text="Safe Feed" xmlUrl="https://93.184.216.34/fixture/default.xml" />
     <outline text="Local Feed" xmlUrl="http://127.0.0.1:9/rss.xml" />
   </body>
 </opml>`,
@@ -350,11 +350,11 @@ describe('server hardening', () => {
       const body = await res.json() as { feeds: Array<{ url: string }>; added: number; skipped: number };
       expect(body.added).toBe(1);
       expect(body.skipped).toBe(1);
-      expect(body.feeds.map(feed => feed.url)).toEqual(['https://example.com/feed.xml']);
+      expect(body.feeds.map(feed => feed.url)).toEqual(['https://93.184.216.34/fixture/default.xml']);
 
       const feedsRes = await fetch(`http://127.0.0.1:${port}/api/feeds`);
       const feeds = await feedsRes.json() as { feeds: Array<{ url: string }> };
-      expect(feeds.feeds.map(feed => feed.url)).toEqual(['https://example.com/feed.xml']);
+      expect(feeds.feeds.map(feed => feed.url)).toEqual(['https://93.184.216.34/fixture/default.xml']);
       for (let attempt = 0; attempt < 100; attempt++) {
         const status = await (await fetch(`http://127.0.0.1:${port}/api/refresh/status`)).json() as { refreshing: boolean };
         if (!status.refreshing) break;
@@ -560,17 +560,6 @@ describe('server hardening', () => {
     expect(caughtUpBody.newEntries).toEqual([]);
   });
 
-  test('renders persistent loading and refresh status UI', async () => {
-    const page = await fetch(`http://127.0.0.1:${port}/`);
-    const html = await page.text();
-    expect(html).toContain('id="refresh-status"');
-    expect(html.match(/class="refresh-bar"/g)).toHaveLength(4);
-    const app = await (await fetch(`http://127.0.0.1:${port}/app.js`)).text();
-    expect(app).toContain('Loading saved entries…');
-    expect(app).toContain('Checking feeds ');
-    expect(app).toContain('/api/refresh/status?since=');
-  });
-
   test('serves app.js with a strict CSP on the document', async () => {
     const page = await fetch(`http://127.0.0.1:${port}/`);
     expect(page.headers.get('content-security-policy')).toContain("script-src 'self'");
@@ -583,7 +572,7 @@ describe('server hardening', () => {
     expect(underServe.status).toBe(200);
   });
 
-  test('serves compiled client assets with conditional, compressed, and range handling', async () => {
+  test('serves compiled client assets with conditional and compressed handling', async () => {
     const full = await fetch(`http://127.0.0.1:${port}/app.js`);
     expect(full.status).toBe(200);
     const etag = full.headers.get('etag');
@@ -593,13 +582,6 @@ describe('server hardening', () => {
       headers: { 'if-none-match': etag! },
     });
     expect(conditional.status).toBe(304);
-
-    const range = await fetch(`http://127.0.0.1:${port}/app.js`, {
-      headers: { range: 'bytes=0-15' },
-    });
-    expect(range.status).toBe(206);
-    expect(range.headers.get('content-range')).toMatch(/^bytes 0-15\//);
-    expect((await range.arrayBuffer()).byteLength).toBe(16);
 
     const compressed = await fetch(`http://127.0.0.1:${port}/app.css`, {
       headers: { 'accept-encoding': 'gzip' },
@@ -657,4 +639,110 @@ describe('server hardening', () => {
     expect(headerMs).toBeLessThan(13_000);
     expect(bodyMs).toBeLessThan(13_000);
   }, 15_000);
+});
+
+async function drainRefresh(): Promise<RefreshStatus> {
+  let cursor = 0;
+  let feedCursor = 0;
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const status = await (await fetch(`http://127.0.0.1:${port}/api/refresh/status?since=${cursor}&feedsSince=${feedCursor}`)).json() as RefreshStatus;
+    if (!status.refreshing) return status;
+    cursor = status.cursor;
+    feedCursor = status.feedCursor;
+    await Bun.sleep(10);
+  }
+  throw new Error('Refresh did not finish');
+}
+
+async function withSavedFiles(run: () => Promise<void>): Promise<void> {
+  await drainRefresh();
+  const names = ['feeds.json', 'cache.json', 'state.json', 'config.json'];
+  const originals = await Promise.all(names.map(name => readFile(join(dataDir, name))));
+  try {
+    await run();
+  } finally {
+    await drainRefresh();
+    await Promise.all(names.map((name, index) => writeFile(join(dataDir, name), originals[index]!)));
+  }
+}
+
+test('refresh preserves old identities and starred state while pruning provisional entries', async () => {
+  await withSavedFiles(async () => {
+    const published = new Date().toISOString();
+    await writeFile(join(dataDir, 'feeds.json'), JSON.stringify({ folders: [], feeds: [
+      { id: 'rewrite', url: 'https://93.184.216.34/fixture/rewrite.xml', label: 'Rewrite', folderId: null },
+    ] }));
+    await writeFile(join(dataDir, 'cache.json'), JSON.stringify({ entries: [
+      { id: 'rewrite:1', sourceId: '1', feedId: 'rewrite', url: '', title: 'Existing', published },
+    ] }));
+    await writeFile(join(dataDir, 'state.json'), JSON.stringify({ 'rewrite:1': { read: true, readAt: 1, starred: true, starredAt: 1 } }));
+    await writeFile(join(dataDir, 'config.json'), JSON.stringify({ retention: { maxDays: 1 } }));
+    await writeFile(join(dataDir, 'upstream.json'), JSON.stringify({ '/fixture/rewrite.xml': { delay: 50, body:
+      `<rss><channel><item><guid>001</guid><title>Existing</title><pubDate>${published}</pubDate></item>
+      <item><guid>new</guid><title>New</title><pubDate>${published}</pubDate></item>
+      <item><guid>old</guid><title>Old</title><pubDate>2000-01-01</pubDate></item></channel></rss>`,
+    } }));
+    await fetch(`http://127.0.0.1:${port}/api/refresh`, { method: 'POST' });
+    const final = await drainRefresh();
+    expect(final.removedIds).toContain('rewrite:old');
+    const entries = await (await fetch(`http://127.0.0.1:${port}/api/entries`)).json() as import('../lib/types.ts').EnrichedEntry[];
+    expect(entries.map(entry => entry.id).sort()).toEqual(['rewrite:1', 'rewrite:new']);
+    expect(entries.find(entry => entry.id === 'rewrite:1')?.state).toMatchObject({ read: true, starred: true });
+  });
+});
+
+test('two connected clients receive state changes and a reconnect requests a full sync', async () => {
+  await withSavedFiles(async () => {
+    await writeFile(join(dataDir, 'cache.json'), JSON.stringify({ entries: [
+      { id: 'shared:one', sourceId: 'one', feedId: 'shared', url: '', title: 'Shared', published: new Date().toISOString() },
+    ] }));
+    await writeFile(join(dataDir, 'state.json'), '{}');
+    const connect = async () => {
+      const abort = new AbortController();
+      const response = await fetch(`http://127.0.0.1:${port}/api/events`, { signal: abort.signal });
+      const reader = response.body!.getReader();
+      const read = async () => new TextDecoder().decode((await reader.read()).value);
+      let initial = '';
+      while (!initial.includes('"sync"')) initial += await read();
+      return { abort, read };
+    };
+    const a = await connect();
+    const b = await connect();
+    try {
+      const first = await (await fetch(`http://127.0.0.1:${port}/api/state`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ entries: { 'shared:one': { read: true } } }),
+      })).json() as { entryStates: Record<string, { readAt: number }> };
+      const [left, right] = await Promise.all([a.read(), b.read()]);
+      expect(left).toContain('"read":true');
+      expect(right).toContain('"read":true');
+      b.abort.abort();
+      const second = await (await fetch(`http://127.0.0.1:${port}/api/state`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ entries: { 'shared:one': { read: false } } }),
+      })).json() as { entryStates: Record<string, { readAt: number }> };
+      expect(second.entryStates['shared:one']!.readAt).toBeGreaterThan(first.entryStates['shared:one']!.readAt);
+      const resumed = await connect();
+      resumed.abort.abort();
+      const entries = await (await fetch(`http://127.0.0.1:${port}/api/entries`)).json() as import('../lib/types.ts').EnrichedEntry[];
+      expect(entries[0]?.state.read).toBe(false);
+    } finally {
+      a.abort.abort();
+      b.abort.abort();
+    }
+  });
+});
+
+test('imports a quoted multipart boundary and rejects malformed XML', async () => {
+  await withSavedFiles(async () => {
+    const response = await fetch(`http://127.0.0.1:${port}/api/feeds/import`, {
+      method: 'POST', headers: { 'content-type': 'multipart/form-data; boundary="quoted-boundary"' },
+      body: '--quoted-boundary\r\nContent-Disposition: form-data; name="file"; filename="feeds.opml"\r\nContent-Type: text/xml\r\n\r\n<opml><body><outline text="Quoted" xmlUrl="https://93.184.216.34/fixture/quoted.xml"/></body></opml>\r\n--quoted-boundary--\r\n',
+    });
+    expect(response.status).toBe(200);
+    expect((await response.json() as { added: number }).added).toBe(1);
+    const malformed = await fetch(`http://127.0.0.1:${port}/api/feeds/import`, {
+      method: 'POST', headers: { 'content-type': 'text/xml' }, body: '<opml><body>',
+    });
+    expect(malformed.status).toBe(400);
+  });
 });

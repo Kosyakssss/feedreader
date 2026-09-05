@@ -200,7 +200,7 @@ describe('client orchestration', () => {
 
     document.querySelector<HTMLButtonElement>('[data-star="one"]')!.click();
     document.querySelector<HTMLButtonElement>('[data-mark="one"]')!.click();
-    await Promise.resolve();
+    await new Promise(resolve => setTimeout(resolve, 0));
     expect(updates).toEqual([{ one: { starred: true } }, { one: { read: true } }]);
   });
 
@@ -253,7 +253,7 @@ describe('client orchestration', () => {
     expect(document.querySelector('[data-nav-menu]')?.getAttribute('aria-expanded')).toBe('false');
   });
 
-  test('resynchronizes after overlapping optimistic failures instead of restoring stale state', async () => {
+  test('serializes writes and restores saved state after optimistic failures', async () => {
     const first = deferred<{ ok: boolean }>();
     const second = deferred<{ ok: boolean }>();
     let writes = 0;
@@ -268,13 +268,13 @@ describe('client orchestration', () => {
 
     const older = app.toggleRead('one');
     const newer = app.toggleRead('one');
-    second.reject(new Error('newer failed'));
-    await newer;
-    expect(app.state.entries[0]?.state?.read).toBe(true);
     first.reject(new Error('older failed'));
     await older;
+    expect(app.state.entries[0]?.state?.read).toBe(false);
+    second.reject(new Error('newer failed'));
+    await newer;
 
-    expect(reads).toBe(1);
+    expect(reads).toBe(2);
     expect(app.state.entries[0]?.state?.read).toBe(false);
   });
 
@@ -616,5 +616,78 @@ describe('shell accessibility', () => {
     app.shell.toast('Saved');
     expect(document.querySelector('#toast-container')?.getAttribute('aria-live')).toBe('polite');
     expect(document.querySelector('.toast')?.textContent).toBe('Saved');
+  });
+});
+
+describe('rewrite regressions', () => {
+  test('an older save response cannot undo newer remote state', async () => {
+    const saved = deferred<{ ok: boolean; entryStates: Record<string, import('../lib/types.ts').EntryState> }>();
+    const app = renderedApp(client({ updateEntries: () => saved.promise }));
+    const pending = app.toggleRead('one');
+    const shared = app as unknown as { receiveSharedEvent(raw: string): void };
+    shared.receiveSharedEvent(JSON.stringify({ topics: ['entry-state'], entryStates: { one: { read: false, readAt: 20 } } }));
+    saved.resolve({ ok: true, entryStates: { one: { read: true, readAt: 10 } } });
+    await pending;
+    expect(app.state.entries[0]?.state).toEqual({ read: false, readAt: 20 });
+  });
+
+  test('a failed save preserves newer remote state', async () => {
+    const saved = deferred<{ ok: boolean }>();
+    const app = renderedApp(client({
+      updateEntries: () => saved.promise,
+      entries: async () => [entry('one', { read: true, readAt: 1 })],
+    }));
+    const pending = app.toggleRead('one');
+    const shared = app as unknown as { receiveSharedEvent(raw: string): void };
+    shared.receiveSharedEvent(JSON.stringify({ topics: ['entry-state'], entryStates: { one: { read: false, readAt: 20 } } }));
+    saved.reject(new Error('connection lost'));
+    await pending;
+    expect(app.state.entries[0]?.state).toEqual({ read: false, readAt: 20 });
+  });
+
+  test('a refresh snapshot does not erase a click waiting to save', async () => {
+    const saved = deferred<{ ok: boolean; entryStates: Record<string, import('../lib/types.ts').EntryState> }>();
+    const app = renderedApp(client({
+      updateEntries: () => saved.promise,
+      entries: async () => [entry('one', { read: false, readAt: 1 }), entry('two')],
+    }), [entry('one', { read: false, readAt: 1 })]);
+    const pending = app.toggleRead('one');
+    const shared = app as unknown as { receiveSharedEvent(raw: string): void; sharedSyncJob: Promise<void> };
+    shared.receiveSharedEvent(JSON.stringify({ topics: ['entries'] }));
+    await shared.sharedSyncJob;
+    expect(app.state.entries.find(entry => entry.id === 'one')?.state.read).toBe(true);
+    expect(app.state.entries).toHaveLength(2);
+    saved.resolve({ ok: true, entryStates: { one: { read: true, readAt: 2 } } });
+    await pending;
+    expect(app.state.entries.find(entry => entry.id === 'one')?.state.readAt).toBe(2);
+  });
+
+  test('final refresh removals win over entries on the same page', async () => {
+    const app = renderedApp(client({ refreshStatus: async () => status({
+      newEntries: [entry('pruned')], removedIds: ['pruned'], cursor: 1,
+    }) }));
+    await app.refresh();
+    expect(app.state.entries.map(entry => entry.id)).toEqual(['one']);
+    expect(document.querySelector('[data-id="pruned"]')).toBeNull();
+  });
+
+  test('opening settings directly loads saved values into the form', async () => {
+    history.replaceState({}, '', '/settings');
+    const app = new FeedreaderApp(document.querySelector<HTMLElement>('#app')!, client({
+      config: async () => ({ ...config(), maxBulkOpen: 37 }),
+    }));
+    await app.start();
+    expect(document.querySelector<HTMLInputElement>('[name="maxBulkOpen"]')?.value).toBe('37');
+  });
+
+  test('remote settings update untouched fields without erasing an edit', async () => {
+    const app = renderedApp(client({ config: async () => ({ ...config(), maxBulkOpen: 37, retention: { maxEntries: 500, maxDays: 10 } }) }));
+    app.navigate('/settings', false);
+    document.querySelector<HTMLInputElement>('[name="maxEntries"]')!.value = '750';
+    const shared = app as unknown as { receiveSharedEvent(raw: string): void; sharedSyncJob: Promise<void> };
+    shared.receiveSharedEvent(JSON.stringify({ topics: ['config'] }));
+    await shared.sharedSyncJob;
+    expect(document.querySelector<HTMLInputElement>('[name="maxBulkOpen"]')?.value).toBe('37');
+    expect(document.querySelector<HTMLInputElement>('[name="maxEntries"]')?.value).toBe('750');
   });
 });

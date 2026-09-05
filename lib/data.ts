@@ -1,3 +1,4 @@
+import { DEFAULT_CONFIG } from './types.ts';
 import { mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -5,14 +6,6 @@ import { join, resolve } from 'node:path';
 import type { CacheFile, Config, Entry, EntryState, FeedCacheMeta, FeedsFile, StateFile } from './types.ts';
 import { createEntryId, publishedTime } from './feeds.ts';
 import { isSafeObjectKey, sanitizeThemeName } from './security.ts';
-
-const DEFAULT_CONFIG: Config = {
-  maxBulkOpen: 20,
-  retention: { maxEntries: 3000, maxDays: null },
-  theme: 'system',
-  port: 8787,
-  trustedOrigins: [],
-};
 
 export type ConfigPatch = Partial<Omit<Config, 'retention'>> & {
   retention?: Partial<Config['retention']>;
@@ -99,9 +92,6 @@ function normalizeFeedMeta(value: unknown): Record<string, FeedCacheMeta> {
     const meta: FeedCacheMeta = {};
     if (typeof entry.etag === 'string' && entry.etag) meta.etag = entry.etag;
     if (typeof entry.lastModified === 'string' && entry.lastModified) meta.lastModified = entry.lastModified;
-    if (typeof entry.failureCount === 'number' && Number.isInteger(entry.failureCount) && entry.failureCount > 0) {
-      meta.failureCount = entry.failureCount;
-    }
     if (Object.keys(meta).length) out[key] = meta;
   }
   return out;

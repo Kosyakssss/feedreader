@@ -1,4 +1,5 @@
-import type { EnrichedEntry, EntryState } from '../lib/types.ts';
+import { EntryStateStore } from './entry-state.ts';
+import type { EnrichedEntry } from '../lib/types.ts';
 import { api, type FeedreaderApi } from './api.ts';
 import { RefreshPoller } from './refresh.ts';
 import { animateFeedRemoval } from './motion/feeds.ts';
@@ -10,8 +11,6 @@ import {
   type SharedTopic,
   createInitialState,
   filteredEntries,
-  mergeEntrySnapshots,
-  mergeEntryState,
   mergeRefreshEntries,
   reconcileTransientState,
   safeHttpUrl,
@@ -28,15 +27,13 @@ export class FeedreaderApp {
   private readonly pages: PageView;
   private readonly refreshPoller: RefreshPoller;
   private readonly client: FeedreaderApi;
-  private readonly entryMutationVersions = new Map<string, number>();
-  private pendingEntryMutations = 0;
-  private stateResyncNeeded = false;
+  private readonly entryStates = new EntryStateStore();
+  private entryWriteChain: Promise<unknown> = Promise.resolve();
   private feedAddAttempt = 0;
   private feedAddRevealTimer: number | null = null;
   private sharedEvents: EventSource | null = null;
   private sharedSyncJob: Promise<void> | null = null;
   private readonly pendingSharedTopics = new Set<SharedTopic>();
-  private sharedEntriesResyncNeeded = false;
   private sharedResumeScheduled = false;
 
   constructor(root: HTMLElement, client: FeedreaderApi = api) {
@@ -46,8 +43,6 @@ export class FeedreaderApp {
     this.pages = new PageView(root);
     this.refreshPoller = new RefreshPoller(
       status => this.applyRefreshStatus(status),
-      () => this.state.refreshCursor,
-      () => this.state.feedRefreshCursor,
       client,
     );
     const resume = () => this.scheduleSharedResume();
@@ -64,7 +59,7 @@ export class FeedreaderApp {
         this.client.config(),
         this.client.feeds(),
       ]);
-      this.state.entries = entries;
+      this.receiveEntries(entries, true);
       this.state.config = { ...this.state.config, ...config };
       this.state.feeds = feeds;
       this.state.initialDataLoading = false;
@@ -307,7 +302,7 @@ export class FeedreaderApp {
       const result = await this.client.addFeed(value);
       this.state.feeds.feeds = [result.feed, ...this.state.feeds.feeds.filter(feed => feed.id !== result.feed.id)];
       this.state.feeds.health = { ...this.state.feeds.health, [result.feed.id]: result.health };
-      this.state.entries = mergeRefreshEntries(this.state.entries, result.entries).entries;
+      this.receiveEntries(result.entries);
       this.state.feedAdd = { pending: false, pendingVisible: false, value: '', error: null };
       this.render({ animateFeeds: true, newFeedIds: new Set([result.feed.id]) });
       this.shell.toast(`Feed added · ${result.entries.length} ${result.entries.length === 1 ? 'entry' : 'entries'} found`);
@@ -461,26 +456,17 @@ export class FeedreaderApp {
   }
 
   private applyRefreshStatus(status: import('./state.ts').RefreshStatus): void {
-    if (status.runId && status.runId !== this.state.refreshRunId) {
-      this.state.refreshRunId = status.runId;
-      this.state.refreshCursor = 0;
-      this.state.feedRefreshCursor = 0;
-    }
-
     const newIds = new Set<string>();
     const removedIds = new Set(status.removedIds ?? []);
     let changed = false;
+    if (status.newEntries?.length) {
+      for (const id of this.receiveEntries(status.newEntries.filter(entry => !removedIds.has(entry.id)))) newIds.add(id);
+      changed = true;
+    }
     if (removedIds.size) {
       const before = this.state.entries.length;
       this.state.entries = this.state.entries.filter(entry => !removedIds.has(entry.id));
-      changed = before !== this.state.entries.length;
-    }
-
-    if (status.newEntries?.length) {
-      const merged = mergeRefreshEntries(this.state.entries, status.newEntries);
-      this.state.entries = merged.entries;
-      for (const id of merged.newIds) newIds.add(id);
-      changed = true;
+      changed ||= before !== this.state.entries.length;
     }
 
     if (status.feedResults?.length) {
@@ -505,8 +491,6 @@ export class FeedreaderApp {
       this.state.feeds.health = health;
     }
 
-    this.state.refreshCursor = Math.max(this.state.refreshCursor, Number(status.cursor) || 0);
-    this.state.feedRefreshCursor = Math.max(this.state.feedRefreshCursor, Number(status.feedCursor) || 0);
     this.state.refreshStatus = status;
     reconcileTransientState(this.state);
     this.render({
@@ -544,14 +528,12 @@ export class FeedreaderApp {
     if (!Array.isArray(payload.topics)) return;
 
     if (payload.topics.includes('entry-state') && payload.entryStates) {
-      let changed = false;
-      for (const [id, update] of Object.entries(payload.entryStates)) {
-        const entry = this.entry(id);
-        if (!entry) continue;
-        entry.state = mergeEntryState(entry.state, update);
-        changed = true;
-      }
-      if (changed) this.render();
+      this.entryStates.receive(this.state.entries.flatMap(entry => {
+        const state = payload.entryStates?.[entry.id];
+        return state ? [{ ...entry, state }] : [];
+      }));
+      this.entryStates.project(this.state.entries);
+      this.render();
     }
 
     const reloadTopics = payload.topics.filter(topic => topic !== 'entry-state');
@@ -579,10 +561,7 @@ export class FeedreaderApp {
       const reloadFeeds = fullSync || topics.has('feeds');
       const reloadConfig = fullSync || topics.has('config');
 
-      const entriesRequest = reloadEntries && this.pendingEntryMutations === 0
-        ? this.client.entries()
-        : null;
-      if (reloadEntries && !entriesRequest) this.sharedEntriesResyncNeeded = true;
+      const entriesRequest = reloadEntries ? this.client.entries() : null;
       const feedsRequest = reloadFeeds ? this.client.feeds() : null;
       const configRequest = reloadConfig ? this.client.config() : null;
       const [entries, feeds, config] = await Promise.all([
@@ -590,7 +569,7 @@ export class FeedreaderApp {
       ]);
 
       if (entries) {
-        this.state.entries = mergeEntrySnapshots(this.state.entries, entries);
+        this.receiveEntries(entries, true);
         reconcileTransientState(this.state);
       }
       if (feeds) this.state.feeds = feeds;
@@ -598,30 +577,8 @@ export class FeedreaderApp {
       if (entries || feeds || config) this.render({ rebuild: reloadFeeds && this.state.page.startsWith('/feed/') });
 
       if (fullSync || topics.has('refresh') || topics.has('entries')) {
-        await this.syncRefreshStatus(fullSync || topics.has('entries'));
+        await this.refreshPoller.sync(fullSync || topics.has('entries'));
       }
-    }
-  }
-
-  private async syncRefreshStatus(fromStart: boolean): Promise<void> {
-    if (fromStart) {
-      this.state.refreshCursor = 0;
-      this.state.feedRefreshCursor = 0;
-    }
-    while (true) {
-      const priorRunId = this.state.refreshRunId;
-      const requestedCursor = this.state.refreshCursor;
-      const requestedFeedCursor = this.state.feedRefreshCursor;
-      let status = await this.client.refreshStatus(requestedCursor, requestedFeedCursor);
-      if (status.runId && priorRunId && status.runId !== priorRunId &&
-        (requestedCursor > 0 || requestedFeedCursor > 0)) {
-        this.state.refreshCursor = 0;
-        this.state.feedRefreshCursor = 0;
-        status = await this.client.refreshStatus(0, 0);
-      }
-      this.applyRefreshStatus(status);
-      const receivedDeltas = status.newEntries.length > 0 || status.feedResults.length > 0;
-      if (!status.refreshing || !receivedDeltas) return;
     }
   }
 
@@ -630,14 +587,14 @@ export class FeedreaderApp {
       count: 0,
       refreshing: false,
       error: errorMessage(error),
-      runId: this.state.refreshRunId,
+      runId: this.state.refreshStatus?.runId ?? null,
       total: 0,
       completed: 0,
       succeeded: 0,
       failed: 0,
       failures: [],
-      cursor: this.state.refreshCursor,
-      feedCursor: this.state.feedRefreshCursor,
+      cursor: 0,
+      feedCursor: 0,
       newEntries: [],
       feedResults: [],
       removedIds: [],
@@ -645,76 +602,38 @@ export class FeedreaderApp {
     this.render();
   }
 
-  private async markEntries(ids: string[], updates: EntryUpdate): Promise<boolean> {
-    const payload: Record<string, EntryUpdate> = {};
-    const previous = new Map<string, EntryState>();
-    const versions = new Map<string, number>();
-    const now = Date.now();
-    for (const id of ids) {
-      payload[id] = updates;
-      const entry = this.entry(id);
-      if (!entry) continue;
-      previous.set(id, { ...entry.state });
-      const version = (this.entryMutationVersions.get(id) ?? 0) + 1;
-      this.entryMutationVersions.set(id, version);
-      versions.set(id, version);
-      entry.state = {
-        ...entry.state,
-        ...updates,
-        ...('read' in updates ? { readAt: now } : {}),
-        ...('starred' in updates ? { starredAt: now } : {}),
-      };
-    }
-    if (previous.size === 0) return true;
-    this.pendingEntryMutations += 1;
-    this.render();
-    try {
-      const result = await this.client.updateEntries(payload);
-      if (result.entryStates) {
-        for (const [id, state] of Object.entries(result.entryStates)) {
-          if (this.entryMutationVersions.get(id) !== versions.get(id)) continue;
-          const entry = this.entry(id);
-          if (entry) entry.state = { ...entry.state, ...state };
-        }
-        this.render();
-      }
-      return true;
-    } catch (error) {
-      for (const [id, state] of previous) {
-        if (this.entryMutationVersions.get(id) !== versions.get(id)) {
-          this.stateResyncNeeded = true;
-          continue;
-        }
-        const entry = this.entry(id);
-        if (entry) entry.state = state;
-      }
-      this.render();
-      this.shell.toast(`Could not save state: ${errorMessage(error)}`);
-      return false;
-    } finally {
-      this.pendingEntryMutations -= 1;
-      if (this.pendingEntryMutations === 0 && this.stateResyncNeeded) {
-        this.stateResyncNeeded = false;
-        await this.resyncEntryStates();
-      }
-      if (this.pendingEntryMutations === 0 && this.sharedEntriesResyncNeeded) {
-        this.sharedEntriesResyncNeeded = false;
-        this.queueSharedSync(['entries', 'refresh']);
-      }
-    }
+  private receiveEntries(entries: readonly EnrichedEntry[], replace = false): Set<string> {
+    this.entryStates.receive(entries);
+    const merged = replace ? { entries: [...entries], newIds: new Set<string>() } : mergeRefreshEntries(this.state.entries, entries);
+    this.state.entries = merged.entries;
+    this.entryStates.project(this.state.entries);
+    return merged.newIds;
   }
 
-  private async resyncEntryStates(): Promise<void> {
+  private async markEntries(ids: string[], updates: EntryUpdate): Promise<boolean> {
+    const selected = new Set(ids);
+    const entries = this.state.entries.filter(entry => selected.has(entry.id));
+    if (!entries.length) return true;
+    const payload = Object.fromEntries(entries.map(entry => [entry.id, updates]));
+    this.entryStates.begin(entries, payload);
+    this.entryStates.project(this.state.entries);
+    this.render();
+    const write = this.entryWriteChain.then(() => this.client.updateEntries(payload));
+    this.entryWriteChain = write.catch(() => undefined);
     try {
-      const saved = await this.client.entries();
-      const states = new Map(saved.map(entry => [entry.id, entry.state ?? {}]));
-      for (const entry of this.state.entries) {
-        const state = states.get(entry.id);
-        if (state) entry.state = state;
-      }
-      this.render();
+      const result = await write;
+      this.entryStates.finish(payload, result.entryStates ?? payload);
+      return true;
     } catch (error) {
-      this.shell.toast(`Could not reload state: ${errorMessage(error)}`);
+      this.entryStates.finish(payload);
+      this.shell.toast(`Could not save state: ${errorMessage(error)}`);
+      try {
+        this.receiveEntries(await this.client.entries(), true);
+      } catch {}
+      return false;
+    } finally {
+      this.entryStates.project(this.state.entries);
+      this.render();
     }
   }
 

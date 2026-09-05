@@ -7,7 +7,7 @@ A local-first RSS/Atom reader that runs in the browser. Portable, pretty, lightw
 - **Local-first** — everything lives on disk (`data/` folder). Sync via Syncthing, iCloud, or just copy the folder. No accounts, no cloud.
 - **Minimal reading in-app** — entries open original links. The app is a _launcher_, not a reader.
 - **Portable server** — runs on Bun 1.4 or newer on macOS and Linux.
-- **No runtime dependencies** — HTTP, static files, and XML parsing use Bun APIs.
+- **No runtime dependencies** — HTTP, uploads, and XML parsing use Bun APIs. A small fallback repairs undeclared feed entities; identifiers and titles remain text.
 - **Framework-free typed client** — browser code is TypeScript and native DOM/CSS, bundled in memory by Bun when the server starts.
 - **Theme choice** — one adaptive system theme follows the browser and macOS light/dark appearance.
 - **File-synced state** — Syncthing conflict files (`state.sync-conflict-*.json`) are auto-merged using latest-timestamp-wins per entry.
@@ -121,3 +121,14 @@ All runtime data lives in `data/`. The feed list and system theme are versioned;
 - No swipe gestures or push notifications — by design.
 - Feed subscriptions in `data/feeds.json` are intentionally public. Never put authenticated feed URLs, cookies, tokens, or private feeds there.
 - Cache, read/star state, settings, and transaction files under `data/` stay local and are ignored.
+
+## Development
+
+Run `bun run test` for type checking, lint, and regression tests. Integration
+tests use temporary data directories and a synthetic upstream feed source;
+they do not read or modify the running reader's data.
+
+Refresh polling and live notifications share one cursor owner. Browser clicks
+are displayed immediately over saved state, then reconciled using server
+timestamps. Queued writes from one browser retain click order, and reconnecting
+clients load a fresh snapshot before catching up on refresh results.

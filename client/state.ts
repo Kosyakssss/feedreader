@@ -1,3 +1,6 @@
+import { DEFAULT_CONFIG } from '../lib/types.ts';
+import type { RefreshStatus } from '../lib/types.ts';
+export type { RefreshStatus, SharedEventPayload, SharedTopic } from '../lib/types.ts';
 import type { Config, EnrichedEntry, EntryState, Feed, FeedsFile } from '../lib/types.ts';
 
 export type EntryFilter = 'all' | 'unread' | 'read';
@@ -11,44 +14,6 @@ export interface FeedHealth {
 
 export interface FeedData extends FeedsFile {
   health?: Record<string, FeedHealth>;
-}
-
-interface RefreshFailure {
-  feedId: string;
-  label: string;
-  error: string;
-}
-
-interface FeedResultChange {
-  sequence: number;
-  feedId: string;
-  entryCount: number | null;
-  error: string | null;
-  completedAt: number;
-}
-
-export interface RefreshStatus {
-  count: number;
-  refreshing: boolean;
-  error: string | null;
-  runId: string | null;
-  total: number;
-  completed: number;
-  succeeded: number;
-  failed: number;
-  failures: RefreshFailure[];
-  cursor: number;
-  feedCursor: number;
-  newEntries: EnrichedEntry[];
-  feedResults: FeedResultChange[];
-  removedIds: string[];
-}
-
-export type SharedTopic = 'sync' | 'refresh' | 'entries' | 'feeds' | 'config' | 'entry-state';
-
-export interface SharedEventPayload {
-  topics: SharedTopic[];
-  entryStates?: Record<string, EntryState>;
 }
 
 interface FeedAddState {
@@ -89,23 +54,12 @@ export interface AppState {
   keyboardNavigationActive: boolean;
   initialDataLoading: boolean;
   refreshStatus: RefreshStatus | null;
-  refreshRunId: string | null;
-  refreshCursor: number;
-  feedRefreshCursor: number;
   feedAdd: FeedAddState;
   feedImport: FeedImportProgress | null;
   feedDisplayLimit: number;
   confirmDeleteFeedId: string | null;
   deletingFeedId: string | null;
 }
-
-const DEFAULT_CONFIG: Config = {
-  maxBulkOpen: 20,
-  retention: { maxEntries: 3000, maxDays: null },
-  theme: 'system',
-  port: 8787,
-  trustedOrigins: [],
-};
 
 export function createInitialState(page: string): AppState {
   return {
@@ -123,9 +77,6 @@ export function createInitialState(page: string): AppState {
     keyboardNavigationActive: false,
     initialDataLoading: true,
     refreshStatus: null,
-    refreshRunId: null,
-    refreshCursor: 0,
-    feedRefreshCursor: 0,
     feedAdd: { pending: false, pendingVisible: false, value: '', error: null },
     feedImport: null,
     feedDisplayLimit: 100,
@@ -190,14 +141,6 @@ export function mergeEntryState(current: EntryState = {}, incoming: EntryState =
 
 function mergeEntry(current: EnrichedEntry | undefined, incoming: EnrichedEntry): EnrichedEntry {
   return current ? { ...incoming, state: mergeEntryState(current.state, incoming.state) } : incoming;
-}
-
-export function mergeEntrySnapshots(
-  current: readonly EnrichedEntry[],
-  incoming: readonly EnrichedEntry[],
-): EnrichedEntry[] {
-  const currentById = new Map(current.map(entry => [entry.id, entry]));
-  return incoming.map(entry => mergeEntry(currentById.get(entry.id), entry));
 }
 
 export function mergeRefreshEntries(

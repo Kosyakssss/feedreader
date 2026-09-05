@@ -1,3 +1,5 @@
+import { EntryIndex } from './lib/entry-index.ts';
+import type { SharedEventPayload, FeedResultChange } from './lib/types.ts';
 import { join } from 'node:path';
 import { stat } from 'node:fs/promises';
 
@@ -32,13 +34,6 @@ let allowedHosts = new Set<string>();
 let allowedOrigins = new Set<string>();
 let clientAssets: ClientAssets | null = null;
 let entriesSnapshot: { fingerprint: string; asset: EncodedAsset } | null = null;
-
-type SharedTopic = 'sync' | 'refresh' | 'entries' | 'feeds' | 'config' | 'entry-state';
-
-interface SharedEventPayload {
-  topics: SharedTopic[];
-  entryStates?: Record<string, EntryState>;
-}
 
 const sharedEventEncoder = new TextEncoder();
 const sharedEventSubscribers = new Set<ReadableStreamDefaultController<Uint8Array>>();
@@ -131,14 +126,6 @@ interface RefreshChange {
   entry: EnrichedEntry;
 }
 
-interface FeedResultChange {
-  sequence: number;
-  feedId: string;
-  entryCount: number | null;
-  error: string | null;
-  completedAt: number;
-}
-
 interface RefreshProgress {
   runId: string;
   startedAt: number;
@@ -223,10 +210,7 @@ async function refreshFeeds(progress: RefreshProgress, initialFeedIds?: Readonly
     };
   });
 
-  const existing = new Set(startingCache.entries.map(entry => entry.id));
-  const existingSources = new Set(startingCache.entries.flatMap(entry => entry.sourceId ? [`${entry.feedId}\t${entry.sourceId}`] : []));
-  const existingUrls = new Set(startingCache.entries.flatMap(entry => entry.url ? [`${entry.feedId}\t${entry.url}`] : []));
-  const existingNoUrlTitles = new Set(startingCache.entries.flatMap(entry => !entry.url && entry.title ? [`${entry.feedId}\t${entry.title}`] : []));
+  const existing = new EntryIndex(startingCache.entries);
   const completedResults: CompletedFeedResult[] = [];
 
   async function fetchBatch(feeds: Feed[]): Promise<void> {
@@ -254,15 +238,7 @@ async function refreshFeeds(progress: RefreshProgress, initialFeedIds?: Readonly
       }
 
       for (const entry of result.entries) {
-        if (entry.feedId !== feed.id || existing.has(entry.id)) continue;
-        if (entry.sourceId && existingSources.has(`${entry.feedId}\t${entry.sourceId}`)) continue;
-        if (entry.url && existingUrls.has(`${entry.feedId}\t${entry.url}`)) continue;
-        if (!entry.url && entry.title && existingNoUrlTitles.has(`${entry.feedId}\t${entry.title}`)) continue;
-
-        existing.add(entry.id);
-        if (entry.sourceId) existingSources.add(`${entry.feedId}\t${entry.sourceId}`);
-        if (entry.url) existingUrls.add(`${entry.feedId}\t${entry.url}`);
-        if (!entry.url && entry.title) existingNoUrlTitles.add(`${entry.feedId}\t${entry.title}`);
+        if (!existing.add(entry, feed.id)) continue;
 
         progress.changes.push({
           sequence: progress.changes.length + 1,
@@ -287,7 +263,7 @@ async function refreshFeeds(progress: RefreshProgress, initialFeedIds?: Readonly
 
   let mergedThrough = 0;
   let added = 0;
-  const removedIds = new Set<string>();
+  const removedIds = new Set(progress.removedIds);
   while (true) {
     while (queuedRefreshRequests.pending) {
       const currentFeeds = await readFeeds();
@@ -306,7 +282,7 @@ async function refreshFeeds(progress: RefreshProgress, initialFeedIds?: Readonly
       added += merged.count;
       for (const id of merged.removedIds) removedIds.add(id);
       progress.added = added;
-      progress.removedIds = [...removedIds];
+      progress.removedIds = [...new Set([...progress.removedIds, ...removedIds])];
       publishSharedEvent({ topics: ['refresh'] });
     }
 
@@ -331,41 +307,25 @@ async function mergeFeedResults(
     }
     const currentFeedIds = new Set(feedsFile.feeds.map(feed => feed.id));
     const originalIds = new Set(cache.entries.map(entry => entry.id));
-    const existing = new Set(cache.entries.map(e => e.id));
-    const existingSources = new Set(cache.entries.flatMap(e => e.sourceId ? [`${e.feedId}\t${e.sourceId}`] : []));
-    const existingUrls = new Set(cache.entries.flatMap(e => e.url ? [`${e.feedId}\t${e.url}`] : []));
-    const existingNoUrlTitles = new Set(cache.entries.flatMap(e => !e.url && e.title ? [`${e.feedId}\t${e.title}`] : []));
+    const existing = new EntryIndex(cache.entries);
     const addedIds: string[] = [];
 
     for (const { feed, result, completedAt } of completedResults) {
       if (!currentFeedIds.has(feed.id)) continue;
       for (const entry of result.entries) {
-        if (entry.feedId !== feed.id || existing.has(entry.id)) continue;
-        if (entry.sourceId && existingSources.has(`${entry.feedId}\t${entry.sourceId}`)) continue;
-        if (entry.url && existingUrls.has(`${entry.feedId}\t${entry.url}`)) continue;
-        if (!entry.url && entry.title && existingNoUrlTitles.has(`${entry.feedId}\t${entry.title}`)) continue;
+        if (!existing.add(entry, feed.id)) continue;
         cache.entries.push(entry);
-        existing.add(entry.id);
-        if (entry.sourceId) existingSources.add(`${entry.feedId}\t${entry.sourceId}`);
-        if (entry.url) existingUrls.add(`${entry.feedId}\t${entry.url}`);
-        if (!entry.url && entry.title) existingNoUrlTitles.add(`${entry.feedId}\t${entry.title}`);
         addedIds.push(entry.id);
       }
 
       cache.lastFetched[feed.id] = completedAt;
       const priorMeta = cache.feedMeta[feed.id] || {};
       if (result.error) {
-        const failureCount = (priorMeta.failureCount || 0) + 1;
-        cache.feedMeta[feed.id] = {
-          ...priorMeta,
-          failureCount,
-        };
         cache.feedErrors[feed.id] = result.error;
       } else {
         cache.feedMeta[feed.id] = {
           ...priorMeta,
           ...result.validators,
-          failureCount: 0,
         };
         delete cache.feedErrors[feed.id];
       }
@@ -437,7 +397,7 @@ function startRefresh(feedIds?: readonly string[]): Promise<number> {
       refreshJob = null;
       activeRefreshFeedIds = new Set();
       queuedRefreshRequests.clear();
-      publishSharedEvent({ topics: ['refresh'] });
+      publishSharedEvent({ topics: ['refresh', 'feeds'] });
     });
   return refreshJob;
 }
@@ -456,7 +416,7 @@ function getRefreshStatus(since = 0, feedsSince = 0) {
     feedCursor: feedPage.cursor,
     newEntries: entryPage.items.map(change => change.entry),
     feedResults: feedPage.items,
-    removedIds: !refreshing && progress ? progress.removedIds : [],
+    removedIds: progress?.removedIds ?? [],
   };
 }
 
@@ -586,7 +546,6 @@ function clientAssetResponse(req: Request, kind: keyof ClientAssets): Response {
     req,
     clientAssets[kind],
     kind === 'script' ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8',
-    { allowRange: true },
   );
 }
 
@@ -675,11 +634,13 @@ function parseStateUpdates(body: unknown): Record<string, Pick<EntryState, 'read
 
 async function updateEntryState(req: Request): Promise<Response> {
   const updates = parseStateUpdates(await parseJSONBody(req));
-  const now = Date.now();
+  const entryStates: Record<string, EntryState> = Object.create(null);
   await runDataMutation(async () => {
     const cache = await readCache();
     const knownIds = new Set(cache.entries.map(entry => entry.id));
-    for (const change of refreshProgress?.changes ?? []) knownIds.add(change.entry.id);
+    for (const change of refreshProgress?.changes ?? []) {
+      if (!refreshProgress?.removedIds.includes(change.entry.id)) knownIds.add(change.entry.id);
+    }
     for (const id of Object.keys(updates)) {
       if (!knownIds.has(id)) throw new HttpError(400, `Unknown entry id: ${id}`);
     }
@@ -688,25 +649,18 @@ async function updateEntryState(req: Request): Promise<Response> {
         const next = state[id] ?? {};
         if (update.read !== undefined) {
           next.read = update.read;
-          next.readAt = now;
+          next.readAt = Math.max(Date.now(), (next.readAt ?? 0) + 1);
         }
         if (update.starred !== undefined) {
           next.starred = update.starred;
-          next.starredAt = now;
+          next.starredAt = Math.max(Date.now(), (next.starredAt ?? 0) + 1);
         }
         state[id] = next;
+        entryStates[id] = { ...next };
       }
       return state;
     }, cache);
   });
-  const entryStates: Record<string, EntryState> = Object.create(null);
-  for (const [id, update] of Object.entries(updates)) {
-    entryStates[id] = {
-      ...update,
-      ...(update.read !== undefined ? { readAt: now } : {}),
-      ...(update.starred !== undefined ? { starredAt: now } : {}),
-    };
-  }
   publishSharedEvent({ topics: ['entry-state'], entryStates });
   return json({ ok: true, entryStates });
 }
@@ -810,6 +764,11 @@ async function deleteFeed(id: string): Promise<Response> {
     const state = await readState(cache);
     for (const removedId of removedIds) delete state[removedId];
     await writeDataFiles({ 'feeds.json': feedsFile, 'cache.json': cache, 'state.json': state });
+    if (refreshProgress) {
+      const provisional = refreshProgress.changes.filter(change => change.entry.feedId === id).map(change => change.entry.id);
+      refreshProgress.removedIds = [...new Set([...refreshProgress.removedIds, ...removedIds, ...provisional])];
+    }
+
   });
   publishSharedEvent({ topics: ['feeds', 'entries'] });
   return json({ ok: true });
@@ -818,20 +777,23 @@ async function deleteFeed(id: string): Promise<Response> {
 async function importFeeds(req: Request): Promise<Response> {
   const raw = await parseBody(req);
   let opmlText = raw;
-  const boundary = req.headers.get('content-type')?.match(/boundary=(.+)/)?.[1];
-  if (boundary) {
-    for (const part of raw.split(`--${boundary}`)) {
-      const bodyStart = part.indexOf('\r\n\r\n');
-      if (bodyStart === -1) continue;
-      const content = part.slice(bodyStart + 4).trim();
-      if (content.includes('<opml') || content.includes('<outline')) {
-        opmlText = content;
-        break;
-      }
+  if (headerValue(req, 'content-type').toLowerCase().startsWith('multipart/form-data')) {
+    try {
+      const form = await new Response(raw, { headers: { 'content-type': headerValue(req, 'content-type') } }).formData();
+      const file = form.get('file');
+      if (!(file instanceof File)) throw new Error('Missing OPML file');
+      opmlText = await file.text();
+    } catch {
+      throw new HttpError(400, 'Invalid OPML upload');
     }
   }
 
-  const imported = parseOPML(opmlText);
+  let imported: ReturnType<typeof parseOPML>;
+  try {
+    imported = parseOPML(opmlText);
+  } catch {
+    throw new HttpError(400, 'Invalid OPML document');
+  }
   const addedFeeds = await runDataMutation(async () => {
     const feedsFile = await readFeeds();
     const existingUrls = new Set(feedsFile.feeds.map(feed => feed.url));
@@ -1021,6 +983,10 @@ function installShutdownHandlers(server: Bun.Server<undefined>) {
     forceExit.unref?.();
 
     try {
+      for (const subscriber of sharedEventSubscribers) {
+        try { subscriber.close(); } catch {}
+      }
+      sharedEventSubscribers.clear();
       const stopped = server.stop();
       if (refreshJob) await refreshJob.catch(() => undefined);
       await stopped;

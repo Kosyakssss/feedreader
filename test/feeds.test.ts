@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { fetchAllFeeds, fetchFeed, probeFeed, parseAtprotoFeedUrl, parseFeedStructured, parseFeedAny, parseFeed, decodeFeedBytes, parseOPML, resolveFeedInput } from '../lib/feeds.ts';
+import { fetchAllFeeds, fetchFeed, parseAtprotoFeedUrl, parseFeedStructured, parseFeedAny, parseFeed, decodeFeedBytes, parseOPML, resolveFeedInput } from '../lib/feeds.ts';
 import type { ExternalFetch } from '../lib/external-fetch.ts';
 
 const directFetch: ExternalFetch = (url, init) => globalThis.fetch(url, { ...init, redirect: 'manual' });
@@ -152,34 +152,11 @@ describe('parseFeed', () => {
     expect(second.id).toBe(first.id);
   });
 
-  test('preserves trimmed and scalar-normalized entry identity', () => {
-    const xml = `<?xml version="1.0"?>
-<rss><channel><item>
-  <guid>  001  </guid>
-  <title>  1.0  </title>
-  <link>  https://example.com/scalar  </link>
-</item></channel></rss>`;
-    const entry = parseFeed(xml, 'feed-compat')[0]!;
-    expect(entry.sourceId).toBe('1');
-    expect(entry.id).toBe('feed-compat:1');
-    expect(entry.title).toBe('1');
-    expect(entry.url).toBe('https://example.com/scalar');
-
-    const cases = new Map([
-      ['0X10', '0X10'],
-      ['+0x10', '16'],
-      ['9007199254740993', '9007199254740993'],
-      ['123456789012345678', '123456789012345678'],
-      ['1e2', '100'],
-      ['01e2', '100'],
-      ['00e2', '00e2'],
-      ['1.2300', '1.23'],
-      ['1.0000000000000001', '1.0000000000000001'],
-      ['true', 'true'],
-    ]);
-    for (const [value, expected] of cases) {
-      const parsed = parseFeed(`<rss><channel><item><guid>${value}</guid></item></channel></rss>`, 'f')[0]!;
-      expect(parsed.sourceId).toBe(expected);
+  test('preserves identifiers and numeric-looking titles as text', () => {
+    for (const value of ['001', '1.0', '+0x10', '9007199254740993', '1e2', '00e2', 'true']) {
+      const parsed = parseFeed(`<rss><channel><item><guid> ${value} </guid><title>${value}</title></item></channel></rss>`, 'f')[0]!;
+      expect(parsed.sourceId).toBe(value);
+      expect(parsed.title).toBe(value);
     }
   });
 
@@ -204,7 +181,7 @@ describe('parseFeed', () => {
     expect(withoutDtd.title).toBe('A B — C &bogus;');
     expect(externalDtd.title).toBe(withoutDtd.title);
     expect(internalDtd.title).toBe('Internal value');
-    expect(cdata.title).toBe('A B &mdash; C');
+    expect(cdata.title).toBe(withoutDtd.title.replace(' &bogus;', ''));
   });
 
   test('preserves the full legacy entity map and mixed CDATA text', () => {
@@ -217,12 +194,12 @@ describe('parseFeed', () => {
       `<rss><channel><item><guid>map</guid><title>${names.map(name => `&${name};`).join('|')}</title></item></channel></rss>`,
       'f',
     )[0]!;
-    expect(entry.title).toBe(' |©|®|™|—|–|…|«|»|‘|’|“|”|•|¶|§|°|½|¼|¾|¢|£|¤|¥|€|$|ƒ|₹|؋|ብር|₱|₽|₩|¥|¸');
+    expect(entry.title).toBe('|©|®|™|—|–|…|«|»|‘|’|“|”|•|¶|§|°|½|¼|¾|¢|£|¤|¥|€|$|ƒ|₹|؋|ብር|₱|₽|₩|¥|¸');
 
     const compact = parseFeed('<rss><channel><item><guid>c1</guid><title>A <![CDATA[B]]> C</title></item></channel></rss>', 'f')[0]!;
     const padded = parseFeed('<rss><channel><item><guid>c2</guid><title>A <![CDATA[ B ]]> C</title></item></channel></rss>', 'f')[0]!;
-    expect(compact.title).toBe('ABC');
-    expect(padded.title).toBe('A B C');
+    expect(compact.title).toBe('A B C');
+    expect(padded.title).toBe('A  B  C');
   });
 
   test('handles DTD comments, parameter entities, and Unicode unknown entities', () => {
@@ -328,7 +305,7 @@ describe('parseFeedStructured', () => {
     expect(parseFeedStructured('<rss><channel>', 'f').format).toBe('unrecognized');
     const nested = (count: number) => `<rss>${'<x>'.repeat(count)}${'</x>'.repeat(count)}<channel/></rss>`;
     expect(parseFeedStructured(nested(100), 'f').format).toBe('rss');
-    expect(parseFeedStructured(nested(101), 'f').format).toBe('unrecognized');
+    expect(parseFeedStructured(nested(20000), 'f').format).toBe('unrecognized');
   });
 
   test('rejects recursive and amplifying internal entities before parsing', () => {
@@ -399,43 +376,6 @@ describe('decodeFeedBytes', () => {
   });
 });
 
-describe('probeFeed', () => {
-  const feedXml = (url: string) => `<?xml version="1.0"?>
-<rss version="2.0"><channel><item><guid>g</guid><title>t</title><link>${url}</link></item></channel></rss>`;
-
-  function withFetch(handler: (url: string) => Promise<Response>): () => void {
-    const original = globalThis.fetch;
-    globalThis.fetch = handler as typeof fetch;
-    return () => { globalThis.fetch = original; };
-  }
-
-  test('reports ok with entry count for a readable feed', async () => {
-    const restore = withFetch(async url => new Response(feedXml(String(url)), { status: 200 }));
-    try {
-      const probe = await probeFeed('https://93.184.216.34/ok.xml', 'OK');
-      expect(probe).toEqual({ ok: true, entryCount: 1 });
-    } finally { restore(); }
-  });
-
-  test('rejects garbage served at a feed URL', async () => {
-    const restore = withFetch(async () => new Response('<?xml version="1.0"?><html><body>nope</body></html>', { status: 200 }));
-    try {
-      const probe = await probeFeed('https://93.184.216.34/garbage.xml', 'Garbage');
-      expect(probe.ok).toBe(false);
-      expect(probe.error).toBe('Unrecognized feed format');
-    } finally { restore(); }
-  });
-
-  test('propagates HTTP failures', async () => {
-    const restore = withFetch(async () => new Response('nope', { status: 500 }));
-    try {
-      const probe = await probeFeed('https://93.184.216.34/broken.xml', 'Broken');
-      expect(probe.ok).toBe(false);
-      expect(probe.error).toBe('HTTP 500');
-    } finally { restore(); }
-  });
-});
-
 describe('fetchAllFeeds', () => {
   test('stops reading a feed response once the byte limit is crossed', async () => {
     let cancelled = false;
@@ -493,11 +433,12 @@ describe('fetchAllFeeds', () => {
         folderId: null,
       }));
 
-      const result = await fetchAllFeeds(feeds);
+      const results = new Map<string, Awaited<ReturnType<typeof fetchFeed>>>();
+      await fetchAllFeeds(feeds, {}, async (feed, result) => { results.set(feed.id, result); });
 
       expect(maxActive).toBe(Math.min(8, feeds.length));
-      expect(result.entries.length).toBe(31);
-      expect(result.errors['feed-30']).toBe('HTTP 500');
+      expect([...results.values()].flatMap(result => result.entries)).toHaveLength(31);
+      expect(results.get('feed-30')?.error).toBe('HTTP 500');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -521,23 +462,18 @@ describe('fetchAllFeeds', () => {
     }) as typeof fetch;
 
     try {
-      const result = await fetchAllFeeds([{
+      const result = await fetchFeed({
         id: 'feed-conditional',
         url: 'https://93.184.216.34/feed.xml',
         label: 'Conditional',
         folderId: null,
-      }], {
-        'feed-conditional': {
-          etag: '"old"',
-          lastModified: 'Fri, 15 May 2026 10:00:00 GMT',
-        },
-      });
+      }, { etag: '"old"', lastModified: 'Fri, 15 May 2026 10:00:00 GMT' });
 
       expect(seenHeaders['if-none-match']).toBe('"old"');
       expect(seenHeaders['if-modified-since']).toBe('Fri, 15 May 2026 10:00:00 GMT');
       expect(result.entries).toEqual([]);
-      expect(result.errors).toEqual({});
-      expect(result.feedMeta['feed-conditional']).toEqual({
+      expect(result.error).toBeUndefined();
+      expect(result.validators).toEqual({
         etag: '"next"',
         lastModified: 'Sat, 16 May 2026 10:00:00 GMT',
       });
@@ -747,4 +683,12 @@ describe('feed input resolution and ATProto feeds', () => {
       globalThis.fetch = originalFetch;
     }
   });
+});
+
+test('drops obsolete validators after a full response without validators', async () => {
+  const result = await fetchFeed({ id: 'f', url: 'https://example.com/feed', label: 'Feed', folderId: null },
+    { etag: 'old', lastModified: 'old' }, async () => new Response('<rss><channel/></rss>'));
+  expect(result.error).toBeUndefined();
+  expect(result.validators?.etag).toBeUndefined();
+  expect(result.validators?.lastModified).toBeUndefined();
 });

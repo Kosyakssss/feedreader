@@ -62,10 +62,11 @@ describe('refresh request queuing', () => {
       },
       refreshStatus: async () => status(),
     } as unknown as FeedreaderApi;
-    const poller = new RefreshPoller(() => undefined, () => 0, () => 0, client);
+    const poller = new RefreshPoller(() => undefined, client);
 
     const active = poller.run(['imported']);
     const full = poller.run();
+    await Promise.resolve();
     expect(requests).toEqual([['imported'], undefined]);
 
     first.resolve(status());
@@ -93,5 +94,62 @@ describe('refresh delta pagination', () => {
       cursor: 2,
       hasMore: false,
     });
+  });
+});
+
+describe('shared refresh coordinator', () => {
+  test('coalesces concurrent wakeups and drains every page', async () => {
+    const first = deferred<RefreshStatus>();
+    const requested: number[] = [];
+    const received: number[] = [];
+    const poller = new RefreshPoller(value => received.push(value.cursor), {
+      refreshStatus: async (cursor: number) => {
+        requested.push(cursor);
+        return requested.length === 1 ? first.promise : status({ cursor: 2 });
+      },
+    } as unknown as FeedreaderApi);
+    const a = poller.sync();
+    const b = poller.sync();
+    expect(requested).toEqual([0]);
+    first.resolve(status({ refreshing: true, cursor: 1, feedResults: [{
+      sequence: 1, feedId: 'one', completedAt: 1, entryCount: 1, error: null,
+    }] }));
+    await Promise.all([a, b]);
+    expect(requested).toEqual([0, 1]);
+    expect(received).toEqual([1, 2]);
+  });
+
+  test('restarts at zero when the server has begun another run', async () => {
+    const requested: number[] = [];
+    const received: string[] = [];
+    const poller = new RefreshPoller(value => received.push(`${value.runId}:${value.cursor}`), {
+      refreshStatus: async (cursor: number) => {
+        requested.push(cursor);
+        return requested.length === 1 ? status({ runId: 'old', cursor: 9 }) : status({ runId: 'new', cursor: 1 });
+      },
+    } as unknown as FeedreaderApi);
+    await poller.sync();
+    await poller.sync();
+    expect(requested).toEqual([0, 9, 0]);
+    expect(received).toEqual(['old:9', 'new:1']);
+  });
+
+  test('a resume during an in-flight request discards its old cursor', async () => {
+    const delayed = deferred<RefreshStatus>();
+    const requested: number[] = [];
+    const received: number[] = [];
+    const poller = new RefreshPoller(value => received.push(value.cursor), {
+      refreshStatus: async (cursor: number) => {
+        requested.push(cursor);
+        return requested.length === 2 ? delayed.promise : status({ cursor: requested.length });
+      },
+    } as unknown as FeedreaderApi);
+    await poller.sync();
+    const inFlight = poller.sync();
+    const resumed = poller.sync(true);
+    delayed.resolve(status({ cursor: 99 }));
+    await Promise.all([inFlight, resumed]);
+    expect(requested).toEqual([0, 1, 0]);
+    expect(received).toEqual([1, 3]);
   });
 });

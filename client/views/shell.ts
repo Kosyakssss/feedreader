@@ -2,10 +2,6 @@ import type { AppState, RefreshStatus } from '../state.ts';
 import { filledRefreshSegments } from '../refresh-progress.ts';
 import { requiredElement } from './dom.ts';
 
-const SEGMENT_SCAN_MS = 320;
-const COMPLETE_HOLD_MS = 700;
-const TOAST_VISIBLE_MS = 2500;
-const TOAST_EXIT_MS = 180;
 const COMPACT_LAYOUT_QUERY = '(max-width: 699px)';
 
 interface ShellTiming {
@@ -16,10 +12,10 @@ interface ShellTiming {
 }
 
 const DEFAULT_TIMING: ShellTiming = {
-  segmentScanMs: SEGMENT_SCAN_MS,
-  completeHoldMs: COMPLETE_HOLD_MS,
-  toastVisibleMs: TOAST_VISIBLE_MS,
-  toastExitMs: TOAST_EXIT_MS,
+  segmentScanMs: 320,
+  completeHoldMs: 700,
+  toastVisibleMs: 2500,
+  toastExitMs: 180,
 };
 
 export class ShellView {
@@ -31,14 +27,8 @@ export class ShellView {
   private readonly bulkBar = requiredElement<HTMLElement>('#bulk-bar');
   private readonly bulkCount = requiredElement<HTMLElement>('#bulk-count');
   private readonly shortcuts = requiredElement<HTMLElement>('#shortcuts-overlay');
-  private collapseTimer: number | null = null;
-  private segmentTimer: number | null = null;
-  private displayedSegments = 0;
-  private segmentStartedAt = 0;
-  private visualRunStarted = false;
-  private visualRunId: string | null = null;
-  private settledRunId: string | null | undefined;
-  private latestStatus: RefreshStatus | null = null;
+  private timer: number | null = null;
+  private visual: { status: RefreshStatus; segments: number; advancedAt: number; settled: boolean } | null = null;
   private shortcutReturnFocus: HTMLElement | null = null;
   private readonly timing: ShellTiming;
 
@@ -141,11 +131,11 @@ export class ShellView {
       return;
     }
 
-    if (!this.visualRunStarted || status.runId !== this.visualRunId) this.beginVisualRun(status);
-    this.latestStatus = status;
+    if (!this.visual || status.runId !== this.visual.status.runId) this.beginVisualRun(status);
+    this.visual!.status = status;
     this.updateRefreshAccessibility(status);
 
-    if (!status.refreshing && status.runId === this.settledRunId) {
+    if (this.visual!.settled) {
       this.refreshRoot.title = failureTitle(status);
       return;
     }
@@ -157,12 +147,7 @@ export class ShellView {
   private beginVisualRun(status: RefreshStatus): void {
     this.clearTimers();
     this.dismissRefreshDetails();
-    this.visualRunStarted = true;
-    this.visualRunId = status.runId;
-    this.settledRunId = undefined;
-    this.displayedSegments = 0;
-    this.segmentStartedAt = performance.now();
-    this.latestStatus = status;
+    this.visual = { status, segments: 0, advancedAt: performance.now(), settled: false };
     this.refreshRoot.classList.add('is-refresh-resetting');
     this.refreshRoot.dataset.phase = 'resetting';
     this.bars.forEach(bar => bar.classList.remove('is-filled', 'is-active'));
@@ -171,37 +156,28 @@ export class ShellView {
   }
 
   private advanceVisualProgress(): void {
-    const status = this.latestStatus;
-    if (!status || status.runId !== this.visualRunId) return;
+    const visual = this.visual;
+    if (!visual || visual.settled || this.timer !== null) return;
+    const { status } = visual;
     const confirmed = status.refreshing
       ? filledRefreshSegments(status.completed, status.total).filter(Boolean).length
       : this.bars.length;
-
-    if (this.displayedSegments >= confirmed) {
-      if (!status.refreshing && this.displayedSegments === this.bars.length) this.finishVisualRun(status);
-      return;
+    if (visual.segments < confirmed) {
+      const delay = this.timing.segmentScanMs - (performance.now() - visual.advancedAt);
+      if (delay > 0) {
+        this.timer = window.setTimeout(() => {
+          this.timer = null;
+          this.advanceVisualProgress();
+        }, delay);
+        return;
+      }
+      visual.segments++;
+      visual.advancedAt = performance.now();
+      this.renderRunning(status);
+      this.advanceVisualProgress();
+    } else if (!status.refreshing) {
+      this.finishVisualRun(status);
     }
-    if (this.segmentTimer !== null) return;
-
-    const elapsed = performance.now() - this.segmentStartedAt;
-    const delay = Math.max(0, this.timing.segmentScanMs - elapsed);
-    this.segmentTimer = window.setTimeout(() => {
-      this.segmentTimer = null;
-      const latest = this.latestStatus;
-      if (!latest || latest.runId !== this.visualRunId) return;
-      const latestConfirmed = latest.refreshing
-        ? filledRefreshSegments(latest.completed, latest.total).filter(Boolean).length
-        : this.bars.length;
-      if (this.displayedSegments < latestConfirmed) {
-        this.displayedSegments += 1;
-        this.segmentStartedAt = performance.now();
-      }
-      if (!latest.refreshing && this.displayedSegments === this.bars.length) this.finishVisualRun(latest);
-      else {
-        this.renderRunning(latest);
-        this.advanceVisualProgress();
-      }
-    }, delay);
   }
 
   private renderRunning(status: RefreshStatus): void {
@@ -213,8 +189,8 @@ export class ShellView {
     this.refreshGraphic.setAttribute('aria-valuemax', String(status.total || 0));
     this.refreshGraphic.setAttribute('aria-valuenow', String(status.completed || 0));
     this.bars.forEach((bar, index) => {
-      bar.classList.toggle('is-filled', index < this.displayedSegments);
-      bar.classList.toggle('is-active', index === this.displayedSegments);
+      bar.classList.toggle('is-filled', index < (this.visual?.segments ?? 0));
+      bar.classList.toggle('is-active', index === (this.visual?.segments ?? 0));
     });
     this.refreshLabel.textContent = '';
     this.refreshRoot.title = failureTitle(status);
@@ -227,8 +203,7 @@ export class ShellView {
   }
 
   private finishVisualRun(status: RefreshStatus): void {
-    if (status.runId === this.settledRunId) return;
-    this.settledRunId = status.runId;
+    this.visual!.settled = true;
     const outcome = refreshOutcome(status);
     this.refreshRoot.dataset.phase = outcome;
     this.refreshGraphic.removeAttribute('role');
@@ -242,7 +217,7 @@ export class ShellView {
     });
     this.refreshLabel.textContent = collapsedRefreshText(status);
     this.refreshRoot.title = failureTitle(status);
-    this.collapseTimer = window.setTimeout(() => {
+    this.timer = window.setTimeout(() => {
       this.refreshRoot.dataset.phase = `${outcome}-collapsed`;
     }, this.timing.completeHoldMs);
   }
@@ -250,9 +225,7 @@ export class ShellView {
   private setCollapsed(text: string, phase: string): void {
     this.clearTimers();
     this.dismissRefreshDetails();
-    this.visualRunStarted = false;
-    this.settledRunId = undefined;
-    this.latestStatus = null;
+    this.visual = null;
     this.refreshRoot.dataset.phase = phase;
     this.refreshLabel.textContent = text;
     this.refreshRoot.setAttribute('aria-label', text || 'Feed refresh status');
@@ -261,10 +234,8 @@ export class ShellView {
   }
 
   private clearTimers(): void {
-    if (this.collapseTimer !== null) window.clearTimeout(this.collapseTimer);
-    if (this.segmentTimer !== null) window.clearTimeout(this.segmentTimer);
-    this.collapseTimer = null;
-    this.segmentTimer = null;
+    if (this.timer !== null) window.clearTimeout(this.timer);
+    this.timer = null;
   }
 
   private shortcutFocusables(): HTMLElement[] {
