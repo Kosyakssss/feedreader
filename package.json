@@ -1,17 +1,25 @@
 {
   "name": "feedreader",
-  "devDependencies": {
-    "@types/bun": "^1.4.0",
-    "happy-dom": "^20.11.6",
-    "oxlint": "1.80.0",
-    "typescript": "^7.0.2"
-  },
+  "type": "module",
   "scripts": {
+    "dev": "bun --bun vite --host 127.0.0.1",
+    "build": "bun --bun vite build",
     "start": "bun server.ts",
     "unread": "bun scripts/unread.ts",
-    "lint": "oxlint --deny-warnings .",
-    "test": "tsc --noEmit && bun run lint && bun test --isolate"
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && oxlint --deny-warnings . && oxfmt --check .",
+    "format": "oxfmt ."
   },
-  "packageManager": "bun@1.4.0",
-  "type": "module"
+  "devDependencies": {
+    "@sveltejs/kit": "2.70.3",
+    "@sveltejs/vite-plugin-svelte": "7.3.0",
+    "@types/bun": "^1.4.0",
+    "oxfmt": "0.67.0",
+    "oxlint": "1.80.0",
+    "svelte": "5.57.0",
+    "svelte-adapter-bun": "1.0.1",
+    "svelte-check": "4.7.6",
+    "typescript": "^5.9.3",
+    "vite": "8.2.2"
+  },
+  "packageManager": "bun@1.4.0"
 }

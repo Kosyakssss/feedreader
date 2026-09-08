@@ -1,0 +1,117 @@
+.entry-card {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  transition: none;
+  user-select: none;
+}
+
+.entry-slot + .entry-slot {
+  margin-top: -0.5px;
+}
+
+.entry-card:hover {
+  background: var(--surface-hover);
+  z-index: 1;
+  position: relative;
+}
+
+.entry-read {
+  opacity: 0.45;
+}
+
+.entry-read:hover {
+  opacity: 0.75;
+}
+
+.entry-selected {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+  opacity: 1;
+}
+
+.entry-selected:hover {
+  background: var(--accent-soft-hover);
+  opacity: 1;
+}
+
+.entry-focused {
+  background: var(--surface-hover);
+  outline: none;
+  z-index: 2;
+  position: relative;
+  transition: none;
+}
+
+.entry-read.entry-focused {
+  opacity: 0.75;
+}
+
+.entry-title {
+  color: var(--link);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.95em;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+
+.entry-title:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.entry-unread .entry-title {
+  font-weight: 600;
+}
+
+.entry-meta {
+  color: var(--muted);
+  font-size: 0.8em;
+}
+
+.entry-checkbox input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--border);
+  border-radius: 0;
+  cursor: pointer;
+  position: relative;
+  transform-origin: center;
+  transition:
+    background var(--duration-default),
+    border-color var(--duration-default),
+    transform 80ms ease-out;
+  flex-shrink: 0;
+  touch-action: none;
+}
+
+.entry-checkbox {
+  touch-action: none;
+}
+
+.entry-checkbox:active input[type='checkbox'] {
+  transform: scale(0.9);
+}
+
+.entry-checkbox input[type='checkbox']:hover {
+  border-color: var(--accent);
+}
+
+.entry-checkbox input[type='checkbox']:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .entry-checkbox input[type='checkbox'] {
+    transition: none;
+  }
+
+  .entry-checkbox:active input[type='checkbox'] {
+    transform: none;
+  }
+}

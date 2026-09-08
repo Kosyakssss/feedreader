@@ -235,6 +235,7 @@ start_tailscale_agent() {
 cmd=${1:-status}
 case "$cmd" in
     install|restart)
+        (cd "$project_dir" && "$(find_bun)" run build)
         write_plist
         stop_agent >/dev/null 2>&1 || true
         launchctl bootstrap "$domain" "$plist"

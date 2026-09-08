@@ -1,0 +1,178 @@
+.search-input {
+  background: var(--field-background);
+  border: 1px solid transparent;
+  border-radius: 0;
+  padding: 7px 12px;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  transition: none;
+  outline: none;
+}
+
+.search-input::placeholder {
+  color: var(--muted);
+}
+
+.search-input:focus {
+  background: var(--surface);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3.5px var(--field-focus-ring);
+}
+
+.filter-tabs button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.8em;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 5px 12px;
+  border-radius: 0;
+  font-family: var(--font-sans);
+  transition:
+    color var(--duration-default),
+    background var(--duration-default),
+    transform 100ms ease;
+}
+
+.filter-tabs button:hover {
+  color: var(--foreground);
+  background: var(--surface-hover);
+}
+
+.filter-tabs button:active {
+  transform: scale(0.97);
+}
+
+.filter-tabs button.active {
+  color: var(--accent);
+  font-weight: 600;
+  background: var(--accent-soft);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  color: var(--accent);
+  padding: 6px 14px;
+  border-radius: 0;
+  font-family: var(--font-sans);
+  font-size: 0.85em;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--duration-default),
+    border-color var(--duration-default),
+    transform 100ms ease,
+    opacity var(--duration-default);
+}
+
+.btn:hover {
+  background: var(--surface-hover);
+}
+
+.btn:active {
+  transform: scale(0.97);
+  opacity: 0.8;
+}
+
+.btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+  transform: none;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-foreground);
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.btn-primary:active {
+  background: var(--accent-hover);
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 1.1em;
+  padding: var(--spacing-xs);
+  border-radius: 0;
+  transition:
+    color var(--duration-default),
+    background var(--duration-default),
+    transform 120ms ease;
+  line-height: 1;
+}
+
+.btn-icon .ui-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.button-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.btn-icon:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+.btn-icon:active {
+  transform: scale(0.88);
+}
+
+.entry-actions .btn-icon {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  padding: 0;
+}
+
+.btn-star.starred {
+  color: var(--star-accent);
+}
+
+.btn-star.starred:hover {
+  color: var(--star-accent);
+}
+
+.settings-form label {
+  font-size: 0.9em;
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.settings-form input {
+  background-color: var(--field-background);
+  border: 1px solid transparent;
+  border-radius: 0;
+  padding: 7px var(--spacing-sm);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  transition: none;
+}
+
+.settings-form input:focus {
+  outline: none;
+  background-color: var(--surface);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3.5px var(--field-focus-ring);
+}
