@@ -3,3 +3,5 @@ node_modules
 .svelte-kit
 build
 data/*.json
+data/*.sqlite*
+data/themes/*.css
