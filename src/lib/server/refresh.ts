@@ -1,24 +1,8 @@
-import type { EnrichedEntry, Feed, RefreshStatus, FeedResultChange } from '../types';
-import type { Storage, Snapshot } from './storage';
+import type { EnrichedEntry, RefreshStatus, FeedResultChange } from '../types';
+import type { Storage } from './storage';
 import type { Events } from './events';
 import type { Diagnostics } from './diagnostics';
-import { EntryIndex } from './entries';
-import { fetchAllFeeds, type FeedFetchResult } from './feeds/fetch';
-import { decodeHtmlEntities, publishedTime } from './feeds/parse';
-import { isSafeExternalUrl } from './security';
-import { pruneEntries } from './normalize';
-export function enrich(data: Snapshot, entries = data.cache.entries): EnrichedEntry[] {
-  const labels = new Map(data.feeds.feeds.map((feed) => [feed.id, feed.label]));
-  return entries
-    .map((entry) => ({
-      ...entry,
-      title: decodeHtmlEntities(entry.title),
-      url: isSafeExternalUrl(entry.url).ok ? entry.url : '',
-      feedLabel: labels.get(entry.feedId) ?? 'Unknown',
-      state: data.state[entry.id] ?? {},
-    }))
-    .sort((a, b) => publishedTime(b) - publishedTime(a));
-}
+import { fetchAllFeeds } from './feeds/fetch';
 export class Refresh {
   private job: Promise<number> | null = null;
   private pending: Set<string> | 'all' | null = null;
@@ -48,9 +32,6 @@ export class Refresh {
   }
   get completion(): Promise<number> | null {
     return this.job;
-  }
-  get knownIds(): string[] {
-    return this.changes.filter((entry) => !this.removed.has(entry.id)).map((entry) => entry.id);
   }
   status(
     since = 0,
@@ -94,10 +75,8 @@ export class Refresh {
     };
     this.log.record('refresh.started', { runId: this.progress.runId });
     this.job = this.run()
-      .catch(async (error) => {
+      .catch((error) => {
         this.progress.error = error instanceof Error ? error.message : 'Refresh failed';
-        const persisted = new Set((await this.store.read()).cache.entries.map((entry) => entry.id));
-        for (const entry of this.changes) if (!persisted.has(entry.id)) this.removed.add(entry.id);
         this.log.record('refresh.failed', { runId: this.progress.runId });
         throw error;
       })
@@ -105,7 +84,7 @@ export class Refresh {
         this.progress.finishedAt = Date.now();
         this.job = null;
         this.pending = null;
-        this.events.publish({ topics: ['refresh', 'feeds'] });
+        this.notify([], [], [], true);
         this.log.record('refresh.finished', {
           runId: this.progress.runId,
           durationMs: Date.now() - this.progress.startedAt!,
@@ -113,35 +92,49 @@ export class Refresh {
           failed: this.progress.failed,
         });
       });
-    this.events.publish({ topics: ['refresh'] });
+    this.notify();
     return this.job;
+  }
+  private notify(
+    entries: EnrichedEntry[] = [],
+    feedResults: FeedResultChange[] = [],
+    removedIds: string[] = [],
+    finished = false,
+  ): void {
+    for (let offset = 0; offset < Math.max(1, entries.length); offset += 500)
+      this.events.publish({
+        topics: finished ? ['refresh', 'feeds'] : ['refresh'],
+        refresh: {
+          ...this.status(this.changes.length, this.results.length),
+          newEntries: entries.slice(offset, offset + 500),
+          feedResults,
+          removedIds,
+        },
+      });
   }
   removeFeed(feedId: string, removedIds: string[]): void {
     for (const id of removedIds) this.removed.add(id);
     for (const entry of this.changes) if (entry.feedId === feedId) this.removed.add(entry.id);
   }
   private async run(): Promise<number> {
-    await this.store.mergeConflicts();
-    const starting = await this.store.read();
-    const index = new EntryIndex(starting.cache.entries);
     let added = 0;
     while (this.pending !== null) {
       const requested = this.pending;
       this.pending = null;
-      const data = await this.store.read();
-      const feeds = data.feeds.feeds.filter(
-        (feed) => !this.active.has(feed.id) && (requested === 'all' || requested.has(feed.id)),
-      );
+      const feeds = this.store
+        .feeds()
+        .filter((feed) => !this.active.has(feed.id) && (requested === 'all' || requested.has(feed.id)));
       feeds.forEach((feed) => this.active.add(feed.id));
       this.progress.total += feeds.length;
-      const completed: {
-        feed: Feed;
-        result: FeedFetchResult;
-        time: number;
-      }[] = [];
-      await fetchAllFeeds(feeds, data.cache.feedMeta, async (feed, result, durationMs) => {
+      await fetchAllFeeds(feeds, this.store.validators(), async (feed, result, durationMs) => {
         const time = Date.now();
-        completed.push({ feed, result, time });
+        const saving = performance.now();
+        const committed = this.store.saveFeed(feed, result, time);
+        const saveMs = Math.round((performance.now() - saving) * 100) / 100;
+        this.changes.push(...committed.entries);
+        for (const id of committed.removed) this.removed.add(id);
+        added += committed.entries.length;
+        this.progress.count = added;
         this.progress.completed++;
         this.results.push({
           sequence: this.results.length + 1,
@@ -154,51 +147,16 @@ export class Refresh {
           this.progress.failed++;
           this.progress.failures.push({ feedId: feed.id, label: feed.label, error: result.error });
         } else this.progress.succeeded++;
-        const fresh = result.entries.filter((entry) => index.add(entry, feed.id));
-        this.changes.push(...enrich(data, fresh));
-        this.progress.count += fresh.length;
         this.log.record('feed.fetched', {
+          saveMs,
           runId: this.progress.runId,
           feedId: feed.id,
           entries: result.entries.length,
           ok: !result.error,
           durationMs: Math.round(durationMs * 100) / 100,
         });
-        this.events.publish({ topics: ['refresh'] });
+        this.notify(committed.entries, this.results.slice(-1), committed.removed);
       });
-      const committed = await this.store.change(['cache', 'state'], (current) => {
-        const known = new Set(current.feeds.feeds.map((feed) => feed.id));
-        const index = new EntryIndex(current.cache.entries);
-        const addedIds: string[] = [];
-        const original = current.cache.entries.map((entry) => entry.id);
-        for (const { feed, result, time } of completed) {
-          if (!known.has(feed.id)) continue;
-          for (const entry of result.entries)
-            if (index.add(entry, feed.id)) {
-              current.cache.entries.push(entry);
-              addedIds.push(entry.id);
-            }
-          current.cache.lastFetched[feed.id] = time;
-          if (result.error) current.cache.feedErrors[feed.id] = result.error;
-          else {
-            delete current.cache.feedErrors[feed.id];
-            current.cache.feedMeta[feed.id] = result.validators ?? {};
-          }
-        }
-        const pruned = pruneEntries(current.cache, current.state, current.config);
-        current.cache = pruned.cache;
-        current.state = pruned.state;
-        const retained = new Set(current.cache.entries.map((entry) => entry.id));
-        return {
-          removed: [...original, ...this.knownIds].filter((id) => !retained.has(id)),
-          added: addedIds.filter((id) => retained.has(id)).length,
-        };
-      });
-      added += committed.added;
-      for (const id of committed.removed) this.removed.add(id);
-      this.progress.count = added;
-      this.log.record('refresh.persisted', { runId: this.progress.runId, added });
-      this.events.publish({ topics: ['refresh'] });
     }
     return added;
   }

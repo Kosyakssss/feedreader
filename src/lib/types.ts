@@ -92,4 +92,5 @@ export type SharedTopic = 'sync' | 'refresh' | 'entries' | 'feeds' | 'config' | 
 export interface SharedEventPayload {
   topics: SharedTopic[];
   entryStates?: Record<string, EntryState>;
+  refresh?: RefreshStatus;
 }

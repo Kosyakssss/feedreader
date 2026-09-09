@@ -1,6 +1,5 @@
 import { Storage } from '../src/lib/server/storage';
 import { resolve } from 'node:path';
-import { publishedTime } from '../src/lib/server/feeds/parse';
 
 function argValue(name: string): string | null {
   const index = process.argv.indexOf(name);
@@ -23,21 +22,16 @@ function esc(text: string): string {
 }
 
 const limit = parseLimit();
-const { cache, state, feeds } = await new Storage(
-  resolve(argValue('--data') || process.env.FEEDREADER_DATA_DIR || 'data'),
-).read();
-const feedLabels = new Map(feeds.feeds.map((feed) => [feed.id, feed.label]));
-
-const unread = cache.entries
-  .filter((entry) => entry.url && !state[entry.id]?.read)
-  .sort((a, b) => publishedTime(b) - publishedTime(a));
+const store = new Storage(resolve(argValue('--data') || process.env.FEEDREADER_DATA_DIR || 'data'));
+const unread = store.entries().filter((entry) => entry.url && !entry.state.read);
+store.close();
 
 const selected = limit ? unread.slice(0, limit) : unread;
 
 console.log(`Unread articles with links: ${unread.length}`);
 
 for (const entry of selected) {
-  const feed = feedLabels.get(entry.feedId) || entry.feedId;
+  const feed = entry.feedLabel;
   console.log(`- [${esc(entry.title)}](${entry.url}) - ${feed}`);
 }
 

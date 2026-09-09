@@ -2,7 +2,6 @@
   import { onDestroy } from 'svelte';
   import { useReader, message } from '$lib/client/reader.svelte';
   import { api } from '$lib/client/api';
-  import { externalPath } from '$lib/client/paths';
   import { timeAgo } from '$lib/client/values';
   import { reveal, revealContent, collapse } from '$lib/client/motion';
   import Icon from '$lib/components/Icon.svelte';
@@ -19,12 +18,9 @@
   let newIds = $state.raw(new Set<string>()),
     replacement = $state<string | null>(null);
   let imported = $state<{ ids: string[]; total: number; reading: boolean } | null>(null);
-  const unread = $derived.by(() => {
-    const counts = new Map<string, number>();
-    for (const entry of reader.entries)
-      if (!entry.state.read) counts.set(entry.feedId, (counts.get(entry.feedId) ?? 0) + 1);
-    return counts;
-  });
+  const unread = $derived(
+    new Map(reader.feeds.feeds.map((feed) => [feed.id, reader.counts(feed.id).unread])),
+  );
   const issueCount = $derived(
     Object.values(reader.feeds.health ?? {}).filter((health) => health.error).length,
   );
@@ -174,7 +170,7 @@
         hidden
         bind:this={fileInput}
         onchange={importFile}
-      /><a class="btn" href={externalPath('/api/feeds/export')} download="feedreader.opml">Export OPML</a>
+      /><a class="btn" href={reader.path('/api/feeds/export')} download="feedreader.opml">Export OPML</a>
     </div>
   </div>
   <div class="feed-import-slot" class:is-visible={!!imported} aria-hidden={!imported}>
@@ -250,7 +246,7 @@
           }}
         >
           <div class="feed-info">
-            <a class="feed-label" dir="auto" href={externalPath(`/feed/${encodeURIComponent(feed.id)}`)}
+            <a class="feed-label" dir="auto" href={reader.path(`/feed/${encodeURIComponent(feed.id)}`)}
               >{feed.label}</a
             >
             <div class="feed-meta" title={feed.url}>{display(feed.url)}</div>

@@ -8,7 +8,7 @@ import {
   type FeedsFile,
   type StateFile,
 } from '../types';
-import { createEntryId, publishedTime } from './feeds/parse';
+import { createEntryId } from './feeds/parse';
 import { isSafeObjectKey } from './security';
 export type ConfigPatch = Partial<Omit<Config, 'retention'>> & {
   retention?: Partial<Config['retention']>;
@@ -242,38 +242,4 @@ export function normalizeStateFile(state: StateFile, cache: CacheFile): StateFil
     normalized[id] = mergeStateEntry(normalized[id], entryState);
   }
   return normalized;
-}
-export function pruneEntries(
-  cache: CacheFile,
-  state: StateFile,
-  config: Config,
-): {
-  cache: CacheFile;
-  state: StateFile;
-} {
-  const sorted = cache.entries.slice().sort((a, b) => publishedTime(b) - publishedTime(a));
-  const starredIds = new Set(
-    Object.entries(state)
-      .filter(([, s]) => s.starred)
-      .map(([id]) => id),
-  );
-  let entries = sorted;
-  if (config.retention.maxDays) {
-    const cutoff = Date.now() - config.retention.maxDays * 86400000;
-    entries = entries.filter((e) => starredIds.has(e.id) || publishedTime(e) >= cutoff);
-  }
-  if (entries.length > config.retention.maxEntries) {
-    const kept = entries.slice(0, config.retention.maxEntries);
-    const keptIds = new Set(kept.map((e) => e.id));
-    const starredOverflow = entries
-      .slice(config.retention.maxEntries)
-      .filter((e) => starredIds.has(e.id) && !keptIds.has(e.id));
-    entries = [...kept, ...starredOverflow];
-  }
-  const keptIds = new Set(entries.map((e) => e.id));
-  const prunedState = createStateFile();
-  for (const [id, s] of Object.entries(state)) {
-    if (keptIds.has(id)) prunedState[id] = s;
-  }
-  return { cache: { ...cache, entries }, state: prunedState };
 }

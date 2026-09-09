@@ -56,7 +56,7 @@ export async function fetchAllFeeds(
   onFeedResult: (feed: Feed, result: FeedFetchResult, durationMs: number) => Promise<void>,
 ): Promise<void> {
   let next = 0;
-  await Promise.all(
+  const outcomes = await Promise.allSettled(
     Array.from({ length: Math.min(FETCH_CONCURRENCY, feeds.length) }, async () => {
       while (next < feeds.length) {
         const feed = feeds[next++]!;
@@ -69,4 +69,6 @@ export async function fetchAllFeeds(
       }
     }),
   );
+  const failure = outcomes.find((outcome) => outcome.status === 'rejected');
+  if (failure?.status === 'rejected') throw failure.reason;
 }

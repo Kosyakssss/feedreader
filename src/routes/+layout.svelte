@@ -1,17 +1,17 @@
 <script lang="ts">
-  import { onMount, setContext } from 'svelte';
+  import { onMount, setContext, untrack } from 'svelte';
   import { page } from '$app/state';
   import { afterNavigate } from '$app/navigation';
   import { toastOut } from '$lib/client/motion';
   import { Reader, readerKey } from '$lib/client/reader.svelte';
-  import { externalPath, internalPath } from '$lib/client/paths';
+  import { internalPath } from '$lib/client/paths';
   import { faviconDataUri } from '$lib/icons';
   import Icon from '$lib/components/Icon.svelte';
   import RefreshStatus from '$lib/components/RefreshStatus.svelte';
   import '$lib/styles/theme.css';
   import '$lib/styles/index.css';
-  let { children } = $props();
-  const reader = setContext(readerKey, new Reader());
+  let { children, data } = $props();
+  const reader = setContext(readerKey, new Reader(untrack(() => data.initial)));
   let menu = $state(false),
     shortcuts = $state(false),
     closeButton = $state<HTMLButtonElement>(),
@@ -89,13 +89,13 @@
   ><title>Feedreader</title><link rel="icon" href={faviconDataUri()} /><link
     id="theme-link"
     rel="stylesheet"
-    href={`${externalPath('/api/theme')}?config=${encodeURIComponent(JSON.stringify(reader.config))}`}
+    href={`${reader.path('/api/theme')}?config=${encodeURIComponent(JSON.stringify(reader.config))}`}
   /></svelte:head
 >
 <svelte:document onkeydown={keydown} onvisibilitychange={() => reader.resume()} />
 <svelte:window onpageshow={() => reader.resume()} ononline={() => reader.resume()} />
 <nav class="nav-bar">
-  <a href={externalPath('/')} class="nav-logo"
+  <a href={reader.path('/')} class="nav-logo"
     ><Icon name="bookmark" class="ui-icon nav-logo-icon" /><span>Feedreader</span></a
   >
   <RefreshStatus />
@@ -108,7 +108,7 @@
   >
   <div class="nav-links">
     {#each links as [href, label]}<a
-        href={externalPath(href!)}
+        href={reader.path(href!)}
         class="nav-link"
         class:active={path === href}
         aria-current={path === href ? 'page' : undefined}>{label}</a

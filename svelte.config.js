@@ -4,6 +4,7 @@ export default {
   preprocess: vitePreprocess(),
   kit: {
     adapter: adapter(),
+    inlineStyleThreshold: 32768,
     csp: {
       directives: {
         'default-src': ['self'],

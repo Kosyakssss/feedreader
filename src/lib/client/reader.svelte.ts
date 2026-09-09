@@ -6,19 +6,21 @@ import {
   type SharedEventPayload,
   type SharedTopic,
 } from '../types';
-import type { FeedData } from './types';
+import type { FeedData, InitialData } from './types';
 import { api } from './api';
-import { RefreshPoller } from './refresh';
 import { mergeEntryState, safeHttpUrl } from './values';
 import { externalPath } from './paths';
 type Updates = Record<string, Pick<EntryState, 'read' | 'starred'>>;
 export const readerKey = Symbol('reader');
 export const useReader = () => getContext<Reader>(readerKey);
 export class Reader {
+  readonly base: string;
   entries = $state.raw<EnrichedEntry[]>([]);
   feeds = $state.raw<FeedData>({ folders: [], feeds: [] });
   config = $state(structuredClone(DEFAULT_CONFIG));
-  loading = $state(true);
+  loading = $state(false);
+  complete = $state(false);
+  private initialCounts: InitialData['counts'];
   status = $state<import('../types').RefreshStatus | null>(null);
   newIds = new Set<string>();
   toasts = $state<
@@ -35,10 +37,12 @@ export class Reader {
   private events: EventSource | null = null;
   private disposed = false;
   private toastTimers = new Set<ReturnType<typeof setTimeout>>();
-  private poller = new RefreshPoller((status) => {
-    this.receive(status.newEntries);
+  private incoming: SharedEventPayload[] = [];
+  private showRefreshError = false;
+  private receiveStatus(status: import('../types').RefreshStatus): void {
+    if (status.newEntries.length) this.receive(status.newEntries);
     const removed = new Set(status.removedIds);
-    this.entries = this.entries.filter((entry) => !removed.has(entry.id));
+    if (removed.size) this.entries = this.entries.filter((entry) => !removed.has(entry.id));
     const health = { ...this.feeds.health };
     for (const item of status.feedResults)
       health[item.feedId] = {
@@ -49,21 +53,42 @@ export class Reader {
       };
     this.feeds = { ...this.feeds, health };
     this.status = status;
-  });
-  async start(): Promise<void> {
-    try {
-      const [entries, feeds, config] = await Promise.all([api.entries(), api.feeds(), api.config()]);
-      this.receive(entries, true);
-      this.feeds = feeds;
-      this.config = config;
-      this.loading = false;
-      if (this.disposed) return;
-      this.connect();
-      await this.refresh();
-    } catch (error) {
-      this.loading = false;
-      this.toast(`Could not load saved data: ${message(error)}`);
+    if (!status.refreshing && this.showRefreshError) {
+      if (status.error) this.toast(`Refresh failed: ${status.error}`);
+      this.showRefreshError = false;
     }
+  }
+  constructor(initial: InitialData) {
+    this.base = initial.base;
+    this.receive(initial.entries, true);
+    this.feeds = initial.feeds;
+    this.config = initial.config;
+    this.initialCounts = initial.counts;
+    this.status = initial.status;
+  }
+  path(path: string): string {
+    return this.base + path;
+  }
+  counts(feedId?: string, starred = false): { total: number; unread: number } {
+    if (!this.complete)
+      return this.initialCounts
+        .filter((row) => !feedId || row.feedId === feedId)
+        .reduce(
+          (sum, row) => ({
+            total: sum.total + (starred ? row.starred : row.total),
+            unread: sum.unread + (starred ? row.starredUnread : row.unread),
+          }),
+          { total: 0, unread: 0 },
+        );
+    const entries = this.entries.filter(
+      (entry) => (!feedId || entry.feedId === feedId) && (!starred || entry.state.starred),
+    );
+    return { total: entries.length, unread: entries.filter((entry) => !entry.state.read).length };
+  }
+  async start(): Promise<void> {
+    if (this.disposed) return;
+    this.connect();
+    await this.refresh();
   }
   stop(): void {
     this.disposed = true;
@@ -170,9 +195,8 @@ export class Reader {
   }
   async refresh(showError = false, ids?: string[]): Promise<void> {
     try {
-      const status = await this.poller.run(ids);
-      this.feeds = await api.feeds();
-      if (showError && status.error) this.toast(`Refresh failed: ${status.error}`);
+      this.showRefreshError ||= showError;
+      await api.startRefresh(ids);
     } catch (error) {
       if (showError) this.toast(`Refresh failed: ${message(error)}`);
     }
@@ -187,42 +211,52 @@ export class Reader {
         return;
       }
       if (!Array.isArray(data.topics)) return;
-      if (data.entryStates) {
-        for (const [id, state] of Object.entries(data.entryStates))
-          this.saved.set(id, mergeEntryState(this.saved.get(id), state));
-        this.project();
-      }
-      this.schedule(data.topics.filter((topic) => topic !== 'entry-state'));
+      this.incoming.push(data);
+      this.schedule([]);
     };
   }
   private schedule(topics: SharedTopic[]): void {
     topics.forEach((topic) => this.topics.add(topic));
     if (this.syncJob || this.disposed) return;
     this.syncJob = (async () => {
-      while (this.topics.size && !this.disposed) {
+      while ((this.topics.size || this.incoming.length) && !this.disposed) {
+        for (const data of this.incoming.splice(0)) {
+          if (data.entryStates) {
+            for (const [id, state] of Object.entries(data.entryStates))
+              this.saved.set(id, mergeEntryState(this.saved.get(id), state));
+            this.project();
+          }
+          if (data.refresh) this.receiveStatus(data.refresh);
+          data.topics
+            .filter((topic) => topic !== 'entry-state' && topic !== 'refresh')
+            .forEach((topic) => this.topics.add(topic));
+        }
         const topics = [...this.topics];
         this.topics.clear();
-        await this.load(topics);
+        if (topics.length) await this.load(topics);
       }
     })()
       .catch(() => this.toast('Could not synchronize saved changes'))
       .finally(() => {
         this.syncJob = null;
-        if (this.topics.size) this.schedule([]);
+        if (this.topics.size || this.incoming.length) this.schedule([]);
       });
   }
   private async load(topics: SharedTopic[]): Promise<void> {
     const full = topics.includes('sync');
-    const [entries, feeds, config] = await Promise.all([
+    const [entries, feeds, config, status] = await Promise.all([
       full || topics.includes('entries') ? api.entries() : null,
       full || topics.includes('feeds') ? api.feeds() : null,
       full || topics.includes('config') ? api.config() : null,
+      full ? api.refreshStatus(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER) : null,
     ]);
-    if (entries) this.receive(entries, true);
+    if (entries) {
+      this.receive(entries, true);
+      this.complete = true;
+    }
     if (feeds) this.feeds = feeds;
     if (config) this.config = config;
-    if (full || topics.includes('refresh') || topics.includes('entries'))
-      await this.poller.sync(full || topics.includes('entries'));
+    if (status) this.receiveStatus(status);
   }
 }
 export function message(error: unknown): string {

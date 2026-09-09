@@ -1,51 +1,29 @@
 import { building } from '$app/environment';
 import { json, isHttpError, type Handle } from '@sveltejs/kit';
 import { app } from '$lib/server/app';
+import { requestPolicy, apiError, requestBase } from '$lib/server/request-policy';
 
-const trusted = new Set<string>();
-const hosts = new Set<string>();
+let policy: ReturnType<typeof requestPolicy>;
 if (!building) {
   const a = app();
-  const config = (await a.store.read()).config;
+  const config = a.store.config();
   const port = Number(process.env.PORT || config.port);
-  for (const origin of [
-    `http://localhost:${port}`,
-    `http://127.0.0.1:${port}`,
-    `http://[::1]:${port}`,
-    ...config.trustedOrigins,
-  ]) {
-    trusted.add(origin);
-    hosts.add(new URL(origin).host);
-  }
+  policy = requestPolicy(config, port);
   void a.refresh.start().catch(() => undefined);
   process.once('feedreader:shutdown', async () => {
     a.events.close();
     await a.refresh.completion?.catch(() => undefined);
     await a.log.flush();
+    a.store.close();
   });
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
   const started = performance.now();
   const { request, url } = event;
-  if (!hosts.has(request.headers.get('host')?.trim().toLowerCase() ?? ''))
-    return json({ error: 'Unrecognized Host header' }, { status: 403 });
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) {
-    const origin = request.headers.get('origin');
-    const site = request.headers.get('sec-fetch-site');
-    if (
-      (origin && !trusted.has(origin.toLowerCase())) ||
-      (site && !['same-origin', 'same-site', 'none'].includes(site))
-    )
-      return json({ error: 'Cross-origin requests are not allowed' }, { status: 403 });
-  }
-  const base =
-    url.pathname.startsWith('/feedreader') ||
-    (request.headers.get('x-forwarded-host') || request.headers.get('host') || '')
-      .split(':')[0]
-      ?.endsWith('.ts.net')
-      ? '/feedreader'
-      : '';
+  const denied = policy?.(request);
+  if (denied) return denied;
+  const base = requestBase(request, url);
   try {
     const response = await resolve(event, {
       transformPageChunk: ({ html }) =>
@@ -54,16 +32,6 @@ export const handle: Handle = async ({ event, resolve }) => {
     const links = response.headers.get('link');
     if (base && links)
       response.headers.set('link', links.replace(/<(?:\/|(?:\.\.?\/)+)_app\//g, `<${base}/_app/`));
-    if (url.pathname.includes('/api/') && response.status >= 400) {
-      const value = await response
-        .clone()
-        .json()
-        .catch(() => ({}));
-      return json(
-        { error: value.error || value.message || response.statusText },
-        { status: response.status },
-      );
-    }
     app().log.record('http.request', {
       route: event.route.id ?? 'unmatched',
       method: request.method,
@@ -76,7 +44,7 @@ export const handle: Handle = async ({ event, resolve }) => {
       response.headers.set('x-frame-options', 'DENY');
       response.headers.set('referrer-policy', 'same-origin');
     }
-    return response;
+    return apiError(response, url.pathname);
   } catch (e) {
     if (url.pathname.includes('/api/'))
       return json(

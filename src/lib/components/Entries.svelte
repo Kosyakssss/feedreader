@@ -15,6 +15,10 @@
       (entry) => (!feedId || entry.feedId === feedId) && (!starred || entry.state.starred),
     ),
   );
+  const counts = $derived(reader.counts(feedId, starred));
+  const filteredCount = $derived(
+    filter === 'all' ? counts.total : filter === 'unread' ? counts.unread : counts.total - counts.unread,
+  );
   const unread = $derived(source.filter((entry) => !entry.state.read));
   const filtered = $derived(
     filter === 'all'
@@ -58,11 +62,13 @@
     });
   });
   function choose(value: typeof filter) {
+    if (!reader.complete) return;
     filter = value;
     limit = 50;
     selection.reset();
   }
   async function markAll() {
+    if (!reader.complete) return;
     const ids = unread.map((entry) => entry.id);
     if (ids.length && (await reader.mark(ids, { read: true }))) reader.toast(`${ids.length} marked as read`);
   }
@@ -128,19 +134,20 @@
             type="button"
             class:active={filter === value}
             aria-pressed={filter === value}
+            disabled={!reader.complete}
             onclick={() => choose(value as typeof filter)}
             >{value[0]!.toUpperCase() + value.slice(1)} ({value === 'all'
-              ? source.length
+              ? counts.total
               : value === 'unread'
-                ? unread.length
-                : source.length - unread.length})</button
+                ? counts.unread
+                : counts.total - counts.unread})</button
           >{/each}
       </div>
       <div class="timeline-actions">
-        <button class="btn" onclick={() => reader.openMany(unread, 'unread')}
+        <button class="btn" disabled={!reader.complete} onclick={() => reader.openMany(unread, 'unread')}
           >Open all unread<Icon name="external-link" class="ui-icon button-icon" /></button
         >
-        <button class="btn" onclick={markAll}
+        <button class="btn" disabled={!reader.complete} onclick={markAll}
           >Mark all read<Icon name="check" class="ui-icon button-icon" /></button
         >
         <button
@@ -228,9 +235,9 @@
           </div>
         {/each}
       </div>
-      {#if filtered.length > limit}<div class="load-more">
-          <button class="btn" onclick={() => (limit += 50)}
-            >Show more ({filtered.length - limit} remaining)</button
+      {#if filteredCount > limit}<div class="load-more">
+          <button class="btn" disabled={!reader.complete} onclick={() => (limit += 50)}
+            >Show more ({filteredCount - limit} remaining)</button
           >
         </div>{/if}
     {/if}

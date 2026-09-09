@@ -21,7 +21,7 @@ const names: Record<string, string> = {
 };
 export const GET = async () => {
   const { store } = app();
-  const name = await store.query((data) => data.config.theme || 'system');
+  const name = store.config().theme || 'system';
   const css = await Bun.file(join(store.directory, 'themes', `${name}.css`))
     .text()
     .catch(() => '');
