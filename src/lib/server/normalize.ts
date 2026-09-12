@@ -71,12 +71,6 @@ export function normalizeFeedsFile(value: unknown): FeedsFile {
         return [{ id, name }];
       })
     : [];
-  const folderIds = new Set<string>();
-  const folders = rawFolders.filter((folder) => {
-    if (folderIds.has(folder.id)) return false;
-    folderIds.add(folder.id);
-    return true;
-  });
   const rawFeeds = Array.isArray(value.feeds)
     ? value.feeds.filter(isRecord).flatMap((feed) => {
         const { id, url, label, folderId } = feed;
@@ -86,15 +80,7 @@ export function normalizeFeedsFile(value: unknown): FeedsFile {
         return [{ id, url, label, folderId: folderId || null }];
       })
     : [];
-  const feedIds = new Set<string>();
-  const feedUrls = new Set<string>();
-  const feeds = rawFeeds.filter((feed) => {
-    if (feedIds.has(feed.id) || feedUrls.has(feed.url)) return false;
-    feedIds.add(feed.id);
-    feedUrls.add(feed.url);
-    return true;
-  });
-  return { folders, feeds };
+  return { folders: rawFolders, feeds: rawFeeds };
 }
 function normalizeEntry(entry: unknown): Entry | null {
   if (!isRecord(entry)) return null;
@@ -116,14 +102,8 @@ export function normalizeCacheFile(cache: unknown): CacheFile {
   const rawEntries = Array.isArray(cache.entries)
     ? cache.entries.flatMap((entry) => normalizeEntry(entry) || [])
     : [];
-  const entryIds = new Set<string>();
-  const entries = rawEntries.filter((entry) => {
-    if (entryIds.has(entry.id)) return false;
-    entryIds.add(entry.id);
-    return true;
-  });
   return {
-    entries,
+    entries: rawEntries,
     lastFetched: numberRecord(cache.lastFetched),
     feedErrors: stringRecord(cache.feedErrors),
     feedMeta: normalizeFeedMeta(cache.feedMeta),
@@ -195,51 +175,28 @@ export function normalizeConfig(value: unknown): Config {
   return config;
 }
 export function mergeStateEntry(existing: EntryState | undefined, incoming: EntryState): EntryState {
-  const next: EntryState = existing ? { ...existing } : {};
-  if (typeof incoming.read === 'boolean' && !('read' in next)) next.read = incoming.read;
-  if (
-    typeof incoming.read === 'boolean' &&
-    incoming.readAt !== undefined &&
-    (next.readAt === undefined || incoming.readAt >= next.readAt)
-  ) {
-    next.read = incoming.read;
-    next.readAt = incoming.readAt;
-  }
-  if (typeof incoming.starred === 'boolean' && !('starred' in next)) next.starred = incoming.starred;
-  if (
-    typeof incoming.starred === 'boolean' &&
-    incoming.starredAt !== undefined &&
-    (next.starredAt === undefined || incoming.starredAt >= next.starredAt)
-  ) {
-    next.starred = incoming.starred;
-    next.starredAt = incoming.starredAt;
+  const next = { ...existing };
+  for (const key of ['read', 'starred'] as const) {
+    const timestamp = key === 'read' ? 'readAt' : 'starredAt';
+    if (typeof incoming[key] !== 'boolean') continue;
+    if (!(key in next)) next[key] = incoming[key];
+    if (
+      incoming[timestamp] !== undefined &&
+      (next[timestamp] === undefined || incoming[timestamp] >= next[timestamp])
+    ) {
+      next[key] = incoming[key];
+      next[timestamp] = incoming[timestamp];
+    }
   }
   return next;
 }
 export function normalizeStateFile(state: StateFile, cache: CacheFile): StateFile {
-  const currentIds = new Set<string>();
-  const idsBySource = new Map<string, string[]>();
-  for (const entry of cache.entries) {
-    currentIds.add(entry.id);
-    const sourceId = entry.sourceId || entry.id;
-    const ids = idsBySource.get(sourceId);
-    if (ids) ids.push(entry.id);
-    else idsBySource.set(sourceId, [entry.id]);
-  }
+  const currentIds = new Set(cache.entries.map((entry) => entry.id));
+  const sources = Object.groupBy(cache.entries, (entry) => entry.sourceId || entry.id);
   const normalized = createStateFile();
   for (const [id, entryState] of Object.entries(normalizeStateShape(state))) {
-    if (currentIds.has(id)) {
-      normalized[id] = mergeStateEntry(normalized[id], entryState);
-      continue;
-    }
-    const migratedIds = idsBySource.get(id);
-    if (migratedIds?.length) {
-      for (const migratedId of migratedIds) {
-        normalized[migratedId] = mergeStateEntry(normalized[migratedId], entryState);
-      }
-      continue;
-    }
-    normalized[id] = mergeStateEntry(normalized[id], entryState);
+    const ids = currentIds.has(id) ? [id] : sources[id]?.map((entry) => entry.id) || [id];
+    for (const id of ids) normalized[id] = mergeStateEntry(normalized[id], entryState);
   }
   return normalized;
 }

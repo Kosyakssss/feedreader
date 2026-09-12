@@ -155,3 +155,8 @@ export function isSafeExternalUrl(rawUrl: string):
   }
   return { ok: true, url: parsed };
 }
+
+export function urlKey(url: string): string {
+  const safe = isSafeExternalUrl(url);
+  return safe.ok ? safe.url.href : url;
+}
