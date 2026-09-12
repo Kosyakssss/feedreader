@@ -1,9 +1,8 @@
 import type { Database } from 'bun:sqlite';
 import type { Config, Entry, EntryState, EnrichedEntry, Feed, FeedCacheMeta } from '../types';
-import { legacySource } from './legacy';
 import { openDatabase } from './database';
-import type { ConfigPatch } from './normalize';
-import { decodeHtmlEntities, publishedTime } from './feeds/parse';
+import type { ConfigPatch } from './config';
+import { decodeHtmlEntities, publishedTime, numericSourceId } from './feeds/parse';
 import { isSafeExternalUrl, urlKey } from './security';
 import type { FeedFetchResult } from './feeds/fetch';
 
@@ -188,15 +187,15 @@ export class Storage {
           SELECT value->>'$.id', value->>'$.sourceId', value->>'$.feedId', value->>'$.url',
             value->>'$.title', value->>'$.published', value->>'$.publishedTime'
           FROM json_each(?1) WHERE value->>'$.feedId' = ?2 AND NOT EXISTS (
-            SELECT 1 FROM entries WHERE feedId = ?2 AND sourceId = value->>'$.legacySource'
-              AND rowid <= ?3 AND value->>'$.legacySource' <> '')
+            SELECT 1 FROM entries WHERE feedId = ?2 AND sourceId = value->>'$.numericSourceId'
+              AND rowid <= ?3 AND value->>'$.numericSourceId' <> '')
           ON CONFLICT(id) DO NOTHING`)
           .run(
             JSON.stringify(
               result.entries.map((entry) => ({
                 ...entry,
                 publishedTime: publishedTime(entry),
-                legacySource: legacySource(entry.sourceId || ''),
+                numericSourceId: numericSourceId(entry.sourceId || ''),
               })),
             ),
             feed.id,

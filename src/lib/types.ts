@@ -26,9 +26,6 @@ export interface EntryState {
   starred?: boolean;
   starredAt?: number;
 }
-export interface StateFile {
-  [entryId: string]: EntryState;
-}
 export interface Config {
   maxBulkOpen: number;
   retention: {
@@ -38,12 +35,6 @@ export interface Config {
   theme: string | null;
   port: number;
   trustedOrigins: string[];
-}
-export interface CacheFile {
-  entries: Entry[];
-  lastFetched: Record<string, number>;
-  feedErrors: Record<string, string>;
-  feedMeta: Record<string, FeedCacheMeta>;
 }
 export interface EnrichedEntry extends Entry {
   feedLabel: string;

@@ -382,3 +382,19 @@ export function parseOPML(xml: string): {
   if (body?.outline) walk(body.outline);
   return feeds;
 }
+
+export function numericSourceId(source: string): string {
+  const hex = /^[-+]?0x[0-9a-f]+$/i.test(source);
+  const numeric = hex ? Number.parseInt(source, 16) : Number(source);
+  if (!source || !Number.isFinite(numeric)) return source;
+  if (hex) return Number.isSafeInteger(numeric) ? String(numeric) : source;
+  if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)[eE][+-]?\d+$/.test(source) && !/^[+-]?0{2,}[eE]/.test(source))
+    return String(numeric);
+  const normalized = source
+    .replace(/^\+/, '')
+    .replace(/^(-?)0+(?=\d)/, '$1')
+    .replace(/(\.\d*?)0+$/, '$1')
+    .replace(/\.$/, '')
+    .replace(/^(-?)\./, '$10.');
+  return normalized === String(numeric) || normalized === '-0' ? String(numeric) : source;
+}

@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { CONFIG_LIMITS, inLimit, type ConfigPatch } from './normalize';
+import { CONFIG_LIMITS, inLimit, type ConfigPatch } from './config';
 import { isSafeObjectKey } from './security';
 import type { Config, EntryState } from '../types';
 export function record(value: unknown): value is Record<string, unknown> {
