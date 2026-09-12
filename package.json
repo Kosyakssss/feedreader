@@ -8,7 +8,8 @@
     "unread": "bun scripts/unread.ts",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && oxlint --deny-warnings . && oxfmt --check .",
     "format": "oxfmt .",
-    "migrate": "bun scripts/migrate-json.ts"
+    "migrate": "bun scripts/migrate-json.ts",
+    "migrate:themes": "bun scripts/migrate-themes.ts"
   },
   "devDependencies": {
     "@sveltejs/kit": "2.70.3",
