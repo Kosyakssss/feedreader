@@ -1,5 +1,5 @@
-import type { Entry } from '../../types';
-import { isSafeExternalUrl } from '../security';
+import type { Entry } from '../types';
+import { isSafeExternalUrl } from './external-http';
 const xmlPredefinedEntities = new Set(['amp', 'lt', 'gt', 'quot', 'apos']);
 const feedHtmlEntities: Record<string, string> = {
   nbsp: '\u00a0',
@@ -38,12 +38,35 @@ const feedHtmlEntities: Record<string, string> = {
   yuan: '\u00a5',
   cedil: '\u00b8',
 };
-function parseXml(xml: string): unknown {
+function parseXml(input: string | Uint8Array, contentType = ''): unknown {
+  let xml = input;
+  let fallbackEncoding = 'utf-8';
+  if (typeof input !== 'string') {
+    const header = Buffer.from(input.subarray(0, 512)).toString('latin1');
+    const declared = /<\?xml[^>]*encoding\s*=\s*["']([^"']+)/i.exec(header)?.[1];
+    const charset = /charset\s*=\s*["']?([\w-]+)/i.exec(contentType)?.[1];
+    const bom = input[0] === 0xff || input[0] === 0xfe || input[0] === 0xef;
+    const encoding = declared ?? charset;
+    fallbackEncoding = bom
+      ? input[0] === 0xff
+        ? 'utf-16le'
+        : input[0] === 0xfe
+          ? 'utf-16be'
+          : 'utf-8'
+      : (encoding ?? 'utf-8');
+    if (
+      !bom &&
+      encoding &&
+      !(declared ? /^(utf-?8|utf-?16(?:le|be)?|iso-8859-1)$/i : /^utf-?8$/i).test(encoding)
+    )
+      xml = new TextDecoder(encoding).decode(input);
+  }
   try {
     return Bun.XML.parse(xml);
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
-    return Bun.XML.parse(repairXmlEntities(xml));
+    const text = typeof xml === 'string' ? xml : new TextDecoder(fallbackEncoding).decode(xml);
+    return Bun.XML.parse(repairXmlEntities(text));
   }
 }
 function repairXmlEntities(xml: string): string {
@@ -235,42 +258,22 @@ export function buildEntry(
     url: safeUrl,
     title,
     published,
+    publishedTime: publishedTime({ published }),
   };
 }
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-export function decodeFeedBytes(bytes: Buffer, contentType?: string | null): string {
-  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf)
-    return decodeWith('utf-8', bytes.subarray(3));
-  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe)
-    return decodeWith('utf-16le', bytes.subarray(2));
-  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff)
-    return decodeWith('utf-16be', bytes.subarray(2));
-  const charsetFromHeader = /charset=([\w-]+)/i.exec(contentType ?? '')?.[1];
-  const declared = /^(<\?xml[^>]*?)\?>/i.exec(bytes.subarray(0, 512).toString('latin1'))?.[1];
-  const charsetFromXml = /\bencoding\s*=\s*["']([\w-]+)["']/i.exec(declared ?? '')?.[1];
-  for (const label of [charsetFromXml, charsetFromHeader]) {
-    if (!label) continue;
-    try {
-      return decodeWith(label, bytes);
-    } catch {}
-  }
-  return decodeWith('utf-8', bytes);
-}
-function decodeWith(label: string, bytes: Buffer): string {
-  return new TextDecoder(label, { fatal: false }).decode(bytes);
 }
 type FeedFormat = 'rss' | 'atom' | 'rdf' | 'json' | 'unrecognized';
 export interface ParsedFeed {
   format: FeedFormat;
   entries: Entry[];
 }
-function parseFeedStructured(xml: string, feedId: string): ParsedFeed {
+function parseFeedStructured(xml: string | Uint8Array, feedId: string, contentType: string): ParsedFeed {
   const entries: Entry[] = [];
   let doc: unknown;
   try {
-    doc = parseXml(xml);
+    doc = parseXml(xml, contentType);
   } catch {
     return { format: 'unrecognized', entries };
   }
@@ -351,12 +354,19 @@ function tryParseJsonFeed(text: string, feedId: string): ParsedFeed | null {
   }
   return { format: 'json', entries };
 }
-export function parseFeedAny(text: string, feedId: string): ParsedFeed {
-  const json = tryParseJsonFeed(text, feedId);
-  if (json) return json;
-  return parseFeedStructured(text, feedId);
+export function parseFeedAny(input: string | Uint8Array, feedId: string, contentType = ''): ParsedFeed {
+  const prefix =
+    typeof input === 'string' ? input.slice(0, 64) : new TextDecoder().decode(input.subarray(0, 64));
+  if (prefix.trimStart().startsWith('{')) {
+    const json = tryParseJsonFeed(
+      typeof input === 'string' ? input : new TextDecoder().decode(input),
+      feedId,
+    );
+    if (json) return json;
+  }
+  return parseFeedStructured(input, feedId, contentType);
 }
-export function parseOPML(xml: string): {
+export function parseOPML(xml: string | Uint8Array): {
   url: string;
   label: string;
 }[] {
@@ -381,20 +391,4 @@ export function parseOPML(xml: string): {
   const body = opml && isRecord(opml.body) ? opml.body : null;
   if (body?.outline) walk(body.outline);
   return feeds;
-}
-
-export function numericSourceId(source: string): string {
-  const hex = /^[-+]?0x[0-9a-f]+$/i.test(source);
-  const numeric = hex ? Number.parseInt(source, 16) : Number(source);
-  if (!source || !Number.isFinite(numeric)) return source;
-  if (hex) return Number.isSafeInteger(numeric) ? String(numeric) : source;
-  if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)[eE][+-]?\d+$/.test(source) && !/^[+-]?0{2,}[eE]/.test(source))
-    return String(numeric);
-  const normalized = source
-    .replace(/^\+/, '')
-    .replace(/^(-?)0+(?=\d)/, '$1')
-    .replace(/(\.\d*?)0+$/, '$1')
-    .replace(/\.$/, '')
-    .replace(/^(-?)\./, '$10.');
-  return normalized === String(numeric) || normalized === '-0' ? String(numeric) : source;
 }
