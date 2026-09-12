@@ -2,7 +2,7 @@ import type { Config, EnrichedEntry, EntryState, Feed } from '../types';
 import { externalPath } from './paths';
 import type { FeedData, FeedHealth, RefreshStatus } from './types';
 type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
-async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: Method, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const headers = new Headers();
   let requestBody: BodyInit | undefined;
   if (body instanceof FormData) {
@@ -11,7 +11,7 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
     headers.set('content-type', 'application/json');
     requestBody = JSON.stringify(body);
   }
-  const response = await fetch(externalPath(path), { method, headers, body: requestBody });
+  const response = await fetch(externalPath(path), { method, headers, body: requestBody, signal });
   const contentType = response.headers.get('content-type') ?? '';
   const data: unknown = contentType.includes('json') ? await response.json() : await response.text();
   if (!response.ok) {
@@ -30,15 +30,20 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
   return data as T;
 }
 export const api = {
-  config: () => request<Config>('GET', '/api/config'),
+  config: (signal?: AbortSignal) => request<Config>('GET', '/api/config', undefined, signal),
   saveConfig: (config: Pick<Config, 'maxBulkOpen' | 'retention'>) =>
     request<Config>('PUT', '/api/config', config),
-  entries: () => request<EnrichedEntry[]>('GET', '/api/entries'),
-  feeds: () => request<FeedData>('GET', '/api/feeds'),
+  entries: (signal?: AbortSignal) => request<EnrichedEntry[]>('GET', '/api/entries', undefined, signal),
+  feeds: (signal?: AbortSignal) => request<FeedData>('GET', '/api/feeds', undefined, signal),
   startRefresh: (feedIds?: string[]) =>
     request<RefreshStatus>('POST', '/api/refresh', feedIds ? { feedIds } : undefined),
-  refreshStatus: (cursor: number, feedCursor: number) =>
-    request<RefreshStatus>('GET', `/api/refresh/status?since=${cursor}&feedsSince=${feedCursor}`),
+  refreshStatus: (cursor: number, feedCursor: number, signal?: AbortSignal) =>
+    request<RefreshStatus>(
+      'GET',
+      `/api/refresh/status?since=${cursor}&feedsSince=${feedCursor}`,
+      undefined,
+      signal,
+    ),
   updateEntries: (
     entries: Record<
       string,

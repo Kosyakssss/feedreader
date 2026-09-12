@@ -33,7 +33,8 @@ export class Reader {
   private pending: Updates[] = [];
   private writes: Promise<unknown> = Promise.resolve();
   private topics = new Set<SharedTopic>();
-  private syncJob: Promise<void> | null = null;
+  private syncController: AbortController | null = null;
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private events: EventSource | null = null;
   private disposed = false;
   private toastTimers = new Set<ReturnType<typeof setTimeout>>();
@@ -92,11 +93,18 @@ export class Reader {
   }
   stop(): void {
     this.disposed = true;
+    this.syncController?.abort();
+    clearTimeout(this.retryTimer);
     this.events?.close();
     for (const timer of this.toastTimers) clearTimeout(timer);
   }
   resume(): void {
     if (!this.disposed && document.visibilityState !== 'hidden') {
+      this.syncController?.abort();
+      this.syncController = null;
+      clearTimeout(this.retryTimer);
+      this.retryTimer = undefined;
+      this.incoming = [];
       this.events?.close();
       this.connect();
       this.schedule(['sync']);
@@ -217,9 +225,11 @@ export class Reader {
   }
   private schedule(topics: SharedTopic[]): void {
     topics.forEach((topic) => this.topics.add(topic));
-    if (this.syncJob || this.disposed) return;
-    this.syncJob = (async () => {
-      while ((this.topics.size || this.incoming.length) && !this.disposed) {
+    if (this.syncController || this.retryTimer || this.disposed) return;
+    const controller = new AbortController();
+    this.syncController = controller;
+    void (async () => {
+      while ((this.topics.size || this.incoming.length) && !controller.signal.aborted) {
         for (const data of this.incoming.splice(0)) {
           if (data.entryStates) {
             for (const [id, state] of Object.entries(data.entryStates))
@@ -233,23 +243,35 @@ export class Reader {
         }
         const topics = [...this.topics];
         this.topics.clear();
-        if (topics.length) await this.load(topics);
+        if (topics.length) await this.load(topics, controller.signal);
       }
     })()
-      .catch(() => this.toast('Could not synchronize saved changes'))
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        this.topics.add('sync');
+        if (document.visibilityState !== 'hidden')
+          this.retryTimer = setTimeout(() => {
+            this.retryTimer = undefined;
+            if (document.visibilityState !== 'hidden') this.schedule([]);
+          }, 3000);
+      })
       .finally(() => {
-        this.syncJob = null;
-        if (this.topics.size || this.incoming.length) this.schedule([]);
+        if (this.syncController !== controller) return;
+        this.syncController = null;
+        if (document.visibilityState !== 'hidden' && (this.topics.size || this.incoming.length))
+          this.schedule([]);
       });
   }
-  private async load(topics: SharedTopic[]): Promise<void> {
+  private async load(topics: SharedTopic[], cancellation: AbortSignal): Promise<void> {
+    const signal = AbortSignal.any([cancellation, AbortSignal.timeout(15000)]);
     const full = topics.includes('sync');
     const [entries, feeds, config, status] = await Promise.all([
-      full || topics.includes('entries') ? api.entries() : null,
-      full || topics.includes('feeds') ? api.feeds() : null,
-      full || topics.includes('config') ? api.config() : null,
-      full ? api.refreshStatus(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER) : null,
+      full || topics.includes('entries') ? api.entries(signal) : null,
+      full || topics.includes('feeds') ? api.feeds(signal) : null,
+      full || topics.includes('config') ? api.config(signal) : null,
+      full ? api.refreshStatus(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, signal) : null,
     ]);
+    signal.throwIfAborted();
     if (entries) {
       this.receive(entries, true);
       this.complete = true;

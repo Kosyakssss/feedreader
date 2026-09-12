@@ -93,7 +93,11 @@
   /></svelte:head
 >
 <svelte:document onkeydown={keydown} onvisibilitychange={() => reader.resume()} />
-<svelte:window onpageshow={() => reader.resume()} ononline={() => reader.resume()} />
+<svelte:window
+  onpageshow={() => reader.resume()}
+  ononline={() => reader.resume()}
+  onfocus={() => reader.resume()}
+/>
 <nav class="nav-bar">
   <a href={reader.path('/')} class="nav-logo"
     ><Icon name="bookmark" class="ui-icon nav-logo-icon" /><span>Feedreader</span></a
