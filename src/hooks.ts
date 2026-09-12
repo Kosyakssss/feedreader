@@ -1,2 +1,3 @@
 import type { Reroute } from '@sveltejs/kit';
-export const reroute: Reroute = ({ url }) => url.pathname.replace(/^\/feedreader(?=\/|$)/, '') || '/';
+import { internalPath } from '$lib/paths';
+export const reroute: Reroute = ({ url }) => internalPath(url.pathname);

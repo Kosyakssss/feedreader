@@ -1,12 +1,6 @@
-import { safeFetchExternal } from '../network';
+import { safeFetchExternal, discardResponseBody } from '../network';
 import { isSafeExternalUrl } from '../security';
-import {
-  UA,
-  MAX_DISCOVERY_BYTES,
-  readResponseText,
-  discardResponseBody,
-  type ResolvedFeedInput,
-} from './transport';
+import { UA, MAX_DISCOVERY_BYTES, readResponseText, type ResolvedFeedInput } from './transport';
 import {
   parseAtprotoFeedUrl,
   resolveActorInput,

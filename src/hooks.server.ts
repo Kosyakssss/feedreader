@@ -1,4 +1,4 @@
-import { building } from '$app/environment';
+import { building, dev } from '$app/environment';
 import { json, isHttpError, type Handle } from '@sveltejs/kit';
 import { app } from '$lib/server/app';
 import { requestPolicy, apiError, requestBase } from '$lib/server/request-policy';
@@ -8,7 +8,7 @@ if (!building) {
   const a = app();
   const config = a.store.config();
   const port = Number(process.env.PORT || config.port);
-  policy = requestPolicy(config, port);
+  if (dev) policy = requestPolicy(config, port);
   void a.refresh.start().catch(() => undefined);
   process.once('feedreader:shutdown', async () => {
     a.events.close();
@@ -44,7 +44,7 @@ export const handle: Handle = async ({ event, resolve }) => {
       response.headers.set('x-frame-options', 'DENY');
       response.headers.set('referrer-policy', 'same-origin');
     }
-    return apiError(response, url.pathname);
+    return dev ? apiError(response, url.pathname) : response;
   } catch (e) {
     if (url.pathname.includes('/api/'))
       return json(

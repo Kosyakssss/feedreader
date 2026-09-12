@@ -30,11 +30,6 @@ export async function fetchJson<T>(rawUrl: string, init: RequestInit = {}): Prom
   }
   return JSON.parse(await readResponseText(res, MAX_DISCOVERY_BYTES)) as T;
 }
-export async function discardResponseBody(res: Response): Promise<void> {
-  try {
-    await res.body?.cancel();
-  } catch {}
-}
 export async function readResponseText(res: Response, maxBytes: number): Promise<string> {
   if (!res.body) {
     const text = await res.text();

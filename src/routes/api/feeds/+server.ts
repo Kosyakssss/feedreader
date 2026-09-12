@@ -1,9 +1,9 @@
 import { json, error } from '@sveltejs/kit';
 import { app } from '$lib/server/app';
 import type { RequestHandler } from './$types';
-import { health, add } from '$lib/server/subscriptions';
+import { add } from '$lib/server/subscriptions';
 import { body, record } from '$lib/server/http';
-export const GET: RequestHandler = () => health(app()).then(json);
+export const GET: RequestHandler = () => json(app().store.health());
 export const POST: RequestHandler = async ({ request, platform }) => {
   platform?.server.timeout(platform.request, 120);
   const value = await body(request);

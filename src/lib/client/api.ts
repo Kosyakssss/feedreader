@@ -1,5 +1,5 @@
 import type { Config, EnrichedEntry, EntryState, Feed } from '../types';
-import { externalPath } from './paths';
+import { externalPath } from '../paths';
 import type { FeedData, FeedHealth, RefreshStatus } from './types';
 type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
 async function request<T>(method: Method, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {

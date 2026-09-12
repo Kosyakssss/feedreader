@@ -1,6 +1,6 @@
 import { app } from '$lib/server/app';
 import { requestBase } from '$lib/server/request-policy';
-import { internalPath } from '$lib/client/paths';
+import { internalPath } from '$lib/paths';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = ({ url, params, request, untrack }) => {

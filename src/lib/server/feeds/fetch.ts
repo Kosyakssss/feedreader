@@ -1,8 +1,8 @@
 import type { Feed, FeedCacheMeta } from '../../types';
-import { safeFetchExternal } from '../network';
+import { safeFetchExternal, discardResponseBody } from '../network';
 import { parseFeedAny } from './parse';
 import { fetchAtprotoFeed, parseAtprotoFeedUrl } from './atproto';
-import { UA, readResponseText, discardResponseBody, type FeedFetchResult } from './transport';
+import { UA, readResponseText, type FeedFetchResult } from './transport';
 export type { FeedFetchResult, ResolvedFeedInput } from './transport';
 const FETCH_CONCURRENCY = 8;
 const FEED_FETCH_TIMEOUT_MS = 8000;

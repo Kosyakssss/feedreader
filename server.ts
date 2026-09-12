@@ -36,8 +36,6 @@ const server = Bun.serve({
     const denied = policy(request);
     if (denied) return denied;
     const url = new URL(request.url);
-    if (url.pathname.endsWith('/api/events')) server.timeout(request, 0);
-    else if (url.pathname.endsWith('/api/feeds') && request.method === 'POST') server.timeout(request, 120);
     if (url.pathname.startsWith('/feedreader/_app/')) url.pathname = url.pathname.slice('/feedreader'.length);
     const headers = new Headers(request.headers);
     headers.set(

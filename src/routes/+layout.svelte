@@ -4,7 +4,7 @@
   import { afterNavigate } from '$app/navigation';
   import { toastOut } from '$lib/client/motion';
   import { Reader, readerKey } from '$lib/client/reader.svelte';
-  import { internalPath } from '$lib/client/paths';
+  import { internalPath } from '$lib/paths';
   import { faviconDataUri } from '$lib/icons';
   import Icon from '$lib/components/Icon.svelte';
   import RefreshStatus from '$lib/components/RefreshStatus.svelte';

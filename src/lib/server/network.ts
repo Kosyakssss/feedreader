@@ -90,7 +90,7 @@ function normalizedHostname(hostname: string): string {
     .replace(/\.+$/, '')
     .toLowerCase();
 }
-async function discardResponseBody(response: Response): Promise<void> {
+export async function discardResponseBody(response: Response): Promise<void> {
   try {
     await response.body?.cancel();
   } catch {}

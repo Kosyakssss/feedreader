@@ -6,9 +6,6 @@ import { fetchFeed } from './feeds/fetch';
 import { parseAtprotoFeedUrl } from './feeds/atproto';
 import { parseOPML } from './feeds/parse';
 import { isSafeExternalUrl } from './security';
-export async function health(app: App) {
-  return app.store.health();
-}
 export async function add(app: App, input: string) {
   const resolved = await resolveFeedInput(input).catch((e) => error(400, e.message));
   const duplicate = () => error(409, 'Feed already exists');

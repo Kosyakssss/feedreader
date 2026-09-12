@@ -9,7 +9,7 @@ import {
 import type { FeedData, InitialData } from './types';
 import { api } from './api';
 import { mergeEntryState, safeHttpUrl } from './values';
-import { externalPath } from './paths';
+import { externalPath } from '../paths';
 type Updates = Record<string, Pick<EntryState, 'read' | 'starred'>>;
 export const readerKey = Symbol('reader');
 export const useReader = () => getContext<Reader>(readerKey);
