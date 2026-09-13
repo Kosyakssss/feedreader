@@ -1,0 +1,29 @@
+:root {
+  color-scheme: light dark;
+  --background: light-dark(#fffcf0, #100f0f);
+  --surface: light-dark(#f2f0e5, #1c1b1a);
+  --surface-hover: light-dark(#e6e4d9, #282726);
+  --navigation-background: light-dark(rgba(255, 252, 240, 0.92), rgba(16, 15, 15, 0.92));
+  --foreground: light-dark(#282726, #cecdc3);
+  --muted: light-dark(#6f6e69, #9f9d96);
+  --link: light-dark(#205ea6, #4385be);
+  --accent: light-dark(#205ea6, #4385be);
+  --accent-hover: light-dark(#1a4f8a, #67a0ca);
+  --accent-soft: light-dark(rgba(32, 94, 166, 0.1), rgba(67, 133, 190, 0.18));
+  --accent-soft-hover: light-dark(rgba(32, 94, 166, 0.14), rgba(67, 133, 190, 0.24));
+  --selection-background: light-dark(#dad8ce, #403e3c);
+  --selection-foreground: light-dark(#282726, #cecdc3);
+  --border: light-dark(rgba(40, 39, 38, 0.16), rgba(206, 205, 195, 0.17));
+  --star-accent: light-dark(#bc5215, #da702c);
+  --danger: light-dark(#af3029, #d14d41);
+  --warning: light-dark(#ad8301, #d0a215);
+  --field-background: light-dark(rgba(40, 39, 38, 0.06), rgba(206, 205, 195, 0.08));
+  --field-focus-ring: light-dark(rgba(32, 94, 166, 0.25), rgba(67, 133, 190, 0.32));
+  --scrim: light-dark(rgba(40, 39, 38, 0.34), rgba(16, 15, 15, 0.72));
+  --accent-foreground: light-dark(#fffcf0, #100f0f);
+  --navigation-shadow: rgba(0, 0, 0, 0.16);
+  --shadow: rgba(0, 0, 0, 0.12);
+  --shadow-faint: rgba(0, 0, 0, 0.08);
+  --toast-shadow: light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.4));
+  --toast-outline: light-dark(rgba(0, 0, 0, 0.05), rgba(255, 255, 255, 0.06));
+}

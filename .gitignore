@@ -1,4 +1,6 @@
 node_modules
 .DS_Store
-
-data/*.json
+.svelte-kit
+build
+data/*
+!data/default.css

@@ -1,19 +1,17 @@
 {
+  "extends": "./.svelte-kit/tsconfig.json",
   "compilerOptions": {
-    "target": "es2023",
-    "lib": ["es2023", "dom", "dom.iterable"],
-    "types": ["bun"],
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "allowImportingTsExtensions": true,
-    "noEmit": true,
-    "verbatimModuleSyntax": false,
+    "allowJs": true,
+    "checkJs": false,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
     "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "noFallthroughCasesInSwitch": true,
-    "exactOptionalPropertyTypes": false,
-    "skipLibCheck": true
+    "moduleResolution": "bundler",
+    "types": ["bun"],
+    "noUncheckedIndexedAccess": true
   },
-  "include": ["server.ts", "client/**/*.ts", "lib/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.svelte", "server.ts", "scripts/**/*.ts", "vite.config.ts"]
 }

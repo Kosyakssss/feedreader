@@ -1,0 +1,247 @@
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+  --text-base: 15px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --duration-default: 180ms;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  color: var(--foreground);
+  background: var(--background);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
+}
+
+::selection {
+  background: var(--selection-background);
+  color: var(--selection-foreground);
+}
+
+.ui-icon {
+  display: block;
+  width: 1em;
+  height: 1em;
+  flex: none;
+  overflow: visible;
+}
+
+.page-title {
+  font-size: 1.3em;
+  font-weight: 700;
+  color: var(--foreground);
+  letter-spacing: -0.02em;
+}
+
+:focus-visible {
+  outline: 2.5px solid var(--accent);
+  outline-offset: 2px;
+  transition-duration: 0s !important;
+}
+
+.app-root {
+  display: contents;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  min-height: 100dvh;
+}
+
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--spacing-md);
+}
+
+.search-input {
+  display: block;
+  width: 100%;
+  margin-bottom: var(--spacing-sm);
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-md);
+}
+
+.empty-state {
+  padding: var(--spacing-xl);
+  color: var(--muted);
+  text-align: center;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.search-input {
+  background: var(--field-background);
+  border: 1px solid transparent;
+  border-radius: 0;
+  padding: 7px 12px;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  transition: none;
+  outline: none;
+}
+
+.search-input::placeholder {
+  color: var(--muted);
+}
+
+.search-input:focus {
+  background: var(--surface);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3.5px var(--field-focus-ring);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  color: var(--accent);
+  padding: 6px 14px;
+  border-radius: 0;
+  font-family: var(--font-sans);
+  font-size: 0.85em;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--duration-default),
+    border-color var(--duration-default),
+    transform 100ms ease,
+    opacity var(--duration-default);
+}
+
+.btn:hover {
+  background: var(--surface-hover);
+}
+
+.btn:active {
+  transform: scale(0.97);
+  opacity: 0.8;
+}
+
+.btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+  transform: none;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-foreground);
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.btn-primary:active {
+  background: var(--accent-hover);
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 1.1em;
+  padding: var(--spacing-xs);
+  border-radius: 0;
+  transition:
+    color var(--duration-default),
+    background var(--duration-default),
+    transform 120ms ease;
+  line-height: 1;
+}
+
+.btn-icon .ui-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.button-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.btn-icon:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+.btn-icon:active {
+  transform: scale(0.88);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+@media (max-width: 699px) {
+  :root {
+    --spacing-md: 12px;
+    --text-base: 14px;
+  }
+
+  .page {
+    padding: var(--spacing-sm);
+  }
+
+  .btn-icon {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .btn {
+    font-size: 0.8em;
+    padding: 6px var(--spacing-sm);
+  }
+}

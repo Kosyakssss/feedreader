@@ -1,6 +1,6 @@
 {
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": ["build/**", ".svelte-kit/**"],
   "rules": {
-    "complexity": ["error", 35]
+    "no-unused-vars": "error"
   }
 }

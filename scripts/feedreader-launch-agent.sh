@@ -30,21 +30,16 @@ find_bun() {
 }
 
 xml_escape() {
-    printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+    "$(find_bun)" -e 'process.stdout.write(Bun.escapeHTML(Bun.argv[1]))' "$1"
 }
 
 current_port() {
-    port=8787
-    config="$project_dir/data/config.json"
-    if [ -f "$config" ] && command -v jq >/dev/null 2>&1; then
-        configured=$(jq -r 'if type == "object" and (.port | type == "number") then .port else empty end' "$config" 2>/dev/null || true)
-        [ -z "$configured" ] || port=$configured
-    fi
-    printf '%s\n' "$port"
+    "$(find_bun)" -e 'const { Configuration } = await import(Bun.argv[1]); console.log(new Configuration(Bun.argv[2]).read().port)' \
+        "$project_dir/src/lib/server/config.ts" "${FEEDREADER_DATA_DIR:-$project_dir/data}"
 }
 
 tailscale_target() {
-    printf 'http://127.0.0.1:%s\n' "$(current_port)"
+    printf 'http://127.0.0.1:%s/feedreader\n' "$(current_port)"
 }
 
 start_tailscale_serve() {
@@ -90,8 +85,6 @@ write_plist() {
     bun_xml=$(xml_escape "$bun_bin")
     server_xml=$(xml_escape "$project_dir/server.ts")
     project_xml=$(xml_escape "$project_dir")
-    stdout_xml=$(xml_escape "$log_dir/stdout.log")
-    stderr_xml=$(xml_escape "$log_dir/stderr.log")
     path_xml=$(xml_escape "$launch_path")
 
     cat >"$tmp" <<EOF
@@ -112,10 +105,6 @@ write_plist() {
   <true/>
   <key>ProcessType</key>
   <string>Background</string>
-  <key>StandardOutPath</key>
-  <string>$stdout_xml</string>
-  <key>StandardErrorPath</key>
-  <string>$stderr_xml</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
@@ -136,8 +125,6 @@ write_tailscale_plist() {
     trap 'rm -f "$tmp"' EXIT HUP INT TERM
 
     script_xml=$(xml_escape "$script_dir/feedreader-launch-agent.sh")
-    stdout_xml=$(xml_escape "$log_dir/tailscale-stdout.log")
-    stderr_xml=$(xml_escape "$log_dir/tailscale-stderr.log")
     path_xml=$(xml_escape "$launch_path")
 
     cat >"$tmp" <<EOF
@@ -158,10 +145,6 @@ write_tailscale_plist() {
   <integer>60</integer>
   <key>ProcessType</key>
   <string>Background</string>
-  <key>StandardOutPath</key>
-  <string>$stdout_xml</string>
-  <key>StandardErrorPath</key>
-  <string>$stderr_xml</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
@@ -193,7 +176,7 @@ show_status() {
     fi
 
     if command -v curl >/dev/null 2>&1; then
-        health_url="http://127.0.0.1:$(current_port)/api/health"
+        health_url="http://127.0.0.1:$(current_port)/feedreader/api/health"
         if health=$(curl --fail --silent "$health_url" 2>/dev/null); then
             echo "health: $health"
         else
@@ -235,6 +218,7 @@ start_tailscale_agent() {
 cmd=${1:-status}
 case "$cmd" in
     install|restart)
+        (cd "$project_dir" && "$(find_bun)" run build)
         write_plist
         stop_agent >/dev/null 2>&1 || true
         launchctl bootstrap "$domain" "$plist"
