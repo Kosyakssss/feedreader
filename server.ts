@@ -27,12 +27,16 @@ process.env.PROTOCOL_HEADER = 'x-forwarded-proto';
 const { getHandler } = await import(built);
 const handler = getHandler();
 const server = Bun.serve({
-  routes: { '/feedreader/_app/*': { dir: resolve(import.meta.dir, 'build/client/feedreader/_app') } },
   hostname: process.env.HOST,
   port,
   maxRequestBodySize: 2 * 1024 * 1024,
   idleTimeout: 10,
   async fetch(request, server) {
+    const asset = new URL(request.url);
+    if (asset.pathname.startsWith('/feedreader/_app/')) {
+      asset.pathname = asset.pathname.slice('/feedreader'.length);
+      return handler.fetch(new Request(asset, request), server);
+    }
     const headers = new Headers(request.headers);
     if (!headers.has('x-forwarded-proto')) headers.set('x-forwarded-proto', 'http');
     const response = await handler.fetch(new Request(request, { headers }), server);

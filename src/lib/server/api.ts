@@ -3,6 +3,7 @@ import type { EnrichedEntry, EntryState } from '../types';
 import { app } from './app';
 import { add, remove, importOPML, exportOPML } from './subscriptions';
 import { parseConfig } from './config';
+import { acceptsGzip } from './request-policy';
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -32,8 +33,29 @@ function statePatch(value: unknown): Record<string, Pick<EntryState, 'read' | 's
     }),
   );
 }
-let cached:
-  | { revision: number; entries: EnrichedEntry[]; bytes?: Uint8Array<ArrayBuffer>; etag?: string }
+type EncodedSnapshot = { bytes: Uint8Array<ArrayBuffer>; etag: string; gzip?: Uint8Array<ArrayBuffer> };
+function encodeSnapshot(value: unknown): EncodedSnapshot {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  return { bytes, etag: `W/"${Bun.hash(bytes).toString(16)}"` };
+}
+function snapshotResponse(snapshot: EncodedSnapshot, request: Request): Response {
+  const headers = new Headers({
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-cache',
+    vary: 'accept-encoding',
+    etag: snapshot.etag,
+  });
+  if (request.headers.get('if-none-match') === snapshot.etag)
+    return new Response(null, { status: 304, headers });
+  if (acceptsGzip(request)) {
+    headers.set('content-encoding', 'gzip');
+    return new Response((snapshot.gzip ??= Bun.gzipSync(snapshot.bytes)), { headers });
+  }
+  return new Response(snapshot.bytes, { headers });
+}
+let cached: { revision: number; entries: EnrichedEntry[]; asset?: EncodedSnapshot } | undefined;
+let synchronized:
+  | { snapshot: NonNullable<typeof cached>; metadata: string; asset: EncodedSnapshot }
   | undefined;
 function entries() {
   const store = app().store;
@@ -57,30 +79,29 @@ async function route({ request, params, platform, url }: RequestEvent): Promise<
     method = request.method;
   if (method === 'GET') {
     switch (path) {
-      case 'sync':
-        return json({
-          entries: entries().entries,
+      case 'sync': {
+        const snapshot = entries();
+        const metadata = {
           feeds: a.store.health(),
           config: a.config.read(),
           themes: a.themes.list(),
           status: a.refresh.status(),
           eventId: a.events.sequence,
-        });
+        };
+        const key = JSON.stringify(metadata);
+        if (synchronized?.snapshot !== snapshot || synchronized.metadata !== key)
+          synchronized = {
+            snapshot,
+            metadata: key,
+            asset: encodeSnapshot({ entries: snapshot.entries, ...metadata }),
+          };
+        return snapshotResponse(synchronized.asset, request);
+      }
       case 'entries': {
         const feed = url.searchParams.get('feed');
         if (feed) return json(a.store.entries(feed));
         const snapshot = entries();
-        snapshot.bytes ??= new TextEncoder().encode(JSON.stringify(snapshot.entries));
-        snapshot.etag ??= `W/"${Bun.hash(snapshot.bytes).toString(16)}"`;
-        const headers = {
-          'content-type': 'application/json; charset=utf-8',
-          'cache-control': 'no-cache',
-          etag: snapshot.etag,
-        };
-        return new Response(request.headers.get('if-none-match') === snapshot.etag ? null : snapshot.bytes, {
-          status: request.headers.get('if-none-match') === snapshot.etag ? 304 : 200,
-          headers,
-        });
+        return snapshotResponse((snapshot.asset ??= encodeSnapshot(snapshot.entries)), request);
       }
       case 'config':
         return json(a.config.read());
