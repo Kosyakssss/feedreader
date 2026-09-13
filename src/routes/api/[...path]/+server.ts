@@ -1,3 +1,7 @@
-import { json } from '@sveltejs/kit';
-import type { RequestHandler } from './$types';
-export const fallback: RequestHandler = () => json({ error: 'Not found' }, { status: 404 });
+import { handleApi } from '$lib/server/api';
+export const GET = handleApi;
+export const POST = handleApi;
+export const PUT = handleApi;
+export const DELETE = handleApi;
+export const PATCH = handleApi;
+export const fallback = handleApi;
