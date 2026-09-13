@@ -12,7 +12,7 @@ uid=$(id -u)
 domain="gui/$uid"
 service="$domain/$label"
 tailscale_service="$domain/$tailscale_label"
-launch_path="$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+launch_path="$HOME/.bun/bin:$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 usage() {
     echo "Usage: scripts/feedreader-launch-agent.sh install|uninstall|start|stop|restart|status|plist"
@@ -21,6 +21,8 @@ usage() {
 find_bun() {
     if command -v bun >/dev/null 2>&1; then
         command -v bun
+    elif [ -x "$HOME/.bun/bin/bun" ]; then
+        printf '%s\n' "$HOME/.bun/bin/bun"
     elif [ -x /opt/homebrew/bin/bun ]; then
         printf '%s\n' /opt/homebrew/bin/bun
     else
