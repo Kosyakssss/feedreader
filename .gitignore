@@ -2,6 +2,5 @@ node_modules
 .DS_Store
 .svelte-kit
 build
-data/*.json
-data/*.sqlite*
-data/themes/*.css
+data/*
+!data/default.css

@@ -1,5 +1,7 @@
 {
   "name": "feedreader",
+  "version": "0.1.0",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "bun --bun vite --host 127.0.0.1",
@@ -8,8 +10,7 @@
     "unread": "bun scripts/unread.ts",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && oxlint --deny-warnings . && oxfmt --check .",
     "format": "oxfmt .",
-    "migrate": "bun scripts/migrate-json.ts",
-    "migrate:themes": "bun scripts/migrate-themes.ts"
+    "migrate": "bun scripts/migrate.ts"
   },
   "devDependencies": {
     "@sveltejs/kit": "2.70.3",
