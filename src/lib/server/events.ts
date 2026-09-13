@@ -3,6 +3,9 @@ export class Events {
   private clients = new Set<ReadableStreamDefaultController<Uint8Array>>();
   private id = 0;
   private encoder = new TextEncoder();
+  get sequence(): number {
+    return this.id;
+  }
   publish(payload: SharedEventPayload): void {
     const bytes = this.encoder.encode(`id: ${++this.id}\ndata: ${JSON.stringify(payload)}\n\n`);
     for (const client of this.clients) this.send(client, bytes);
