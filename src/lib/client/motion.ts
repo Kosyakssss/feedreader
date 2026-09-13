@@ -1,16 +1,16 @@
 import type { TransitionConfig } from 'svelte/transition';
 function bezier(x1: number, y1: number, x2: number, y2: number) {
-  const point = (t: number, a: number, b: number) =>
-    3 * (1 - t) * (1 - t) * t * a + 3 * (1 - t) * t * t * b + t * t * t;
-  return (x: number) => {
-    let lo = 0,
-      hi = 1;
-    for (let i = 0; i < 18; i++) {
-      const mid = (lo + hi) / 2;
-      if (point(mid, x1, x2) < x) lo = mid;
-      else hi = mid;
-    }
-    return point((lo + hi) / 2, y1, y2);
+  let sampler: Animation;
+  return (progress: number) => {
+    sampler ??= new Animation(
+      new KeyframeEffect(null, [], {
+        duration: 1,
+        fill: 'both',
+        easing: `cubic-bezier(${x1}, ${y1}, ${x2}, ${y2})`,
+      }),
+    );
+    sampler.currentTime = progress;
+    return sampler.effect!.getComputedTiming().progress ?? progress;
   };
 }
 const easing = bezier(0.2, 0, 0, 1),

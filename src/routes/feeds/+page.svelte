@@ -2,9 +2,8 @@
   import { onDestroy } from 'svelte';
   import { useReader, message } from '$lib/client/reader.svelte';
   import { api } from '$lib/client/api';
-  import { timeAgo } from '$lib/client/values';
-  import { reveal, revealContent, collapse } from '$lib/client/motion';
-  import Icon from '$lib/components/Icon.svelte';
+  import FeedRow from '$lib/components/FeedRow.svelte';
+  import FeedImport from '$lib/components/FeedImport.svelte';
   const reader = useReader();
   let address = $state(''),
     pending = $state(false),
@@ -13,29 +12,13 @@
     confirming = $state<string | null>(null),
     deleting = $state<string | null>(null),
     limit = $state(100),
-    fileInput = $state<HTMLInputElement>();
-  let revealTimer: ReturnType<typeof setTimeout> | undefined;
-  let newIds = $state.raw(new Set<string>()),
+    newIds = $state.raw(new Set<string>()),
     replacement = $state<string | null>(null);
-  let imported = $state<{ ids: string[]; total: number; reading: boolean } | null>(null);
+  let revealTimer: ReturnType<typeof setTimeout> | undefined;
   const unread = $derived(
     new Map(reader.feeds.feeds.map((feed) => [feed.id, reader.counts(feed.id).unread])),
   );
-  const issueCount = $derived(
-    Object.values(reader.feeds.health ?? {}).filter((health) => health.error).length,
-  );
-  const progress = $derived.by(() => {
-    const results =
-      imported?.ids.map((id) => reader.feeds.health?.[id]).filter((health) => health && !health.checking) ??
-      [];
-    return {
-      completed: results.length,
-      failed: results.filter((health) => health?.error).length,
-      succeeded: results.filter((health) => !health?.error).length,
-    };
-  });
-  const importing = $derived(!!imported && (imported.reading || progress.completed < imported.total));
-  const display = (url: string) => url.replace(/^https?:\/\/(?:www\.)?/i, '').replace(/\/$/, '');
+  const issueCount = $derived(Object.values(reader.feeds.health).filter((health) => health.error).length);
   async function add(event: SubmitEvent) {
     event.preventDefault();
     if (pending) return;
@@ -48,10 +31,11 @@
       newIds = new Set([result.feed.id]);
       replacement = pendingVisible ? result.feed.id : null;
       reader.feeds = {
-        ...reader.feeds,
         feeds: [result.feed, ...reader.feeds.feeds.filter((feed) => feed.id !== result.feed.id)],
         health: { ...reader.feeds.health, [result.feed.id]: result.health },
       };
+      const removed = new Set(result.removedIds);
+      reader.entries = reader.entries.filter((entry) => !removed.has(entry.id));
       reader.receive(result.entries);
       address = '';
       reader.toast(
@@ -84,38 +68,6 @@
       deleting = null;
     }
   }
-  async function importFile() {
-    const file = fileInput?.files?.[0];
-    if (!file || importing) return;
-    imported = { ids: [], total: 0, reading: true };
-    const body = new FormData();
-    body.append('file', file);
-    try {
-      const result = await api.importFeeds(body);
-      newIds = new Set(result.feeds.map((feed) => feed.id));
-      reader.feeds = {
-        ...reader.feeds,
-        feeds: [...result.feeds, ...reader.feeds.feeds.filter((feed) => !newIds.has(feed.id))],
-        health: {
-          ...reader.feeds.health,
-          ...Object.fromEntries(
-            result.feeds.map((feed) => [
-              feed.id,
-              { lastFetched: null, error: null, entryCount: 0, checking: true },
-            ]),
-          ),
-        },
-      };
-      imported = result.added ? { ids: [...newIds], total: result.added, reading: false } : null;
-      if (result.added) void reader.refresh(false, [...newIds]);
-      else reader.toast(`No new feeds · ${result.skipped} skipped`);
-    } catch (error) {
-      imported = null;
-      reader.toast(`Error: ${message(error)}`);
-    } finally {
-      if (fileInput) fileInput.value = '';
-    }
-  }
   onDestroy(() => clearTimeout(revealTimer));
 </script>
 
@@ -142,11 +94,12 @@
   <div class="feed-tools">
     <div class="add-form-wrap">
       <form class="add-form" onsubmit={add} aria-busy={pending || undefined}>
-        <label class="visually-hidden" for="add-feed-url">Feed or site address</label><input
+        <label class="visually-hidden" for="add-feed-url">Feed or site address</label>
+        <input
           class="search-input"
           id="add-feed-url"
           name="url"
-          placeholder="Feed, site URL, or @handle…"
+          placeholder="Feed or site URL…"
           required
           autocomplete="off"
           aria-autocomplete="none"
@@ -155,7 +108,8 @@
           bind:value={address}
           oninput={() => (addError = '')}
           disabled={pending}
-        /><button class="btn btn-primary" class:is-busy={pending} type="submit" disabled={pending}
+        />
+        <button class="btn btn-primary" class:is-busy={pending} type="submit" disabled={pending}
           >{pending ? 'Checking…' : 'Add'}</button
         >
       </form>
@@ -163,142 +117,182 @@
         <div class="add-feed-status-inner">{addError ? `Couldn’t add feed: ${addError}` : ''}</div>
       </div>
     </div>
-    <div class="feed-file-actions">
-      <button class="btn" disabled={importing} onclick={() => fileInput?.click()}>Import OPML</button><input
-        type="file"
-        accept=".opml,.xml"
-        hidden
-        bind:this={fileInput}
-        onchange={importFile}
-      /><a class="btn" href={reader.path('/api/feeds/export')} download="feedreader.opml">Export OPML</a>
-    </div>
-  </div>
-  <div class="feed-import-slot" class:is-visible={!!imported} aria-hidden={!imported}>
-    <div class="feed-import-slot-inner">
-      <section class="feed-import-status" aria-live="polite">
-        <div class="feed-import-title">
-          {imported?.reading
-            ? 'Reading subscriptions…'
-            : importing
-              ? `Checking imported feeds · ${progress.completed} / ${imported?.total}`
-              : `Import complete · ${progress.succeeded} checked${progress.failed ? ` · ${progress.failed} need attention` : ''}`}
-        </div>
-        <progress
-          class="feed-import-meter"
-          hidden={!imported?.total}
-          max={imported?.total || 1}
-          value={progress.completed}
-        ></progress>
-        <div class="feed-import-detail">
-          {imported?.reading
-            ? ''
-            : importing
-              ? `${progress.succeeded} ready${progress.failed ? ` · ${progress.failed} failed` : ''}`
-              : `${imported?.total ?? 0} subscriptions added`}
-        </div>
-      </section>
-    </div>
+    <FeedImport onimport={(ids) => (newIds = ids)} />
   </div>
   <div class="feed-list-header" aria-hidden="true" hidden={!reader.feeds.feeds.length}>
     <span>Subscription</span>
     <div class="feed-list-header-metrics"><span>Unread</span><span>Checked</span></div>
     <span></span>
   </div>
-  <div class="feed-list" role="list" aria-busy={pending || importing || undefined}>
-    {#if pendingVisible}<div
-        class="feed-slot feed-pending-slot"
-        in:reveal={{ active: true }}
-        out:collapse={{ replacement: !!replacement }}
-      >
-        <div class="feed-item feed-pending" role="status" in:revealContent={{ active: true }}>
-          <div class="feed-info">
-            <span class="feed-label feed-pending-label">Finding and checking feed…</span>
-            <div class="feed-meta feed-pending-address" title={address}>{display(address)}</div>
-          </div>
-          <div class="feed-metrics feed-pending-metrics">
-            <span class="feed-pending-metric-spacer"></span><span class="feed-pending-activity"
-              ><span class="feed-pending-spinner"></span></span
-            >
-          </div>
-          <span class="feed-pending-action"></span>
-        </div>
-      </div>{/if}
+  <div class="feed-list" role="list" aria-busy={pending || undefined}>
+    {#if pendingVisible}<FeedRow {address} active replacement={!!replacement} />{/if}
     {#each reader.feeds.feeds.slice(0, limit) as feed, index (feed.id)}
-      {@const health = reader.feeds.health?.[feed.id]}
-      {@const count = unread.get(feed.id) ?? 0}
-      {@const last = health?.lastFetched ? timeAgo(new Date(health.lastFetched).toISOString()) : null}
-      <div
-        class="feed-slot"
-        role="listitem"
-        data-feed-id={feed.id}
-        in:reveal={{
-          active: newIds.has(feed.id),
-          delay: Math.min(index * 30, 150),
-          replacement: replacement === feed.id,
-        }}
-        out:collapse
-      >
-        <div
-          class="feed-item"
-          in:revealContent={{
-            active: newIds.has(feed.id) && replacement !== feed.id,
-            delay: Math.min(index * 30, 150),
-          }}
-        >
-          <div class="feed-info">
-            <a class="feed-label" dir="auto" href={reader.path(`/feed/${encodeURIComponent(feed.id)}`)}
-              >{feed.label}</a
-            >
-            <div class="feed-meta" title={feed.url}>{display(feed.url)}</div>
-          </div>
-          <div class="feed-metrics">
-            <span
-              class="feed-unread"
-              class:has-unread={count > 0}
-              aria-label={`${count} unread ${count === 1 ? 'entry' : 'entries'}`}
-              ><span class="feed-unread-value">{count || '—'}</span><span class="feed-unread-context">
-                unread</span
-              ></span
-            ><span
-              class="feed-health"
-              class:has-error={!!health?.error}
-              class:is-checking={health?.checking}
-              title={health?.error || (!health?.entryCount && last ? 'Feed returned no entries' : undefined)}
-              >{health?.checking ? 'Checking…' : health?.error ? 'Error' : last || 'Not checked'}</span
-            >
-          </div>
-          <button
-            class="btn btn-feed-delete"
-            class:is-confirming={confirming === feed.id}
-            class:is-deleting={deleting === feed.id}
-            disabled={deleting === feed.id}
-            aria-busy={deleting === feed.id || undefined}
-            title={deleting === feed.id
-              ? 'Removing feed'
-              : confirming === feed.id
-                ? 'Click again to remove feed'
-                : 'Remove feed'}
-            aria-label={deleting === feed.id
-              ? `Removing ${feed.label}`
-              : confirming === feed.id
-                ? `Confirm removal of ${feed.label}`
-                : `Remove ${feed.label}`}
-            onclick={() => remove(feed.id, feed.label)}
-            ><Icon name="close" class="ui-icon feed-delete-icon feed-delete-icon-idle" /><Icon
-              name="trash"
-              class="ui-icon feed-delete-icon feed-delete-icon-confirm"
-            /><span class="feed-delete-spinner"></span></button
-          >
-        </div>
-      </div>
+      <FeedRow
+        {feed}
+        health={reader.feeds.health[feed.id]}
+        unread={unread.get(feed.id) ?? 0}
+        total={reader.counts(feed.id).total}
+        active={newIds.has(feed.id)}
+        delay={Math.min(index * 30, 150)}
+        replacement={replacement === feed.id}
+        confirming={confirming === feed.id}
+        deleting={deleting === feed.id}
+        onremove={() => remove(feed.id, feed.label)}
+      />
     {/each}
     {#if !reader.feeds.feeds.length && !pendingVisible}<div class="empty-state">
         No feeds yet. Add one above!
       </div>{/if}
     {#if reader.feeds.feeds.length > limit}<div class="feed-load-more">
-        <button class="btn" onclick={() => (limit += 100)}
-          >Show {Math.min(100, reader.feeds.feeds.length - limit)} more ({reader.feeds.feeds.length - limit} remaining)</button
-        >
+        <button class="btn" onclick={() => (limit += 100)}>
+          Show {Math.min(100, reader.feeds.feeds.length - limit)} more ({reader.feeds.feeds.length - limit} remaining)
+        </button>
       </div>{/if}
   </div>
 </div>
+
+<style>
+  .feed-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .feed-list-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 190px 40px;
+    align-items: center;
+    gap: var(--spacing-sm);
+  }
+
+  .feed-list-header-metrics {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr);
+    align-items: center;
+    gap: var(--spacing-sm);
+  }
+
+  .feed-tools,
+  .add-form {
+    display: flex;
+    gap: var(--spacing-xs);
+  }
+
+  .add-form-wrap {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .feed-tools {
+    align-items: flex-start;
+    margin-bottom: var(--spacing-md);
+  }
+
+  .add-form input {
+    flex: 1;
+  }
+
+  .add-form {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .add-form .btn-primary {
+    width: 92px;
+  }
+
+  .feeds-subtitle {
+    color: var(--muted);
+    font-size: 0.85em;
+    font-weight: 500;
+    margin-top: 1px;
+  }
+
+  .feed-tools .search-input {
+    margin-bottom: 0;
+  }
+
+  .add-feed-status {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    overflow: hidden;
+    color: var(--danger);
+    font-size: 0.78em;
+    font-weight: 500;
+    line-height: 1.35;
+    transition:
+      grid-template-rows 180ms cubic-bezier(0.2, 0, 0, 1),
+      opacity 140ms ease;
+  }
+
+  .add-feed-status.is-visible {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+
+  .add-feed-status-inner {
+    min-height: 0;
+    overflow: hidden;
+    padding: 5px 2px 0;
+  }
+
+  .feed-list {
+    position: relative;
+  }
+
+  .feed-list-header {
+    padding: 0 var(--spacing-md) 6px;
+    color: var(--muted);
+    font-size: 0.7em;
+    font-weight: 600;
+    letter-spacing: 0.035em;
+  }
+
+  .feed-list-header-metrics {
+    text-align: right;
+  }
+
+  .feed-load-more {
+    display: flex;
+    justify-content: center;
+    padding: var(--spacing-md);
+  }
+
+  @media (max-width: 699px) {
+    .feed-list-header {
+      display: none;
+    }
+
+    .feed-tools {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--spacing-xs);
+    }
+
+    .add-form {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .add-form-wrap {
+      width: 100%;
+    }
+
+    .add-form input {
+      min-width: 0;
+      font-size: 16px;
+    }
+  }
+
+  .feed-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 0;
+  }
+  @media (max-width: 699px) {
+    .feed-tools {
+      grid-template-columns: minmax(0, 1fr);
+      row-gap: var(--spacing-xs);
+    }
+  }
+</style>

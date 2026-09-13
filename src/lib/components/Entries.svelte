@@ -2,14 +2,15 @@
   import { tick, untrack } from 'svelte';
   import { useReader } from '$lib/client/reader.svelte';
   import { Selection } from '$lib/client/selection.svelte';
-  import { safeHttpUrl, timeAgo } from '$lib/client/values';
-  import { reveal, revealContent } from '$lib/client/motion';
+  import { reveal } from '$lib/client/motion';
+  import EntryCard from './EntryCard.svelte';
+  import BulkActions from './BulkActions.svelte';
   import Icon from './Icon.svelte';
   let { feedId, starred = false }: { feedId?: string; starred?: boolean } = $props();
   const reader = useReader();
   let filter = $state<'all' | 'unread' | 'read'>('all'),
-    limit = $state(50);
-  let root = $state<HTMLDivElement>();
+    limit = $state(50),
+    root = $state<HTMLDivElement>();
   const source = $derived(
     reader.entries.filter(
       (entry) => (!feedId || entry.feedId === feedId) && (!starred || entry.state.starred),
@@ -49,8 +50,7 @@
     return () => document.body.classList.remove('bulk-active');
   });
   $effect.pre(() => {
-    const rows = visible;
-    if (!rows.length || !root || scrollY <= 72 || !reader.newIds.size) return;
+    if (!visible.length || !root || scrollY <= 72 || !reader.newIds.size) return;
     const top = document.querySelector('.nav-bar')?.getBoundingClientRect().bottom ?? 0;
     const anchor = [...root.querySelectorAll<HTMLElement>('.entry-slot')].find(
       (row) => row.getBoundingClientRect().bottom > top,
@@ -72,16 +72,6 @@
     const ids = unread.map((entry) => entry.id);
     if (ids.length && (await reader.mark(ids, { read: true }))) reader.toast(`${ids.length} marked as read`);
   }
-  async function bulk(action: string) {
-    const entries = reader.entries.filter((entry) => selection.ids.has(entry.id));
-    if (action === 'open') await reader.openMany(entries, 'selected');
-    else if (action !== 'cancel')
-      await reader.mark(
-        entries.map((entry) => entry.id),
-        action === 'star' ? { starred: true } : { read: action === 'read' },
-      );
-    selection.clear();
-  }
   async function keydown(event: KeyboardEvent) {
     if (
       event.metaKey ||
@@ -91,9 +81,8 @@
         event.target.matches('input,textarea,select,[contenteditable=true]'))
     )
       return;
+    if (document.querySelector('dialog[open]') || document.body.classList.contains('nav-menu-open')) return;
     const key = event.key.toLowerCase();
-    if (document.querySelector('[data-shortcuts-open]') || document.body.classList.contains('nav-menu-open'))
-      return;
     if (key === 'j' || key === 'k') {
       selection.move(key === 'j' ? 1 : -1, event.shiftKey);
       await tick();
@@ -127,8 +116,7 @@
 />
 <div class="page" data-page={starred ? 'starred' : feedId ? `feed:${feedId}` : 'timeline'} bind:this={root}>
   {#if starred || feedId}<div class="page-header"><h1 class="page-title">{title}</h1></div>{/if}
-  {#if !starred}
-    <div class="toolbar">
+  {#if !starred}<div class="toolbar">
       <div class="filter-tabs" role="group" aria-label="Filter entries">
         {#each ['all', 'unread', 'read'] as value}<button
             type="button"
@@ -136,12 +124,13 @@
             aria-pressed={filter === value}
             disabled={!reader.complete}
             onclick={() => choose(value as typeof filter)}
-            >{value[0]!.toUpperCase() + value.slice(1)} ({value === 'all'
+          >
+            {value[0]!.toUpperCase() + value.slice(1)} ({value === 'all'
               ? counts.total
               : value === 'unread'
                 ? counts.unread
-                : counts.total - counts.unread})</button
-          >{/each}
+                : counts.total - counts.unread})
+          </button>{/each}
       </div>
       <div class="timeline-actions">
         <button class="btn" disabled={!reader.complete} onclick={() => reader.openMany(unread, 'unread')}
@@ -152,86 +141,24 @@
         >
         <button
           class="btn"
-          disabled={reader.loading || reader.status?.refreshing}
+          disabled={reader.status?.refreshing}
           aria-label={reader.status?.refreshing ? 'Refreshing feeds' : 'Refresh feeds'}
           aria-busy={reader.status?.refreshing || undefined}
           onclick={() => reader.refresh(true)}
           >Refresh<Icon name="refresh" class="ui-icon button-icon" /></button
         >
       </div>
-    </div>
-  {/if}
+    </div>{/if}
   <div id="entry-list">
-    {#if reader.loading}<div class="empty-state">Loading saved entries…</div>
-    {:else if !visible.length}<div class="empty-state">No entries</div>
-    {:else}
-      <div class="entry-list" role="list">
+    {#if !visible.length}<div class="empty-state">
+        {!reader.complete && reader.syncing ? 'Loading saved entries…' : 'No entries'}
+      </div>
+    {:else}<div class="entry-list" role="list">
         {#each visible as entry, index (entry.id)}
           {@const active = reader.newIds.has(entry.id)}
           {@const delay = Math.min(index * 34, 136)}
           <div class="entry-slot" role="listitem" data-id={entry.id} in:reveal={{ active, delay }}>
-            <div
-              class="entry-card"
-              class:entry-read={entry.state.read}
-              class:entry-unread={!entry.state.read}
-              class:entry-selected={selection.ids.has(entry.id)}
-              class:entry-focused={selection.focused === entry.id}
-              data-id={entry.id}
-              data-idx={index}
-              in:revealContent={{ active, delay }}
-            >
-              <label class="entry-checkbox" onpointerdown={(event) => selection.down(event, entry.id, index)}
-                ><input
-                  type="checkbox"
-                  aria-label={`Select ${entry.title || 'entry'}`}
-                  checked={selection.ids.has(entry.id)}
-                  onclick={(event) => {
-                    if (selection.suppressClick) event.preventDefault();
-                    else selection.toggle(entry.id, index, event.shiftKey);
-                  }}
-                /></label
-              >
-              <span class="entry-leading-space" aria-hidden="true"></span>
-              <div class="entry-content">
-                <span class="entry-title-slot">
-                  {#if safeHttpUrl(entry.url)}<a
-                      class="entry-title"
-                      dir="auto"
-                      href={entry.url}
-                      target="_blank"
-                      rel="noopener"
-                      onclick={(event) => {
-                        if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
-                          event.preventDefault();
-                          reader.open(entry);
-                        }
-                      }}>{entry.title || 'Untitled'}</a
-                    >
-                  {:else}<span class="entry-title" dir="auto">{entry.title || 'Untitled'}</span>{/if}
-                </span><span class="entry-meta" dir="auto"
-                  >{entry.feedLabel || 'Unknown'} · {timeAgo(entry.published)}</span
-                >
-              </div>
-              <div class="entry-actions">
-                <button
-                  class="btn-icon btn-star"
-                  class:starred={entry.state.starred}
-                  aria-pressed={!!entry.state.starred}
-                  title={entry.state.starred ? 'Unstar' : 'Star'}
-                  aria-label="Star entry"
-                  onclick={() => reader.toggle(entry.id, 'starred')}
-                  ><Icon name={entry.state.starred ? 'star-filled' : 'star'} /></button
-                >
-                <button
-                  class="btn-icon btn-mark"
-                  aria-pressed={!!entry.state.read}
-                  title={entry.state.read ? 'Mark unread' : 'Mark read'}
-                  aria-label="Read entry"
-                  onclick={() => reader.toggle(entry.id, 'read')}
-                  ><Icon name={entry.state.read ? 'circle' : 'circle-filled'} /></button
-                >
-              </div>
-            </div>
+            <EntryCard {entry} {index} {selection} {active} {delay} />
           </div>
         {/each}
       </div>
@@ -243,14 +170,110 @@
     {/if}
   </div>
 </div>
-{#if selection.ids.size}<div class="bulk-bar" id="bulk-bar">
-    <span class="bulk-count">{selection.ids.size} selected</span><button
-      class="btn"
-      onclick={() => bulk('read')}>Mark read</button
-    ><button class="btn" onclick={() => bulk('unread')}>Mark unread</button><button
-      class="btn"
-      onclick={() => bulk('open')}>Open<Icon name="external-link" class="ui-icon button-icon" /></button
-    ><button class="btn" onclick={() => bulk('star')}
-      ><Icon name="star" class="ui-icon button-icon" />Star</button
-    ><button class="btn" id="bulk-cancel" onclick={() => bulk('cancel')}>Cancel</button>
-  </div>{/if}
+<BulkActions {selection} />
+
+<style>
+  .toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+  }
+
+  .filter-tabs {
+    display: flex;
+    gap: var(--spacing-xs);
+  }
+
+  .timeline-actions {
+    display: flex;
+    gap: var(--spacing-xs);
+    justify-self: end;
+  }
+
+  .entry-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .entry-slot {
+    flex: none;
+    min-height: 0;
+    content-visibility: auto;
+    contain-intrinsic-block-size: auto 58px;
+  }
+
+  .load-more {
+    display: flex;
+    justify-content: center;
+    padding: var(--spacing-md);
+  }
+
+  .filter-tabs button {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 0.8em;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 5px 12px;
+    border-radius: 0;
+    font-family: var(--font-sans);
+    transition:
+      color var(--duration-default),
+      background var(--duration-default),
+      transform 100ms ease;
+  }
+
+  .filter-tabs button:hover {
+    color: var(--foreground);
+    background: var(--surface-hover);
+  }
+
+  .filter-tabs button:active {
+    transform: scale(0.97);
+  }
+
+  .filter-tabs button.active {
+    color: var(--accent);
+    font-weight: 600;
+    background: var(--accent-soft);
+  }
+
+  .entry-slot + .entry-slot {
+    margin-top: -0.5px;
+  }
+
+  @media (max-width: 699px) {
+    .filter-tabs button {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      padding: 6px var(--spacing-sm);
+      text-align: center;
+    }
+
+    .toolbar {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--spacing-xs);
+    }
+
+    .filter-tabs,
+    .timeline-actions {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      width: 100%;
+    }
+
+    .timeline-actions {
+      justify-self: stretch;
+    }
+
+    .filter-tabs button,
+    .timeline-actions .btn {
+      min-width: 0;
+      text-align: center;
+      white-space: nowrap;
+    }
+  }
+</style>
