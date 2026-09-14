@@ -85,7 +85,9 @@ export class Reader {
     );
   }
   start(): void {
-    if (!this.disposed) this.connect();
+    if (this.disposed) return;
+    this.connect();
+    void this.refresh();
   }
   stop(): void {
     this.disposed = true;
@@ -323,8 +325,25 @@ export class Reader {
     try {
       this.showRefreshError ||= showError;
       await api.startRefresh(ids);
+      await this.awaitRefresh();
     } catch (error) {
       if (showError) this.toast(`Refresh failed: ${message(error)}`);
+    }
+  }
+  private async awaitRefresh(): Promise<void> {
+    for (let i = 0; i < 80 && !this.disposed; i++) {
+      const health = await api.health().catch(() => null);
+      const status = health?.lastRefreshResult;
+      if (!status) return;
+      if (!status.refreshing) {
+        this.status = status;
+        if (this.showRefreshError) {
+          if (status.error) this.toast(`Refresh failed: ${status.error}`);
+          this.showRefreshError = false;
+        }
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 750));
     }
   }
 }

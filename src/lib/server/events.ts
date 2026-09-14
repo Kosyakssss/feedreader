@@ -31,7 +31,7 @@ export class Events {
           const timer = setInterval(() => {
             if (!this.clients.has(client)) cleanup();
             else this.send(client, this.encoder.encode(': keepalive\n\n'));
-          }, 15000);
+          }, 5000);
           timer.unref();
           cleanup = () => {
             clearInterval(timer);

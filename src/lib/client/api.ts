@@ -24,6 +24,7 @@ async function request<T>(method: string, path: string, body?: unknown, signal?:
 }
 export const api = {
   sync: (signal: AbortSignal) => request<Snapshot>('GET', '/api/sync', undefined, signal),
+  health: () => request<{ refreshing: boolean; lastRefreshResult: RefreshStatus }>('GET', '/api/health'),
   saveConfig: (config: Pick<Config, 'maxBulkOpen' | 'retention' | 'theme' | 'appearance'>) =>
     request<Config>('PUT', '/api/config', config),
   themes: () => request<Theme[]>('GET', '/api/themes'),
