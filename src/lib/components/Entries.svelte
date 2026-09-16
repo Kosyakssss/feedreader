@@ -141,9 +141,9 @@
         >
         <button
           class="btn"
-          disabled={reader.status?.refreshing}
-          aria-label={reader.status?.refreshing ? 'Refreshing feeds' : 'Refresh feeds'}
-          aria-busy={reader.status?.refreshing || undefined}
+          disabled={reader.refreshing}
+          aria-label={reader.refreshing ? 'Refreshing feeds' : 'Refresh feeds'}
+          aria-busy={reader.refreshing || undefined}
           onclick={() => reader.refresh(true)}
           >Refresh<Icon name="refresh" class="ui-icon button-icon" /></button
         >

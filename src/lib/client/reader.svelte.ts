@@ -26,6 +26,7 @@ export class Reader {
   complete = $state(false);
   syncing = $state(false);
   status = $state<RefreshStatus | null>(null);
+  private refreshStarts = $state(0);
   newIds = $state.raw(new Set<string>());
   toasts = $state<{ id: number; message: string }[]>([]);
   private initialCounts: InitialData['counts'];
@@ -59,6 +60,7 @@ export class Reader {
   private toastTimers = new Set<ReturnType<typeof setTimeout>>();
   private disposed = false;
   private showRefreshError = false;
+  private refreshPoll: Promise<void> | null = null;
   constructor(initial: InitialData) {
     this.initialCounts = initial.counts;
     this.config = initial.config;
@@ -69,6 +71,9 @@ export class Reader {
   }
   path(path: string): string {
     return base + path;
+  }
+  get refreshing(): boolean {
+    return this.refreshStarts > 0 || !!this.status?.refreshing;
   }
   counts(feedId?: string, starred = false): { total: number; unread: number } {
     const rows = this.complete
@@ -152,7 +157,7 @@ export class Reader {
         this.feeds = snapshot.feeds;
         this.config = snapshot.config;
         this.themes = snapshot.themes;
-        this.status = snapshot.status;
+        this.receiveRefreshStatus(snapshot.status);
         this.complete = true;
         this.sequence = snapshot.eventId;
       } catch {
@@ -205,11 +210,7 @@ export class Reader {
         healthChanged = true;
       }
       if (data.refresh) {
-        this.status = data.refresh;
-        if (!data.refresh.refreshing && this.showRefreshError) {
-          if (data.refresh.error) this.toast(`Refresh failed: ${data.refresh.error}`);
-          this.showRefreshError = false;
-        }
+        this.receiveRefreshStatus(data.refresh);
       }
     }
     if (healthChanged) this.feeds = { ...this.feeds, health };
@@ -322,29 +323,51 @@ export class Reader {
     );
   }
   async refresh(showError = false, ids?: string[]): Promise<void> {
+    this.refreshStarts++;
     try {
       this.showRefreshError ||= showError;
-      await api.startRefresh(ids);
-      await this.awaitRefresh();
+      this.receiveRefreshStatus(await api.startRefresh(ids));
     } catch (error) {
       if (showError) this.toast(`Refresh failed: ${message(error)}`);
+      this.showRefreshError = false;
+      return;
+    } finally {
+      this.refreshStarts--;
     }
+    await this.pollRefresh();
+  }
+  private pollRefresh(): Promise<void> {
+    if (this.refreshPoll) return this.refreshPoll;
+    const poll = this.awaitRefresh().finally(() => {
+      if (this.refreshPoll === poll) this.refreshPoll = null;
+    });
+    this.refreshPoll = poll;
+    return poll;
   }
   private async awaitRefresh(): Promise<void> {
-    for (let i = 0; i < 80 && !this.disposed; i++) {
+    while (!this.disposed) {
       const health = await api.health().catch(() => null);
       const status = health?.lastRefreshResult;
-      if (!status) return;
-      if (!status.refreshing) {
-        this.status = status;
-        if (this.showRefreshError) {
-          if (status.error) this.toast(`Refresh failed: ${status.error}`);
-          this.showRefreshError = false;
-        }
-        return;
-      }
+      if (status && this.receiveRefreshStatus(status) && !status.refreshing) return;
       await new Promise((resolve) => setTimeout(resolve, 750));
     }
+  }
+  private receiveRefreshStatus(status: RefreshStatus): boolean {
+    const current = this.status;
+    if (current?.runId && status.runId) {
+      const order = (status.startedAt ?? 0) - (current.startedAt ?? 0);
+      if (order < 0) return false;
+      if (order === 0 && current.runId === status.runId) {
+        if (status.completed < current.completed) return false;
+        if (current.finishedAt !== null && status.finishedAt === null) return false;
+      }
+    }
+    this.status = status;
+    if (!status.refreshing && this.showRefreshError) {
+      if (status.error) this.toast(`Refresh failed: ${status.error}`);
+      this.showRefreshError = false;
+    }
+    return true;
   }
 }
 export function message(error: unknown): string {
