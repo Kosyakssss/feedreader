@@ -1,20 +1,30 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { useReader } from '$lib/client/reader.svelte';
-  const reader = useReader();
-  let segments = $state(0),
-    phase = $state('loading'),
-    revealed = $state(false),
-    seenRun: string | null = null;
-  const status = $derived(reader.status);
-  const failures = $derived(status ? Math.max(status.failed, status.failures.length) : 0);
-  const outcome = $derived(
-    status?.error || (status && status.total > 0 && failures >= status.total)
+  import type { RefreshStatus } from '$lib/types';
+  function result(status: RefreshStatus | null): 'failed' | 'warning' | 'complete' {
+    const failures = status ? Math.max(status.failed, status.failures.length) : 0;
+    return status?.error || (status && status.total > 0 && failures >= status.total)
       ? 'failed'
       : failures
         ? 'warning'
-        : 'complete',
-  );
+        : 'complete';
+  }
+  const reader = useReader();
+  const initialStatus = reader.status;
+  let segments = $state(initialStatus && !initialStatus.refreshing ? 4 : 0),
+    phase = $state(
+      initialStatus
+        ? initialStatus.refreshing
+          ? 'running'
+          : `${result(initialStatus)}-collapsed`
+        : 'loading',
+    ),
+    revealed = $state(false),
+    seenRun: string | null = initialStatus?.runId ?? null;
+  const status = $derived(reader.status);
+  const failures = $derived(status ? Math.max(status.failed, status.failures.length) : 0);
+  const outcome = $derived(result(status));
   const label = $derived(
     outcome === 'failed'
       ? 'All feeds failed'
@@ -34,14 +44,12 @@
   const runId = $derived(status?.runId);
   $effect(() => {
     const run = runId;
-    if (!run || run === seenRun) return;
-    const initial = seenRun === null;
-    seenRun = run;
-    if (initial && !status?.refreshing) {
-      segments = 4;
-      phase = `${outcome}-collapsed`;
+    if (!run) return;
+    if (run === seenRun) {
+      if (status?.refreshing && phase === 'running') reader.setRefreshAnimation(true);
       return;
     }
+    seenRun = run;
     segments = 0;
     phase = 'resetting';
     revealed = false;
