@@ -26,6 +26,7 @@ export class Reader {
   complete = $state(false);
   syncing = $state(false);
   status = $state<RefreshStatus | null>(null);
+  starting = $state(true);
   private refreshStarts = $state(0);
   private refreshAnimation = $state(false);
   newIds = $state.raw(new Set<string>());
@@ -74,7 +75,7 @@ export class Reader {
     return base + path;
   }
   get refreshing(): boolean {
-    return this.refreshStarts > 0 || !!this.status?.refreshing || this.refreshAnimation;
+    return this.starting || this.refreshStarts > 0 || !!this.status?.refreshing || this.refreshAnimation;
   }
   setRefreshAnimation(active: boolean): void {
     this.refreshAnimation = active;
@@ -96,7 +97,7 @@ export class Reader {
   start(): void {
     if (this.disposed) return;
     this.connect();
-    void this.refresh();
+    void this.refresh().finally(() => (this.starting = false));
   }
   stop(): void {
     this.disposed = true;

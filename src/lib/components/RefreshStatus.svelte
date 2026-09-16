@@ -12,16 +12,14 @@
   }
   const reader = useReader();
   const initialStatus = reader.status;
-  let segments = $state(initialStatus && !initialStatus.refreshing ? 4 : 0),
-    phase = $state(
-      initialStatus
-        ? initialStatus.refreshing
-          ? 'running'
-          : `${result(initialStatus)}-collapsed`
-        : 'loading',
-    ),
+  const initialRun = initialStatus?.runId ? initialStatus : null;
+  let segments = $state(0),
+    phase = $state<
+      'idle' | 'running' | 'complete' | 'warning' | 'failed' | `${ReturnType<typeof result>}-collapsed`
+    >('running'),
+    awaitingInitialRun = $state(!initialRun?.refreshing),
     revealed = $state(false),
-    seenRun: string | null = initialStatus?.runId ?? null;
+    seenRun: string | null = initialRun?.runId ?? null;
   const status = $derived(reader.status);
   const failures = $derived(status ? Math.max(status.failed, status.failures.length) : 0);
   const outcome = $derived(result(status));
@@ -50,15 +48,19 @@
       return;
     }
     seenRun = run;
+    awaitingInitialRun = false;
     segments = 0;
-    phase = 'resetting';
+    phase = 'running';
     revealed = false;
     reader.setRefreshAnimation(true);
-    const timer = setTimeout(() => (phase = 'running'), 0);
-    return () => clearTimeout(timer);
   });
   $effect(() => {
-    if (!status || phase === 'resetting' || phase.endsWith('collapsed')) return;
+    if (!awaitingInitialRun || reader.starting) return;
+    awaitingInitialRun = false;
+    phase = 'idle';
+  });
+  $effect(() => {
+    if (!status || awaitingInitialRun || phase.endsWith('collapsed')) return;
     const confirmed = status.refreshing
       ? status.total
         ? Math.floor((4 * status.completed) / status.total)
@@ -93,7 +95,7 @@
   id="refresh-status"
   type="button"
   data-refresh-status
-  data-phase={!reader.complete && reader.syncing ? 'loading' : status ? phase : 'idle'}
+  data-phase={phase}
   data-revealed={revealed}
   aria-label={status?.refreshing ? live : label}
   aria-expanded={revealed}
@@ -218,23 +220,13 @@
     background: var(--danger);
   }
 
-  .refresh-status:is(
-      [data-phase='idle'],
-      [data-phase='loading'],
-      [data-phase='resetting'],
-      [data-phase$='-collapsed']
-    )
+  .refresh-status:is([data-phase='idle'], [data-phase='loading'], [data-phase$='-collapsed'])
     .refresh-graphic {
     width: var(--refresh-segment-width);
     gap: 0;
   }
 
-  .refresh-status:is(
-      [data-phase='idle'],
-      [data-phase='loading'],
-      [data-phase='resetting'],
-      [data-phase$='-collapsed']
-    )
+  .refresh-status:is([data-phase='idle'], [data-phase='loading'], [data-phase$='-collapsed'])
     .refresh-bar:not(:first-child) {
     width: 0;
     opacity: 0;
