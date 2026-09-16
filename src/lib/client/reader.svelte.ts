@@ -27,6 +27,7 @@ export class Reader {
   syncing = $state(false);
   status = $state<RefreshStatus | null>(null);
   private refreshStarts = $state(0);
+  private refreshAnimation = $state(false);
   newIds = $state.raw(new Set<string>());
   toasts = $state<{ id: number; message: string }[]>([]);
   private initialCounts: InitialData['counts'];
@@ -73,7 +74,10 @@ export class Reader {
     return base + path;
   }
   get refreshing(): boolean {
-    return this.refreshStarts > 0 || !!this.status?.refreshing;
+    return this.refreshStarts > 0 || !!this.status?.refreshing || this.refreshAnimation;
+  }
+  setRefreshAnimation(active: boolean): void {
+    this.refreshAnimation = active;
   }
   counts(feedId?: string, starred = false): { total: number; unread: number } {
     const rows = this.complete

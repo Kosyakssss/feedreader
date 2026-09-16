@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { useReader } from '$lib/client/reader.svelte';
   const reader = useReader();
   let segments = $state(0),
     phase = $state('loading'),
-    revealed = $state(false);
+    revealed = $state(false),
+    seenRun: string | null = null;
   const status = $derived(reader.status);
   const failures = $derived(status ? Math.max(status.failed, status.failures.length) : 0);
   const outcome = $derived(
@@ -32,10 +34,18 @@
   const runId = $derived(status?.runId);
   $effect(() => {
     const run = runId;
-    if (!run) return;
+    if (!run || run === seenRun) return;
+    const initial = seenRun === null;
+    seenRun = run;
+    if (initial && !status?.refreshing) {
+      segments = 4;
+      phase = `${outcome}-collapsed`;
+      return;
+    }
     segments = 0;
     phase = 'resetting';
     revealed = false;
+    reader.setRefreshAnimation(true);
     const timer = setTimeout(() => (phase = 'running'), 0);
     return () => clearTimeout(timer);
   });
@@ -56,6 +66,12 @@
       return () => clearTimeout(timer);
     }
   });
+  $effect(() => {
+    if (!phase.endsWith('collapsed')) return;
+    const timer = setTimeout(() => reader.setRefreshAnimation(false), 240);
+    return () => clearTimeout(timer);
+  });
+  onDestroy(() => reader.setRefreshAnimation(false));
 </script>
 
 <svelte:document
