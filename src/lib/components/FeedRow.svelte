@@ -12,6 +12,7 @@
     active = false,
     delay = 0,
     replacement = false,
+    focused = false,
     address = '',
     confirming = false,
     deleting = false,
@@ -24,6 +25,7 @@
     active?: boolean;
     delay?: number;
     replacement?: boolean;
+    focused?: boolean;
     address?: string;
     confirming?: boolean;
     deleting?: boolean;
@@ -44,6 +46,7 @@
   <div
     class="feed-item"
     class:feed-pending={!feed}
+    class:feed-focused={focused}
     role={!feed ? 'status' : undefined}
     in:revealContent={{ active: active && !replacement, delay }}
   >
@@ -190,6 +193,12 @@
     background: var(--surface-hover);
     z-index: 1;
     position: relative;
+  }
+
+  .feed-item.feed-focused {
+    background: var(--surface-hover);
+    box-shadow: inset 3px 0 0 var(--accent);
+    z-index: 2;
   }
 
   .feed-label {

@@ -5,6 +5,7 @@
   let { onimport }: { onimport: (ids: Set<string>) => void } = $props();
   const reader = useReader();
   let fileInput = $state<HTMLInputElement>();
+  let exportLink = $state<HTMLAnchorElement>();
   let imported = $state<{ ids: string[]; total: number; reading: boolean } | null>(null);
   const progress = $derived.by(() => {
     const results =
@@ -43,12 +44,23 @@
       if (fileInput) fileInput.value = '';
     }
   }
+  export function importOpml(): void {
+    if (!importing) fileInput?.click();
+  }
+  export function exportOpml(): void {
+    exportLink?.click();
+  }
+  export function isImporting(): boolean {
+    return importing;
+  }
 </script>
 
 <div class="feed-file-actions">
-  <button class="btn" disabled={importing} onclick={() => fileInput?.click()}>Import OPML</button>
+  <button class="btn" disabled={importing} onclick={importOpml}>Import OPML</button>
   <input type="file" accept=".opml,.xml" hidden bind:this={fileInput} onchange={importFile} />
-  <a class="btn" href={`${base}/api/feeds/export`} download="feedreader.opml">Export OPML</a>
+  <a class="btn" href={`${base}/api/feeds/export`} download="feedreader.opml" bind:this={exportLink}
+    >Export OPML</a
+  >
 </div>
 <div class="feed-import-slot" class:is-visible={!!imported} aria-hidden={!imported}>
   <div class="feed-import-slot-inner">

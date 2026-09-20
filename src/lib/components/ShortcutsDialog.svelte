@@ -1,6 +1,14 @@
 <script lang="ts">
+  import { page } from '$app/state';
+  import { base } from '$app/paths';
   let dialog = $state<HTMLDialogElement>();
-  const keys = [
+  const navigation = [
+    ['1', 'Timeline'],
+    ['2', 'Starred'],
+    ['3', 'Feeds'],
+    ['4', 'Settings'],
+  ];
+  const entries = [
     ['j', 'Next entry'],
     ['k', 'Previous entry'],
     ['o', 'Open entry'],
@@ -8,10 +16,33 @@
     ['s', 'Toggle star'],
     ['x', 'Toggle select'],
     ['a', 'Mark all read'],
+  ];
+  const feeds = [
+    ['j', 'Next feed'],
+    ['k', 'Previous feed'],
+    ['Shift+j/k', 'Last / first feed'],
+    ['o / Enter', 'Open feed'],
+    ['a', 'Add feed'],
+    ['d', 'Remove feed'],
+    ['i', 'Import OPML'],
+    ['e', 'Export OPML'],
+  ];
+  const common = [
     ['r', 'Refresh feeds'],
     ['?', 'Show shortcuts'],
     ['Esc', 'Close / clear'],
   ];
+  const keys = $derived([
+    ...navigation,
+    ...(page.url.pathname === `${base}/feeds`
+      ? feeds
+      : page.url.pathname === `${base}/` ||
+          page.url.pathname === `${base}/starred` ||
+          page.url.pathname.startsWith(`${base}/feed/`)
+        ? entries
+        : []),
+    ...common,
+  ]);
   export function toggle(): void {
     if (dialog?.open) dialog.close();
     else dialog?.showModal();

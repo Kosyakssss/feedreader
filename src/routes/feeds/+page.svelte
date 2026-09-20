@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { base } from '$app/paths';
   import { useReader, message } from '$lib/client/reader.svelte';
   import { api } from '$lib/client/api';
   import FeedRow from '$lib/components/FeedRow.svelte';
@@ -13,7 +15,11 @@
     deleting = $state<string | null>(null),
     limit = $state(100),
     newIds = $state.raw(new Set<string>()),
-    replacement = $state<string | null>(null);
+    replacement = $state<string | null>(null),
+    focused = $state<string | null>(null),
+    addInput = $state<HTMLInputElement>(),
+    feedList = $state<HTMLDivElement>(),
+    feedImport = $state<{ importOpml(): void; exportOpml(): void; isImporting(): boolean }>();
   let revealTimer: ReturnType<typeof setTimeout> | undefined;
   const unread = $derived(
     new Map(reader.feeds.feeds.map((feed) => [feed.id, reader.counts(feed.id).unread])),
@@ -58,8 +64,11 @@
     deleting = id;
     try {
       await api.deleteFeed(id);
+      const index = reader.feeds.feeds.findIndex((feed) => feed.id === id);
       reader.feeds = { ...reader.feeds, feeds: reader.feeds.feeds.filter((feed) => feed.id !== id) };
       reader.entries = reader.entries.filter((entry) => entry.feedId !== id);
+      if (focused === id)
+        focused = reader.feeds.feeds[Math.min(index, reader.feeds.feeds.length - 1)]?.id ?? null;
       reader.toast(`${label || 'Feed'} removed`);
     } catch (error) {
       reader.toast(`Error: ${message(error)}`);
@@ -67,6 +76,57 @@
       confirming = null;
       deleting = null;
     }
+  }
+  async function move(direction: 1 | -1, edge: boolean) {
+    const feeds = reader.feeds.feeds;
+    if (!feeds.length) return;
+    const current = feeds.findIndex((feed) => feed.id === focused);
+    const index = edge
+      ? direction === 1
+        ? feeds.length - 1
+        : 0
+      : direction === 1
+        ? Math.min(current + 1, feeds.length - 1)
+        : Math.max(current < 0 ? 0 : current - 1, 0);
+    focused = feeds[index]!.id;
+    if (index >= limit) limit = Math.ceil((index + 1) / 100) * 100;
+    await tick();
+    feedList?.querySelector('.feed-focused')?.scrollIntoView({ block: 'nearest' });
+  }
+  function keydown(event: KeyboardEvent) {
+    if (
+      event.metaKey ||
+      event.ctrlKey ||
+      event.altKey ||
+      (event.target instanceof Element &&
+        event.target.matches('input,textarea,select,[contenteditable=true]')) ||
+      document.querySelector('dialog[open]') ||
+      document.body.classList.contains('nav-menu-open') ||
+      deleting ||
+      feedImport?.isImporting()
+    )
+      return;
+    const key = event.key.toLowerCase();
+    if (key === 'j' || key === 'k') void move(key === 'j' ? 1 : -1, event.shiftKey);
+    else if (key === 'escape') {
+      if (confirming) confirming = null;
+      else focused = null;
+    } else if (key === 'a') addInput?.focus();
+    else if (key === 'i') feedImport?.importOpml();
+    else if (key === 'e') feedImport?.exportOpml();
+    else {
+      const feed = reader.feeds.feeds.find((feed) => feed.id === focused);
+      if (!feed) return;
+      if (
+        key === 'o' ||
+        (key === 'enter' &&
+          !(event.target instanceof Element && event.target.matches('a,button,input,select,textarea')))
+      )
+        void goto(`${base}/feed/${encodeURIComponent(feed.id)}`);
+      else if (key === 'd' && !event.repeat) void remove(feed.id, feed.label);
+      else return;
+    }
+    event.preventDefault();
   }
   onDestroy(() => clearTimeout(revealTimer));
 </script>
@@ -76,9 +136,7 @@
     if (!deleting && event.target instanceof Element && !event.target.closest('.btn-feed-delete'))
       confirming = null;
   }}
-  onkeydown={(event) => {
-    if (event.key === 'Escape') confirming = null;
-  }}
+  onkeydown={keydown}
 />
 <div class="page feeds-page" data-page="feeds">
   <div class="page-header feeds-header">
@@ -105,6 +163,7 @@
           aria-autocomplete="none"
           autocapitalize="none"
           spellcheck={false}
+          bind:this={addInput}
           bind:value={address}
           oninput={() => (addError = '')}
           disabled={pending}
@@ -117,14 +176,14 @@
         <div class="add-feed-status-inner">{addError ? `Couldn’t add feed: ${addError}` : ''}</div>
       </div>
     </div>
-    <FeedImport onimport={(ids) => (newIds = ids)} />
+    <FeedImport bind:this={feedImport} onimport={(ids) => (newIds = ids)} />
   </div>
   <div class="feed-list-header" aria-hidden="true" hidden={!reader.feeds.feeds.length}>
     <span>Subscription</span>
     <div class="feed-list-header-metrics"><span>Unread</span><span>Checked</span></div>
     <span></span>
   </div>
-  <div class="feed-list" role="list" aria-busy={pending || undefined}>
+  <div class="feed-list" role="list" aria-busy={pending || undefined} bind:this={feedList}>
     {#if pendingVisible}<FeedRow {address} active replacement={!!replacement} />{/if}
     {#each reader.feeds.feeds.slice(0, limit) as feed, index (feed.id)}
       <FeedRow
@@ -135,6 +194,7 @@
         active={newIds.has(feed.id)}
         delay={Math.min(index * 30, 150)}
         replacement={replacement === feed.id}
+        focused={focused === feed.id}
         confirming={confirming === feed.id}
         deleting={deleting === feed.id}
         onremove={() => remove(feed.id, feed.label)}

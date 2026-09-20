@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, setContext, untrack } from 'svelte';
+  import { goto } from '$app/navigation';
   import { base } from '$app/paths';
   import { Reader, readerKey } from '$lib/client/reader.svelte';
   import { faviconDataUri } from '$lib/icons';
@@ -24,10 +25,15 @@
       }
       return;
     }
+    const dialogOpen = document.querySelector('dialog[open]');
     if (event.key === '?') {
       shortcuts?.toggle();
       event.preventDefault();
-    } else if (event.key.toLowerCase() === 'r' && !document.querySelector('dialog[open]')) {
+    } else if (!dialogOpen && ['1', '2', '3', '4'].includes(event.key)) {
+      const routes = ['/', '/starred', '/feeds', '/settings'];
+      void goto(base + routes[Number(event.key) - 1]);
+      event.preventDefault();
+    } else if (event.key.toLowerCase() === 'r' && !dialogOpen) {
       void reader.refresh(true);
       event.preventDefault();
     }
