@@ -67,6 +67,12 @@
     limit = 50;
     selection.reset();
   }
+  function moveFilter(direction: 1 | -1) {
+    const filters: (typeof filter)[] = ['all', 'unread', 'read'];
+    const index = filters.indexOf(filter);
+    const next = filters[Math.max(0, Math.min(index + direction, filters.length - 1))]!;
+    if (next !== filter) choose(next);
+  }
   async function markAll() {
     if (!reader.complete) return;
     const ids = unread.map((entry) => entry.id);
@@ -87,6 +93,10 @@
       selection.move(key === 'j' ? 1 : -1, event.shiftKey);
       await tick();
       root?.querySelector('.entry-focused')?.scrollIntoView({ block: 'nearest' });
+    } else if (!starred && (key === 'h' || key === 'l')) {
+      moveFilter(key === 'l' ? 1 : -1);
+    } else if (!starred && event.key === 'O') {
+      void reader.openMany(unread, 'unread');
     } else if (key === 'a') void markAll();
     else if (key === 'escape') {
       if (selection.ids.size) selection.clear();

@@ -8,9 +8,15 @@
     ['3', 'Feeds'],
     ['4', 'Settings'],
   ];
-  const entries = [
+  const entryNavigation = [
     ['j', 'Next entry'],
     ['k', 'Previous entry'],
+  ];
+  const filters = [
+    ['h / l', 'Previous / next filter'],
+    ['Shift+o', 'Open all unread'],
+  ];
+  const entryActions = [
     ['o', 'Open entry'],
     ['m', 'Toggle read'],
     ['s', 'Toggle star'],
@@ -36,11 +42,11 @@
     ...navigation,
     ...(page.url.pathname === `${base}/feeds`
       ? feeds
-      : page.url.pathname === `${base}/` ||
-          page.url.pathname === `${base}/starred` ||
-          page.url.pathname.startsWith(`${base}/feed/`)
-        ? entries
-        : []),
+      : page.url.pathname === `${base}/starred`
+        ? [...entryNavigation, ...entryActions]
+        : page.url.pathname === `${base}/` || page.url.pathname.startsWith(`${base}/feed/`)
+          ? [...entryNavigation, ...filters, ...entryActions]
+          : []),
     ...common,
   ]);
   export function toggle(): void {
