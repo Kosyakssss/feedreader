@@ -20,7 +20,18 @@
     awaitingInitialRun = $state(!initialRun?.refreshing),
     revealed = $state(false),
     seenRun: string | null = initialRun?.runId ?? null;
+  let scanTimer: ReturnType<typeof setTimeout> | undefined;
+  let scanReady = false;
   const status = $derived(reader.status);
+  const target = $derived(
+    status?.refreshing
+      ? status.total
+        ? Math.floor((4 * status.completed) / status.total)
+        : 0
+      : status
+        ? 4
+        : 0,
+  );
   const failures = $derived(status ? Math.max(status.failed, status.failures.length) : 0);
   const outcome = $derived(result(status));
   const label = $derived(
@@ -40,6 +51,20 @@
           : `${status?.count ? `${status.count} new` : 'Up to date'}${failures ? ` · ${failures} failed` : ''}`,
   );
   const runId = $derived(status?.runId);
+  function scan() {
+    if (scanTimer || scanReady || segments === 4 || phase !== 'running') return;
+    scanTimer = setTimeout(() => {
+      scanTimer = undefined;
+      scanReady = true;
+      advance();
+    }, 320);
+  }
+  function advance() {
+    if (awaitingInitialRun || phase !== 'running' || !scanReady || segments >= target) return;
+    segments++;
+    scanReady = false;
+    scan();
+  }
   $effect(() => {
     const run = runId;
     if (!run) return;
@@ -48,6 +73,9 @@
       return;
     }
     seenRun = run;
+    clearTimeout(scanTimer);
+    scanTimer = undefined;
+    scanReady = false;
     awaitingInitialRun = false;
     segments = 0;
     phase = 'running';
@@ -60,28 +88,28 @@
     phase = 'idle';
   });
   $effect(() => {
-    if (!status || awaitingInitialRun || phase.endsWith('collapsed')) return;
-    const confirmed = status.refreshing
-      ? status.total
-        ? Math.floor((4 * status.completed) / status.total)
-        : 0
-      : 4;
-    if (segments < confirmed) {
-      const timer = setTimeout(() => segments++, 320);
-      return () => clearTimeout(timer);
-    }
-    if (!status.refreshing && segments === 4) {
+    if (!status || awaitingInitialRun || phase !== 'running') return;
+    scan();
+    if (segments < target) advance();
+    else if (!status.refreshing && segments === 4) {
       phase = outcome;
-      const timer = setTimeout(() => (phase = `${outcome}-collapsed`), 700);
-      return () => clearTimeout(timer);
     }
+  });
+  $effect(() => {
+    if (phase !== 'complete' && phase !== 'warning' && phase !== 'failed') return;
+    const completed = phase;
+    const timer = setTimeout(() => (phase = `${completed}-collapsed`), 700);
+    return () => clearTimeout(timer);
   });
   $effect(() => {
     if (!phase.endsWith('collapsed')) return;
     const timer = setTimeout(() => reader.setRefreshAnimation(false), 240);
     return () => clearTimeout(timer);
   });
-  onDestroy(() => reader.setRefreshAnimation(false));
+  onDestroy(() => {
+    clearTimeout(scanTimer);
+    reader.setRefreshAnimation(false);
+  });
 </script>
 
 <svelte:document
