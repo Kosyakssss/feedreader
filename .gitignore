@@ -5,3 +5,5 @@ build
 tui/target/
 data/*
 !data/default.css
+
+/target

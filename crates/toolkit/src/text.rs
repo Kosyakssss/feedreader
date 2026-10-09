@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::ops::Range;
 
 use parley::{
-    Alignment, AlignmentOptions, FontContext, FontFamily, FontVariations, FontWeight, Layout,
+    Alignment, AlignmentOptions, FontContext, FontFamily, FontStyle, FontVariations, FontWeight, Layout,
     LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty,
 };
 use swash::scale::{Render, ScaleContext, Source, StrikeWith};
@@ -10,6 +12,7 @@ use swash::zeno::{Format, Vector};
 use crate::gpu::{ATLAS, Quad};
 
 const FONT: &[u8] = include_bytes!("../assets/fonts/GoogleSansCode.ttf");
+const FONT_ITALIC: &[u8] = include_bytes!("../assets/fonts/GoogleSansCode-Italic.ttf");
 const FAMILY: &str = "Google Sans Code";
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -25,14 +28,25 @@ pub struct TextStyle {
     pub weight: f32,
 }
 
-#[derive(Hash, PartialEq, Eq)]
-struct LayoutKey {
-    text: String,
-    face: Face,
-    size: u32,
-    weight: u32,
-    line: u32,
-    wrap: Option<u32>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SpanStyle {
+    pub face: Face,
+    pub weight: u16,
+    pub italic: bool,
+    pub underline: bool,
+    pub color: u8,
+}
+
+impl SpanStyle {
+    pub fn plain(face: Face) -> Self {
+        Self {
+            face,
+            weight: 400,
+            italic: false,
+            underline: false,
+            color: 0,
+        }
+    }
 }
 
 #[derive(Hash, PartialEq, Eq, Clone, Copy)]
@@ -88,9 +102,9 @@ impl Shelf {
 
 pub struct Text {
     fonts: FontContext,
-    layouts_cx: LayoutContext<()>,
+    layouts_cx: LayoutContext<u8>,
     scale: ScaleContext,
-    layouts: HashMap<LayoutKey, (Layout<()>, u64)>,
+    layouts: HashMap<u64, (Layout<u8>, u64)>,
     glyphs: HashMap<GlyphKey, Option<Slot>>,
     shelf: Shelf,
     pub uploads: Vec<Upload>,
@@ -100,14 +114,29 @@ pub struct Text {
 pub struct Drawn {
     pub width: f32,
     pub height: f32,
+    pub underlines: Vec<([f32; 4], Range<usize>)>,
+}
+
+pub struct Paint<'a> {
+    pub origin: (f32, f32),
+    pub limit: Option<f32>,
+    pub colors: &'a [[f32; 4]],
+    pub clip: [f32; 4],
+}
+
+impl Default for Text {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Text {
     pub fn new() -> Self {
         let mut fonts = FontContext::new();
+        fonts.collection.register_fonts(parley::fontique::Blob::from(FONT.to_vec()), None);
         fonts
             .collection
-            .register_fonts(parley::fontique::Blob::from(FONT.to_vec()), None);
+            .register_fonts(parley::fontique::Blob::from(FONT_ITALIC.to_vec()), None);
         Self {
             fonts,
             layouts_cx: LayoutContext::new(),
@@ -122,7 +151,7 @@ impl Text {
 
     pub fn begin_frame(&mut self) {
         self.frame += 1;
-        if self.layouts.len() > 6000 {
+        if self.layouts.len() > 8000 {
             let frame = self.frame;
             self.layouts.retain(|_, (_, used)| frame - *used < 120);
         }
@@ -134,35 +163,49 @@ impl Text {
         self.shelf = Shelf { x: 0, y: 0, row: 0 };
     }
 
-    fn layout(
-        &mut self,
-        text: &str,
-        style: TextStyle,
-        line: f32,
-        wrap: Option<f32>,
-    ) -> &Layout<()> {
-        let key = LayoutKey {
-            text: text.to_owned(),
-            face: style.face,
-            size: style.size.to_bits(),
-            weight: style.weight.to_bits(),
-            line: line.to_bits(),
-            wrap: wrap.map(|w| w.floor() as u32),
-        };
+    fn layout(&mut self, spans: &[(&str, SpanStyle)], size: f32, line: f32, wrap: Option<f32>) -> &Layout<u8> {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for (t, s) in spans {
+            t.hash(&mut h);
+            s.hash(&mut h);
+        }
+        size.to_bits().hash(&mut h);
+        line.to_bits().hash(&mut h);
+        wrap.map(|w| w.floor() as u32).hash(&mut h);
+        let key = h.finish();
         let frame = self.frame;
+        let fonts = &mut self.fonts;
+        let cx = &mut self.layouts_cx;
         let entry = self.layouts.entry(key).or_insert_with(|| {
-            let mut builder = self.layouts_cx.ranged_builder(&mut self.fonts, text, 1.0, true);
-            builder.push_default(StyleProperty::FontFamily(FontFamily::named(FAMILY)));
-            builder.push_default(StyleProperty::FontSize(style.size));
-            builder.push_default(StyleProperty::FontWeight(FontWeight::new(style.weight)));
-            builder.push_default(StyleProperty::FontVariations(FontVariations::from(
-                match style.face {
-                    Face::Mono => "\"MONO\" 1",
-                    Face::Prop => "\"MONO\" 0",
-                },
-            )));
-            builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(line)));
-            let mut layout = builder.build(text);
+            let text: String = spans.iter().map(|(t, _)| *t).collect();
+            let mut b = cx.ranged_builder(fonts, &text, 1.0, true);
+            b.push_default(StyleProperty::FontFamily(FontFamily::named(FAMILY)));
+            b.push_default(StyleProperty::FontSize(size));
+            b.push_default(StyleProperty::LineHeight(LineHeight::Absolute(line)));
+            let mut at = 0;
+            for (t, s) in spans {
+                let r = at..at + t.len();
+                at = r.end;
+                if r.is_empty() {
+                    continue;
+                }
+                b.push(StyleProperty::FontWeight(FontWeight::new(s.weight as f32)), r.clone());
+                b.push(
+                    StyleProperty::FontVariations(FontVariations::from(match s.face {
+                        Face::Mono => "\"MONO\" 1",
+                        Face::Prop => "\"MONO\" 0",
+                    })),
+                    r.clone(),
+                );
+                if s.italic {
+                    b.push(StyleProperty::FontStyle(FontStyle::Italic), r.clone());
+                }
+                if s.underline {
+                    b.push(StyleProperty::Underline(true), r.clone());
+                }
+                b.push(StyleProperty::Brush(s.color), r);
+            }
+            let mut layout = b.build(&text);
             layout.break_all_lines(wrap);
             layout.align(Alignment::Start, AlignmentOptions::default());
             (layout, frame)
@@ -172,7 +215,15 @@ impl Text {
     }
 
     pub fn measure(&mut self, text: &str, style: TextStyle, line: f32) -> f32 {
-        self.layout(text, style, line, None).width()
+        let span = SpanStyle {
+            weight: style.weight as u16,
+            ..SpanStyle::plain(style.face)
+        };
+        self.layout(&[(text, span)], style.size, line, None).width()
+    }
+
+    pub fn height(&mut self, spans: &[(&str, SpanStyle)], size: f32, line: f32, wrap: f32) -> f32 {
+        self.layout(spans, size, line, Some(wrap)).height()
     }
 
     pub fn draw(
@@ -187,52 +238,109 @@ impl Text {
         color: [f32; 4],
         clip: [f32; 4],
     ) -> Drawn {
-        let ellipsis = match limit {
-            Some(_) => self.measure("\u{2026}", style, line),
+        let span = SpanStyle {
+            weight: style.weight as u16,
+            ..SpanStyle::plain(style.face)
+        };
+        let colors = [color];
+        self.draw_spans(
+            out,
+            &[(text, span)],
+            style.size,
+            line,
+            wrap,
+            Paint {
+                origin,
+                limit,
+                colors: &colors,
+                clip,
+            },
+        )
+    }
+
+    pub fn draw_spans(
+        &mut self,
+        out: &mut Vec<Quad>,
+        spans: &[(&str, SpanStyle)],
+        size: f32,
+        line: f32,
+        wrap: Option<f32>,
+        p: Paint,
+    ) -> Drawn {
+        let ellipsis = match p.limit {
+            Some(_) => {
+                let first = spans.first().map(|s| s.1).unwrap_or(SpanStyle::plain(Face::Prop));
+                self.layout(&[("\u{2026}", first)], size, line, None).width()
+            }
             None => 0.0,
         };
-        let mut runs: Vec<(parley::FontData, Vec<i16>, Vec<(GlyphKey, f32, f32)>)> = Vec::new();
-        let layout = self.layout(text, style, line, wrap);
+        let color = |i: u8| p.colors.get(i as usize).copied().unwrap_or(p.colors[0]);
+        let mut runs: Vec<(parley::FontData, Vec<i16>, [f32; 4], Vec<(GlyphKey, f32, f32)>)> = Vec::new();
+        let mut underlines = Vec::new();
+        let mut rules: Vec<([f32; 4], [f32; 4])> = Vec::new();
+        let layout = self.layout(spans, size, line, wrap);
         let (width, height) = (layout.width(), layout.height());
-        let cut = limit.filter(|l| width > *l).map(|l| l - ellipsis);
+        let cut = p.limit.filter(|l| width > *l).map(|l| l - ellipsis);
         let mut truncated = false;
         let mut end = 0.0f32;
-        'lines: for line in layout.lines() {
-            for item in line.items() {
+        'lines: for l in layout.lines() {
+            for item in l.items() {
                 let PositionedLayoutItem::GlyphRun(run) = item else {
                     continue;
                 };
                 let font = run.run().font().clone();
-                let size = run.run().font_size();
+                let fsize = run.run().font_size();
                 let coords = run.run().normalized_coords().to_vec();
                 let coords_hash = coords.iter().fold(1469598103934665603u64, |h, c| {
                     (h ^ (*c as u16 as u64)).wrapping_mul(1099511628211)
                 });
+                let style = run.style();
+                let c = color(style.brush);
+                if style.underline.is_some() {
+                    let m = run.run().metrics();
+                    let x = p.origin.0 + run.offset();
+                    let y = (p.origin.1 + run.baseline() - m.underline_offset).round();
+                    let w = run.advance();
+                    let t = m.underline_size.max(1.0).round();
+                    rules.push(([x, y, w, t], c));
+                    underlines.push(([x, p.origin.1 + run.baseline() - m.ascent, w, m.ascent + m.descent], run.run().text_range()));
+                }
                 let mut glyphs = Vec::new();
                 for glyph in run.positioned_glyphs() {
                     if cut.is_some_and(|c| glyph.x + glyph.advance > c) {
                         truncated = true;
-                        runs.push((font, coords, glyphs));
+                        runs.push((font, coords, c, glyphs));
                         break 'lines;
                     }
-                    let gx = origin.0 + glyph.x;
-                    let gy = origin.1 + glyph.y;
+                    end = glyph.x + glyph.advance;
+                    let gx = p.origin.0 + glyph.x;
+                    let gy = p.origin.1 + glyph.y;
                     let sub = ((gx - gx.floor()) * 4.0).floor() as u8 & 3;
                     let key = GlyphKey {
                         font: font.data.id(),
                         index: font.index,
                         glyph: glyph.id,
-                        size: size.to_bits(),
+                        size: fsize.to_bits(),
                         coords: coords_hash,
                         sub,
                     };
-                    end = glyph.x + glyph.advance;
                     glyphs.push((key, gx.floor(), gy.round()));
                 }
-                runs.push((font, coords, glyphs));
+                runs.push((font, coords, c, glyphs));
             }
         }
-        for (font, coords, glyphs) in runs {
+        for (r, c) in rules {
+            out.push(Quad {
+                pos: [r[0], r[1]],
+                size: [r[2], r[3]],
+                uv: [0.0; 4],
+                color: c,
+                clip: p.clip,
+                kind: 0,
+                pad: [0; 3],
+            });
+        }
+        for (font, coords, c, glyphs) in runs {
             for (key, x, y) in glyphs {
                 let slot = match self.glyphs.get(&key) {
                     Some(slot) => *slot,
@@ -248,8 +356,8 @@ impl Text {
                         pos: [x + s.left as f32, y - s.top as f32],
                         size: [s.w as f32, s.h as f32],
                         uv: [s.x as f32 / a, s.y as f32 / a, s.w as f32 / a, s.h as f32 / a],
-                        color,
-                        clip,
+                        color: c,
+                        clip: p.clip,
                         kind: 1,
                         pad: [0; 3],
                     });
@@ -257,11 +365,25 @@ impl Text {
             }
         }
         if truncated {
-            self.draw(out, "\u{2026}", style, line, (origin.0 + end, origin.1), None, None, color, clip);
+            let first = spans.first().map(|s| s.1).unwrap_or(SpanStyle::plain(Face::Prop));
+            self.draw_spans(
+                out,
+                &[("\u{2026}", first)],
+                size,
+                line,
+                None,
+                Paint {
+                    origin: (p.origin.0 + end, p.origin.1),
+                    limit: None,
+                    colors: p.colors,
+                    clip: p.clip,
+                },
+            );
         }
         Drawn {
             width: if truncated { end + ellipsis } else { width },
             height,
+            underlines,
         }
     }
 

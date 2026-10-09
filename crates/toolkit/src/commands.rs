@@ -10,6 +10,9 @@ pub enum Key {
     Backspace,
     PageUp,
     PageDown,
+    Home,
+    End,
+    Delete,
     F(u8),
 }
 
@@ -68,6 +71,9 @@ impl Chord {
             Key::Backspace => s.push_str("bksp"),
             Key::PageUp => s.push_str("pgup"),
             Key::PageDown => s.push_str("pgdn"),
+            Key::Home => s.push_str("home"),
+            Key::End => s.push_str("end"),
+            Key::Delete => s.push_str("del"),
             Key::F(n) => s.push_str(&format!("F{n}")),
         }
         s
@@ -87,6 +93,7 @@ pub struct Command<C, M> {
     pub keys: Vec<Chord>,
     pub label: fn(&M) -> String,
     pub available: fn(&M) -> bool,
+    pub rank: u8,
 }
 
 pub struct Registry<C, M> {

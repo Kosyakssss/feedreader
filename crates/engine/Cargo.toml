@@ -1,0 +1,19 @@
+[package]
+name = "engine"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+chrono = "0.4.45"
+dirs = "7.0.0"
+dom_smoothie = "0.18.2"
+feed-rs = "3.0.0"
+futures = "0.3.34"
+html-escape = "0.2.15"
+quick-xml = "0.42.0"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "gzip", "brotli", "deflate", "stream"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+scraper = "0.27.0"
+sha2 = "0.11.0"
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
+url = "2.5.8"

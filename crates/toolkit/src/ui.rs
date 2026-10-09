@@ -1,5 +1,6 @@
 use crate::gpu::Quad;
-use crate::text::{Drawn, Face, Text, TextStyle};
+use crate::field::Field;
+use crate::text::{Drawn, Face, Paint, SpanStyle, Text, TextStyle};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
@@ -66,7 +67,11 @@ pub struct Palette {
     pub faint: [f32; 4],
     pub rule: [f32; 4],
     pub cursor: [f32; 4],
+    pub hover: [f32; 4],
     pub field: [f32; 4],
+    pub link: [f32; 4],
+    pub danger: [f32; 4],
+    pub warn: [f32; 4],
 }
 
 pub const LIGHT: Palette = Palette {
@@ -76,7 +81,11 @@ pub const LIGHT: Palette = Palette {
     faint: [0.62, 0.62, 0.64, 1.0],
     rule: [0.72, 0.72, 0.73, 1.0],
     cursor: [0.905, 0.905, 0.9, 1.0],
+    hover: [0.94, 0.94, 0.935, 1.0],
     field: [0.935, 0.935, 0.93, 1.0],
+    link: [0.13, 0.32, 0.66, 1.0],
+    danger: [0.72, 0.16, 0.13, 1.0],
+    warn: [0.62, 0.42, 0.05, 1.0],
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -122,6 +131,7 @@ pub struct Scene<'a, H> {
     pub style: LineStyle,
     pub palette: Palette,
     pub hits: Vec<(Rect, H)>,
+    pub pointer: Option<(f32, f32)>,
     clips: Vec<[f32; 4]>,
 }
 
@@ -134,6 +144,7 @@ impl<'a, H> Scene<'a, H> {
             style,
             palette,
             hits: Vec::new(),
+            pointer: None,
             clips: vec![[0.0, 0.0, m.width, m.height]],
         }
     }
@@ -154,6 +165,20 @@ impl<'a, H> Scene<'a, H> {
 
     pub fn pop_clip(&mut self) {
         self.clips.pop();
+    }
+
+    pub fn hovered(&self, r: Rect) -> bool {
+        let c = self.clip();
+        self.pointer.is_some_and(|(x, y)| r.contains(x, y) && x >= c[0] && y >= c[1] && x < c[2] && y < c[3])
+    }
+
+    pub fn hover(&mut self, r: Rect) -> bool {
+        let on = self.hovered(r);
+        if on {
+            let color = self.palette.hover;
+            self.fill(r, color);
+        }
+        on
     }
 
     pub fn hit(&mut self, r: Rect, h: H) {
@@ -200,6 +225,71 @@ impl<'a, H> Scene<'a, H> {
         let clip = self.clip();
         self.text
             .draw(&mut self.quads, s, style, line, (x, y), None, Some(width), color, clip)
+    }
+
+    pub fn spans(
+        &mut self,
+        spans: &[(&str, SpanStyle)],
+        size: f32,
+        line: f32,
+        x: f32,
+        y: f32,
+        wrap: Option<f32>,
+        limit: Option<f32>,
+        colors: &[[f32; 4]],
+    ) -> Drawn {
+        let clip = self.clip();
+        self.text.draw_spans(
+            &mut self.quads,
+            spans,
+            size,
+            line,
+            wrap,
+            Paint {
+                origin: (x, y),
+                limit,
+                colors,
+                clip,
+            },
+        )
+    }
+
+    pub fn field(&mut self, r: Rect, f: &Field, focused: bool, placeholder: &str) -> Option<Rect> {
+        let mono = self.m.mono();
+        let pal = self.palette;
+        self.fill(r, pal.field);
+        if focused {
+            let t = self.m.scale.round().max(1.0);
+            self.fill(Rect::new(r.x, r.bottom() - t, r.w, t), pal.ink);
+        }
+        self.push_clip(r);
+        let tx = r.x + self.m.cell_w * 0.5;
+        let mut caret = None;
+        if f.text.is_empty() && f.preedit.is_empty() && !focused {
+            self.text(placeholder, mono, tx, r.y, None, pal.faint);
+        } else {
+            let before = &f.text[..f.caret];
+            let bw = self.measure(before, mono);
+            let room = r.w - self.m.cell_w * 1.5;
+            let shift = (bw - room).max(0.0);
+            let x0 = tx - shift;
+            self.text(before, mono, x0, r.y, None, pal.ink);
+            let mut cx = x0 + bw;
+            if !f.preedit.is_empty() {
+                let pw = self.text(&f.preedit, mono, cx, r.y, None, pal.ink).width;
+                let t = self.m.scale.round().max(1.0);
+                self.fill(Rect::new(cx, r.y + self.m.cell_h * 0.85, pw, t), pal.ink);
+                cx += pw;
+            }
+            self.text(&f.text[f.caret..], mono, cx, r.y, None, pal.ink);
+            if focused {
+                let c = Rect::new(cx.floor(), r.y + self.m.cell_h * 0.15, (self.m.scale * 2.0).round().max(1.0), self.m.cell_h * 0.7);
+                self.fill(c, pal.ink);
+                caret = Some(c);
+            }
+        }
+        self.pop_clip();
+        caret
     }
 
     pub fn measure(&mut self, s: &str, style: TextStyle) -> f32 {

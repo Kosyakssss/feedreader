@@ -1,0 +1,10 @@
+[workspace]
+resolver = "3"
+members = ["crates/toolkit", "crates/engine", "crates/feedreader"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[profile.release]
+debug = "line-tables-only"

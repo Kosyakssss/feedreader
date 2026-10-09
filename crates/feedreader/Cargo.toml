@@ -1,0 +1,13 @@
+[package]
+name = "feedreader"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+toolkit = { path = "../toolkit" }
+engine = { path = "../engine" }
+winit = "0.30.13"
+wry = "0.57.0"
+chrono = "0.4.45"
+png = "0.18.1"
+arboard = "3.6.1"

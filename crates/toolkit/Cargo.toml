@@ -1,0 +1,12 @@
+[package]
+name = "toolkit"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bytemuck = { version = "1.25.2", features = ["derive"] }
+parley = "0.11.1"
+pollster = "1.0.1"
+swash = "0.2.10"
+wgpu = "30.0.1"
+winit = "0.30.13"
