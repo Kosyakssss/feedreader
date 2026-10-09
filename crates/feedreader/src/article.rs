@@ -46,7 +46,7 @@ enum Laid {
         quote: bool,
     },
     Code(String),
-    Line(String, String),
+    Line(String, String, String),
     Picture(String, String, Option<(u32, u32)>),
     Rule,
 }
@@ -138,7 +138,7 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
                 } else {
                     "embed"
                 };
-                Laid::Line(format!("[{k}] {src}"), src.clone())
+                Laid::Line(format!("[{k}] {src}"), src.clone(), k.to_string())
             }
             Block::Rule => Laid::Rule,
         })
@@ -264,7 +264,7 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
                 }
                 geom.push(g);
             }
-            Laid::Line(text, src) => {
+            Laid::Line(text, src, kind) => {
                 if visible {
                     let st = SpanStyle {
                         underline: true,
@@ -275,7 +275,7 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
                     let r = Rect::new(x0 - cw * 0.5, y, w + cw, ch);
                     s.hover(r);
                     s.spans(&[(text.as_str(), st)], mt.size, ch, x0, y, None, Some(width), &colors);
-                    s.hit(r, Hit::Media(src.clone()));
+                    s.hit(r, if kind == "embed" { Hit::Media(src.clone()) } else { Hit::Play(src.clone(), kind.clone()) });
                 }
             }
             Laid::Picture(src, alt, hint) => {

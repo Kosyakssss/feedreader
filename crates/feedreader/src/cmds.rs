@@ -107,7 +107,7 @@ fn entry_action(m: &Model) -> bool {
 }
 
 fn reading_page(m: &Model) -> bool {
-    reading(m) && matches!(m.reader.as_ref().map(|r| r.target()), Some(Target::Page(_)))
+    reading(m) && m.reader.as_ref().is_some_and(|r| r.target().link().is_some())
 }
 
 fn current_feed(m: &Model) -> Option<&engine::Feed> {
@@ -457,7 +457,7 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
             m.act(format!("{what} {}", plural(n)), Op::Bookmark(t.into_iter().map(|id| (id, to)).collect()));
         }
         Cmd::Browser => {
-            if let Some(Target::Page(url)) = m.reader.as_ref().map(|r| r.target().clone()) {
+            if let Some(url) = m.reader.as_ref().and_then(|r| r.target().link().map(str::to_string)) {
                 m.open.push(url);
             } else {
                 let t = m.targets();
@@ -466,7 +466,7 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
         }
         Cmd::CopyLink => {
             let url = match m.reader.as_ref().map(|r| r.target().clone()) {
-                Some(Target::Page(u)) => Some(u),
+                Some(Target::Page(u) | Target::Play(u, _)) => Some(u),
                 _ => m.current_entry().map(|e| e.url.clone()),
             };
             if let Some(u) = url.filter(|u| !u.is_empty()) {
@@ -625,7 +625,7 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
             }
         }
         Cmd::SaveLink => {
-            if let Some(Target::Page(url)) = m.reader.as_ref().map(|r| r.target().clone()) {
+            if let Some(url) = m.reader.as_ref().and_then(|r| r.target().link().map(str::to_string)) {
                 m.out.push(Request::SaveLink(url.clone()));
                 m.message = Some(format!("Saving {url}\u{2026}"));
             } else {
@@ -633,7 +633,7 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
             }
         }
         Cmd::AddAsFeed => {
-            if let Some(Target::Page(url)) = m.reader.as_ref().map(|r| r.target().clone()) {
+            if let Some(url) = m.reader.as_ref().and_then(|r| r.target().link().map(str::to_string)) {
                 m.go(Page::Feeds);
                 m.discovery = Some(Discovery::Searching(url.clone()));
                 m.out.push(Request::Discover(url));

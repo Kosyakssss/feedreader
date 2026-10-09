@@ -34,6 +34,7 @@ pub enum Hit {
     BookmarkToggle(usize),
     Link(String),
     Media(String),
+    Play(String, String),
     Prompt,
 }
 
@@ -58,8 +59,23 @@ impl FrameStats {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Web {
+    Url(String),
+    Player(String, String),
+}
+
+impl Web {
+    pub fn key(&self) -> String {
+        match self {
+            Web::Url(u) => u.clone(),
+            Web::Player(src, _) => format!("player:{src}"),
+        }
+    }
+}
+
 pub struct PaintOut {
-    pub webview: Option<(Rect, String)>,
+    pub webview: Option<(Rect, Web)>,
     pub ime: Option<Rect>,
 }
 
@@ -610,7 +626,16 @@ fn paint_reader(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOu
             y += ch;
             let web = Rect::new(main.x, y, main.w, main.bottom() - y);
             s.text("Loading the page\u{2026}", mono, web.x + cw, web.y, None, pal.faint);
-            out.webview = Some((web, url.clone()));
+            out.webview = Some((web, Web::Url(url.clone())));
+            return;
+        }
+        Target::Play(src, kind) => {
+            s.text(&format!("{kind}   {src}"), mono, x, y, Some(width), pal.muted);
+            y += ch;
+            s.hline(y, main.x - cw * 0.5, main.right());
+            y += ch;
+            let web = Rect::new(main.x, y, main.w, main.bottom() - y);
+            out.webview = Some((web, Web::Player(src.clone(), kind.clone())));
             return;
         }
         Target::Entry(id) => {
@@ -637,7 +662,7 @@ fn paint_reader(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOu
                 y += ch;
                 let rest = Rect::new(main.x, y, main.w, main.bottom() - y);
                 s.text("Loading the page\u{2026}", mono, rest.x + cw, rest.y, None, pal.faint);
-                out.webview = Some((rest, e.url.clone()));
+                out.webview = Some((rest, Web::Url(e.url.clone())));
             } else {
                 article::paint(m, s, main, article::Header { title, meta, url: e.url.clone() });
             }

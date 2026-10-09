@@ -34,6 +34,16 @@ pub enum Focus {
 pub enum Target {
     Entry(EntryId),
     Page(String),
+    Play(String, String),
+}
+
+impl Target {
+    pub fn link(&self) -> Option<&str> {
+        match self {
+            Target::Page(u) | Target::Play(u, _) => Some(u),
+            Target::Entry(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -914,7 +924,7 @@ impl Model {
     pub fn current_entry(&self) -> Option<&Entry> {
         match self.reader.as_ref().map(|r| r.target()) {
             Some(Target::Entry(id)) => self.entry(id),
-            Some(Target::Page(_)) => None,
+            Some(Target::Page(_) | Target::Play(..)) => None,
             None if self.page == Page::List => self.list.visible.get(self.list.cursor).map(|&i| &self.entries[i]),
             None => None,
         }
@@ -963,8 +973,12 @@ impl Model {
     }
 
     pub fn open_page(&mut self, url: String) {
+        self.open_target(Target::Page(url));
+    }
+
+    pub fn open_target(&mut self, t: Target) {
         if let Some(r) = &mut self.reader {
-            r.history.push(Target::Page(url));
+            r.history.push(t);
             r.scroll = 0.0;
         }
     }

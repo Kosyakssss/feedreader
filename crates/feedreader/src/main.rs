@@ -22,7 +22,7 @@ use winit::window::{CursorIcon, Window, WindowId};
 
 use cmds::Cmd;
 use model::{Focus, Model};
-use view::{FrameStats, Hit, Scroll};
+use view::{FrameStats, Hit, Scroll, Web};
 
 const BASE_SIZE: f32 = 13.0;
 
@@ -96,6 +96,14 @@ fn metrics(text: &mut Text, scale: f32, size: PhysicalSize<u32>) -> Metrics {
     }
 }
 
+fn player(src: &str, kind: &str) -> String {
+    let tag = if kind == "audio" { "audio" } else { "video" };
+    let src = src.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{{margin:0;height:100%;background:#f9f9f7}}body{{display:flex;align-items:center;justify-content:center}}video,audio{{max-width:92%;max-height:92%}}audio{{width:80%}}</style></head><body><{tag} controls autoplay preload=\"metadata\" src=\"{src}\"></{tag}></body></html>"
+    )
+}
+
 fn open_external(url: &str) {
     #[cfg(target_os = "macos")]
     let opener = "open";
@@ -156,8 +164,8 @@ impl State {
         }
     }
 
-    fn sync_webview(&mut self, web: Option<(Rect, String)>) {
-        let Some((r, url)) = web else {
+    fn sync_webview(&mut self, web: Option<(Rect, Web)>) {
+        let Some((r, content)) = web else {
             if let Some(w) = &self.webview
                 && self.web_visible
             {
@@ -173,18 +181,25 @@ impl State {
             position: wry::dpi::LogicalPosition::new(r.x as f64 / s, r.y as f64 / s).into(),
             size: wry::dpi::LogicalSize::new(r.w as f64 / s, r.h as f64 / s).into(),
         };
+        let key = content.key();
         match &self.webview {
             Some(w) => {
                 let _ = w.set_bounds(bounds);
                 let _ = w.set_visible(true);
-                if self.web_url.as_deref() != Some(url.as_str()) {
-                    let _ = w.load_url(&url);
+                if self.web_url.as_deref() != Some(key.as_str()) {
+                    let _ = match &content {
+                        Web::Url(u) => w.load_url(u),
+                        Web::Player(src, kind) => w.load_html(&player(src, kind)),
+                    };
                 }
             }
             None => {
                 let proxy = self.proxy.clone();
-                self.webview = wry::WebViewBuilder::new()
-                    .with_url(url.clone())
+                let builder = match &content {
+                    Web::Url(u) => wry::WebViewBuilder::new().with_url(u.clone()),
+                    Web::Player(src, kind) => wry::WebViewBuilder::new().with_html(player(src, kind)),
+                };
+                self.webview = builder
                     .with_bounds(bounds)
                     .with_background_color((
                         (LIGHT.bg[0] * 255.0) as u8,
@@ -202,7 +217,7 @@ impl State {
                     .ok();
             }
         }
-        self.web_url = Some(url);
+        self.web_url = Some(key);
     }
 
     fn sync_ime(&mut self, caret: Option<Rect>) {
@@ -453,6 +468,13 @@ impl State {
                     } else {
                         *cur = i;
                     }
+                }
+            }
+            Some(Hit::Play(src, kind)) => {
+                if self.modifiers.super_key() {
+                    m.open.push(src);
+                } else {
+                    m.open_target(model::Target::Play(src, kind));
                 }
             }
             Some(Hit::Link(url)) | Some(Hit::Media(url)) => {
