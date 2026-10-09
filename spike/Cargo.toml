@@ -1,0 +1,16 @@
+[package]
+name = "spike"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytemuck = { version = "1.25.2", features = ["derive"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+parley = "0.11.1"
+png = "0.18.1"
+pollster = "1.0.1"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+swash = "0.2.10"
+wgpu = "30.0.1"
+winit = "0.30.13"
+wry = "0.57.0"
