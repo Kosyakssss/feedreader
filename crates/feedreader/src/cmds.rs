@@ -77,6 +77,10 @@ pub enum Cmd {
     PaletteUp,
     PaletteRun,
     PaletteBack,
+    CloseTab,
+    ReopenTab,
+    NextTab,
+    PreviousTab,
 }
 
 fn idle(m: &Model) -> bool {
@@ -166,9 +170,15 @@ pub fn registry() -> Registry<Cmd, Model> {
             c(Cmd::CancelDiscovery, vec![k(Key::Escape)], |_| "cancel".into(), |m| {
                 idle(m) && m.page == Page::Feeds && m.discovery.is_some()
             }),
-            c(Cmd::Close, vec![k(Key::Escape), Chord::cmd('w')], |m| {
-                if m.reader.as_ref().is_some_and(|r| r.history.len() > 1) { "back".into() } else { "close".into() }
+            c(Cmd::Close, vec![k(Key::Escape)], |m| match m.reader.as_ref() {
+                Some(r) if r.history.len() > 1 => "back".into(),
+                Some(r) if r.kept => "to the list".into(),
+                _ => "close".into(),
             }, reading),
+            c(Cmd::CloseTab, vec![Chord::cmd('w')], |_| "close tab".into(), reading),
+            c(Cmd::ReopenTab, vec![Chord::cmd_shift('t')], |_| "reopen closed tab".into(), |m| idle(m) && !m.closed.is_empty()),
+            c(Cmd::NextTab, vec![Chord::cmd_shift(']')], |_| "next tab".into(), |m| idle(m) && !m.tabs.is_empty()),
+            c(Cmd::PreviousTab, vec![Chord::cmd_shift('[')], |_| "previous tab".into(), |m| idle(m) && !m.tabs.is_empty()),
             c(Cmd::Deselect, vec![k(Key::Escape)], |m| format!("deselect {}", m.list.selected.len()), |m| {
                 listing(m) && !m.list.selected.is_empty()
             }),
@@ -302,6 +312,7 @@ fn rank(cmd: Cmd) -> u8 {
         | Cmd::RemoveRule
         | Cmd::PaletteRun
         | Cmd::PaletteBack
+        | Cmd::CloseTab
         | Cmd::More => 0,
         Cmd::PageDown
         | Cmd::PageUp
@@ -448,9 +459,9 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
                 if targets.len() > 1 {
                     m.list.selected.clear();
                     let first = targets[0].clone();
-                    let rest: Vec<_> = targets[1..].iter().map(|id| (id.clone(), true)).collect();
+                    let rest: Vec<_> = targets[1..].to_vec();
                     m.open_entry(first, None);
-                    m.act(format!("Marked {} more read", plural(rest.len())), Op::Read(rest));
+                    m.open_background(rest);
                 } else if let Some(id) = targets.into_iter().next() {
                     m.open_entry(id, None);
                 }
@@ -540,6 +551,14 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
             m.list.anchor = None;
         }
         Cmd::Close => m.back(),
+        Cmd::CloseTab => m.close_active(),
+        Cmd::ReopenTab => {
+            if !m.closed.is_empty() {
+                m.act("Reopened a closed tab".into(), Op::Reopen);
+            }
+        }
+        Cmd::NextTab => m.cycle_tab(true),
+        Cmd::PreviousTab => m.cycle_tab(false),
         Cmd::Next => m.step_entry(true),
         Cmd::Previous => m.step_entry(false),
         Cmd::ScrollDown | Cmd::ScrollUp => {

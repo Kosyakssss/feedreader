@@ -1,6 +1,8 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use engine::{Block, Candidate, Entry, EntryId, Event, Feed, FeedId, Folder, Mode, Recommendation, RefreshStatus, Request, Rule, SAVED, Settings};
+use engine::{Block, Candidate, Entry, EntryId, Event, Feed, FeedId, Folder, Mode, Recommendation, RefreshStatus, Request, Rule, SAVED, Settings, TabState};
+
+pub use engine::Target;
 use toolkit::field::Field;
 use toolkit::images::Images;
 use toolkit::text::SpanStyle;
@@ -31,22 +33,6 @@ pub enum Focus {
     Palette,
 }
 
-#[derive(Clone, PartialEq, Debug)]
-pub enum Target {
-    Entry(EntryId),
-    Page(String),
-    Play(String, String),
-}
-
-impl Target {
-    pub fn link(&self) -> Option<&str> {
-        match self {
-            Target::Page(u) | Target::Play(u, _) => Some(u),
-            Target::Entry(_) => None,
-        }
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct SelPoint {
     pub block: usize,
@@ -75,6 +61,10 @@ impl Geom {
 }
 
 pub struct Reader {
+    pub id: u64,
+    pub opener: Option<u64>,
+    pub kept: bool,
+    pub seen: bool,
     pub history: Vec<Target>,
     pub mode: Mode,
     pub body: Option<Result<Vec<Block>, String>>,
@@ -214,6 +204,8 @@ pub enum Op {
     AddRule(Rule),
     RemoveRule(Rule),
     Recommend(Vec<(EntryId, Option<String>)>),
+    CloseTab(u64),
+    Reopen,
 }
 
 struct Change {
@@ -285,6 +277,11 @@ pub struct Model {
     pub filter: Field,
     pub focus: Focus,
     pub reader: Option<Reader>,
+    pub tabs: Vec<Option<Reader>>,
+    pub active: usize,
+    pub closed: Vec<Reader>,
+    pub next_tab: u64,
+    pub saved_tabs: Vec<TabState>,
     pub palette: Option<crate::palette::Palette>,
     pub feeds_order: Vec<usize>,
     pub feeds_page: Scroller,
@@ -353,6 +350,11 @@ impl Model {
             filter: Field::default(),
             focus: Focus::Main,
             reader: None,
+            tabs: Vec::new(),
+            active: 0,
+            closed: Vec::new(),
+            next_tab: 0,
+            saved_tabs: Vec::new(),
             palette: None,
             feeds_order: Vec::new(),
             feeds_page: Scroller { row_h: 1.0, ..Default::default() },
@@ -594,8 +596,8 @@ impl Model {
         if page == Page::Feeds && self.page != Page::Feeds {
             self.sort_feeds();
         }
+        self.activate(0);
         self.page = page;
-        self.reader = None;
         self.armed = None;
         self.focus = Focus::Main;
     }
@@ -618,7 +620,9 @@ impl Model {
                 rules,
                 recommendations,
                 public_url,
+                tabs,
             } => {
+                self.restore_tabs(tabs);
                 self.ready = true;
                 self.data_dir = data_dir;
                 self.feeds = feeds;
@@ -721,13 +725,13 @@ impl Model {
                 });
             }
             Event::Body(b) => {
-                if let Some(r) = &mut self.reader
-                    && *r.target() == Target::Entry(b.entry.clone())
-                    && r.mode == b.mode
-                {
-                    r.body = Some(b.blocks);
-                    r.note = b.note;
-                    r.sel = None;
+                let target = Target::Entry(b.entry.clone());
+                for r in self.reader.iter_mut().chain(self.tabs.iter_mut().flatten()) {
+                    if *r.target() == target && r.mode == b.mode {
+                        r.body = Some(b.blocks.clone());
+                        r.note = b.note.clone();
+                        r.sel = None;
+                    }
                 }
             }
             Event::Settings(s) => {
@@ -867,6 +871,11 @@ impl Model {
                 self.refold();
                 Op::AddRule(r)
             }
+            Op::CloseTab(id) => {
+                self.close_tab(id);
+                Op::Reopen
+            }
+            Op::Reopen => Op::CloseTab(self.reopen().unwrap_or(0)),
             Op::Recommend(list) => {
                 let mut inverse = Vec::new();
                 for (id, note) in list {
@@ -947,43 +956,8 @@ impl Model {
         }
     }
 
-    pub fn open_entry(&mut self, id: EntryId, mode: Option<Mode>) {
-        let Some(e) = self.entry(&id).cloned() else { return };
-        let mode = mode
-            .or_else(|| self.feed(&e.feed_id).and_then(|f| f.mode))
-            .unwrap_or(self.settings.reading_mode);
-        if mode != Mode::Original {
-            self.out.push(Request::LoadBody(id.clone(), mode));
-        }
-        self.reader = Some(Reader {
-            history: vec![Target::Entry(id.clone())],
-            mode,
-            body: None,
-            note: None,
-            scroll: 0.0,
-            content_h: 0.0,
-            view_h: 0.0,
-            geom: Vec::new(),
-            sel: None,
-        });
-        self.page = Page::List;
-        if let Some(row) = self.list.visible.iter().position(|&i| self.entries[i].id == id) {
-            self.list.cursor = row;
-        }
-        if !e.read {
-            self.act(format!("Opened \u{201C}{}\u{201D} and marked it read", e.title), Op::Read(vec![(id, true)]));
-        }
-    }
-
     pub fn open_page(&mut self, url: String) {
         self.open_target(Target::Page(url));
-    }
-
-    pub fn open_target(&mut self, t: Target) {
-        if let Some(r) = &mut self.reader {
-            r.history.push(t);
-            r.scroll = 0.0;
-        }
     }
 
     pub fn set_mode(&mut self, mode: Mode) {
@@ -1012,26 +986,13 @@ impl Model {
         }
     }
 
-    pub fn back(&mut self) {
-        if let Some(r) = &mut self.reader {
-            if r.history.len() > 1 {
-                r.history.pop();
-                r.scroll = 0.0;
-            } else {
-                self.reader = None;
-            }
-        }
-        self.list.reveal_cursor();
-    }
-
     pub fn step_entry(&mut self, forward: bool) {
         let Some(Target::Entry(id)) = self.reader.as_ref().map(|r| r.target().clone()) else { return };
         let Some(row) = self.list.visible.iter().position(|&i| self.entries[i].id == id) else { return };
         let next = if forward { row + 1 } else { row.wrapping_sub(1) };
         if let Some(&i) = self.list.visible.get(next) {
-            let mode = self.reader.as_ref().map(|r| r.mode);
             let nid = self.entries[i].id.clone();
-            self.open_entry(nid, mode);
+            self.replace_entry(nid);
         } else {
             self.message = Some(if forward { "That's the last entry in this view." } else { "That's the first entry in this view." }.into());
         }

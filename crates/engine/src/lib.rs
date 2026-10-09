@@ -193,6 +193,7 @@ impl Engine {
             rules: self.store.rules(),
             recommendations: self.store.recommendations(),
             public_url: self.public_url.clone(),
+            tabs: self.store.tabs(),
         });
     }
 
@@ -703,6 +704,7 @@ impl Engine {
                 Err(e) => (self.emit)(Event::Probed(input, Err(e))),
             },
             Request::UseWebExtractor => self.web_extractor = true,
+            Request::SetTabs(tabs) => self.store.set_tabs(&tabs),
             Request::Media(urls) => self.want_media(urls, true),
             Request::Extracted(id, r) => {
                 let Some((job, url, html)) = self.jobs.remove(&id) else { return };

@@ -3,6 +3,7 @@ mod cmds;
 mod extract;
 mod model;
 mod palette;
+mod tabs;
 mod view;
 
 use std::sync::Arc;
@@ -286,7 +287,11 @@ impl State {
             WKey::Named(NamedKey::Home) => Some(Key::Home),
             WKey::Named(NamedKey::End) => Some(Key::End),
             WKey::Named(NamedKey::Space) => Some(Key::Char(' ')),
-            WKey::Character(s) => s.chars().next().map(Key::Char),
+            WKey::Character(s) => s.chars().next().map(|c| match c {
+                '{' => '[',
+                '}' => ']',
+                c => c,
+            }).map(Key::Char),
             _ => None,
         };
         let Some(key) = key else { return false };
@@ -478,6 +483,13 @@ impl State {
                     }
                 }
             }
+            Some(Hit::Tab(n)) => m.activate(n),
+            Some(Hit::CloseTab(n)) => {
+                if let Some(id) = m.tab(n).map(|r| r.id) {
+                    let title = m.tab_title(n);
+                    m.act(format!("Closed \u{201C}{title}\u{201D}"), model::Op::CloseTab(id));
+                }
+            }
             Some(Hit::Palette(i)) => {
                 if i != usize::MAX {
                     palette::activate(m, i);
@@ -498,6 +510,26 @@ impl State {
                 }
             }
             Some(Hit::Area(_)) | None => {}
+        }
+    }
+
+    fn middle(&mut self) {
+        let (x, y) = self.mouse;
+        let m = &mut self.model;
+        match self.hits.iter().rev().find(|(r, _)| r.contains(x, y)).map(|(_, h)| h.clone()) {
+            Some(Hit::Row(row) | Hit::Check(row)) => {
+                if let Some(&i) = m.list.visible.get(row) {
+                    let id = m.entries[i].id.clone();
+                    m.open_background(vec![id]);
+                }
+            }
+            Some(Hit::Tab(n) | Hit::CloseTab(n)) if n > 0 => {
+                if let Some(id) = m.tab(n).map(|r| r.id) {
+                    let title = m.tab_title(n);
+                    m.act(format!("Closed \u{201C}{title}\u{201D}"), model::Op::CloseTab(id));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -795,6 +827,14 @@ impl ApplicationHandler<Wake> for App {
                 ..
             } => {
                 s.press();
+                true
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Middle,
+                ..
+            } => {
+                s.middle();
                 true
             }
             WindowEvent::MouseInput {

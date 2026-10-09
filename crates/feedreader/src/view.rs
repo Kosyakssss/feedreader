@@ -37,6 +37,8 @@ pub enum Hit {
     Media(String),
     Play(String, String),
     Palette(usize),
+    Tab(usize),
+    CloseTab(usize),
     Prompt,
 }
 
@@ -345,6 +347,13 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
         s.text("Opening the library\u{2026}", mt.prop(400.0), main.x + cw, main.y, None, pal.muted);
         return out;
     }
+    let main = if m.tabs.is_empty() || m.palette.is_some() {
+        main
+    } else {
+        paint_tabs(m, s, Rect::new(main.x - cw, main.y, main.w + cw, ch));
+        s.hline(main.y + ch, main.x - cw * 0.5, main.right() + cw);
+        Rect::new(main.x, main.y + ch * 2.0, main.w, main.h - ch * 2.0)
+    };
     if m.palette.is_some() {
         out.ime = crate::palette::paint(m, reg, s, main);
         return out;
@@ -398,6 +407,49 @@ fn nav_items(m: &Model) -> Vec<Nav> {
     v.push(item(Hit::Page(Page::Feeds), "3 FEEDS".into(), String::new(), m.page == Page::Feeds, true));
     v.push(item(Hit::Page(Page::Settings), "4 SETTINGS".into(), String::new(), m.page == Page::Settings, true));
     v
+}
+
+#[profiling::function]
+fn paint_tabs(m: &mut Model, s: &mut Scene<Hit>, r: Rect) {
+    let cw = s.m.cell_w;
+    let pal = s.palette;
+    let mono = s.m.mono();
+    let prop = s.m.prop(400.0);
+    let n = m.tabs.len() + 1;
+    let close_w = s.measure("\u{00D7}", mono) + cw;
+    let room = (r.w - cw * 2.0) / n as f32;
+    let width = room.clamp(cw * 8.0, cw * 34.0);
+    s.push_clip(r);
+    let mut x = r.x + cw;
+    for i in 0..n {
+        if x > r.right() {
+            break;
+        }
+        let cell = Rect::new(x - cw * 0.5, r.y, width - cw * 0.5, r.h);
+        let active = i == m.active;
+        if active {
+            s.fill(cell, pal.cursor);
+        } else {
+            s.hover(cell);
+        }
+        let title = if i == 0 { m.view_name().to_uppercase() } else { m.tab_title(i) };
+        let style = if i == 0 { mono } else { prop };
+        let limit = if i == 0 { width - cw * 1.5 } else { width - cw * 1.5 - close_w };
+        s.text(&title, style, x, r.y, Some(limit), if active { pal.ink } else { pal.muted });
+        s.hit(cell, Hit::Tab(i));
+        if i > 0 {
+            let cx = cell.right() - close_w;
+            let close = Rect::new(cx, r.y, close_w, r.h);
+            let hovered = s.hovered(close);
+            s.text("\u{00D7}", mono, cx + cw * 0.5, r.y, None, if hovered { pal.ink } else { pal.faint });
+            s.hit(close, Hit::CloseTab(i));
+        }
+        x += width;
+        if i == 0 {
+            s.vline(x - cw * 1.25, r.y, r.bottom());
+        }
+    }
+    s.pop_clip();
 }
 
 fn count(n: usize) -> String {

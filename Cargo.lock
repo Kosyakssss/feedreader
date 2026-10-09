@@ -940,6 +940,8 @@ dependencies = [
  "reqwest",
  "rusqlite",
  "scraper",
+ "serde",
+ "serde_json",
  "sha2 0.11.0",
  "tokio",
  "url",
@@ -1029,6 +1031,7 @@ dependencies = [
  "serde_json",
  "toolkit",
  "tracy-client",
+ "url",
  "winit",
  "wry",
 ]

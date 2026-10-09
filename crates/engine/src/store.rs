@@ -835,6 +835,23 @@ pub struct MediaRow {
 }
 
 impl Store {
+    pub fn tabs(&self) -> Vec<crate::types::TabState> {
+        self.db
+            .query_row("select value from settings where key = 'tabs'", [], |r| r.get::<_, String>(0))
+            .ok()
+            .and_then(|v| serde_json::from_str(&v).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn set_tabs(&self, tabs: &[crate::types::TabState]) {
+        if let Ok(v) = serde_json::to_string(tabs) {
+            let _ = self.db.execute(
+                "insert into settings (key, value) values ('tabs', ?1) on conflict(key) do update set value = excluded.value",
+                [v],
+            );
+        }
+    }
+
     pub fn media(&self, url: &str) -> Option<MediaRow> {
         self.db
             .query_row("select file, error, fetched_at from media where url = ?1", [url], |r| {

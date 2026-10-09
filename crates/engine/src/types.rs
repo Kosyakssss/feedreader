@@ -68,7 +68,7 @@ pub struct Entry {
     pub bookmarked: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Mode {
     Clean,
     Feed,
@@ -174,6 +174,30 @@ pub struct Body {
     pub note: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum Target {
+    Entry(EntryId),
+    Page(String),
+    Play(String, String),
+}
+
+impl Target {
+    pub fn link(&self) -> Option<&str> {
+        match self {
+            Target::Page(u) | Target::Play(u, _) => Some(u),
+            Target::Entry(_) => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TabState {
+    pub history: Vec<Target>,
+    pub mode: Mode,
+    pub scroll: f32,
+    pub kept: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct Extracted {
     pub title: String,
@@ -198,6 +222,7 @@ impl Extractor {
 #[derive(Debug)]
 pub enum Request {
     UseWebExtractor,
+    SetTabs(Vec<TabState>),
     Media(Vec<String>),
     Extracted(u64, Result<Extracted, String>),
     Probe(String),
@@ -240,6 +265,7 @@ pub enum Event {
         rules: Vec<Rule>,
         recommendations: Vec<Recommendation>,
         public_url: Option<String>,
+        tabs: Vec<TabState>,
     },
     Folders(Vec<Folder>),
     Rules(Vec<Rule>),
