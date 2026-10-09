@@ -1,9 +1,2 @@
-node_modules
-.DS_Store
-.svelte-kit
-build
-tui/target/
-data/*
-!data/default.css
-
 /target
+.DS_Store

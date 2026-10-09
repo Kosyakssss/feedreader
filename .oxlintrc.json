@@ -1,6 +1,0 @@
-{
-  "ignorePatterns": ["build/**", ".svelte-kit/**"],
-  "rules": {
-    "no-unused-vars": "error"
-  }
-}
