@@ -8,7 +8,7 @@ use url::Url;
 use crate::net::{self, fetch};
 use crate::parse::{ParsedFeed, parse_feed};
 use crate::store::feed_id;
-use crate::types::{Candidate, Feed};
+use crate::types::{Candidate, Extracted, Feed};
 
 pub const FEED_ACCEPT: &str =
     "application/rss+xml, application/atom+xml, application/feed+json, application/json;q=0.9, application/xml;q=0.8, text/xml;q=0.8, */*;q=0.1";
@@ -88,43 +88,25 @@ pub async fn discover(client: &reqwest::Client, input: &str, known: &HashSet<Str
     }
 }
 
-pub async fn extract(client: &reqwest::Client, url: &str) -> Result<String, String> {
+pub async fn fetch_page(client: &reqwest::Client, url: &str) -> Result<(String, String), String> {
     let u = Url::parse(url).map_err(|e| e.to_string())?;
     let f = fetch(client, &u, PAGE_ACCEPT, None, Duration::from_secs(12), 8_000_000).await?;
     if f.status >= 400 {
         return Err(format!("HTTP {}", f.status));
     }
-    let html = String::from_utf8_lossy(&f.body).to_string();
-    let final_url = f.url.to_string();
-    tokio::task::spawn_blocking(move || {
-        let mut r = dom_smoothie::Readability::new(html, Some(&final_url), None).map_err(|e| e.to_string())?;
-        let article = r.parse().map_err(|e| e.to_string())?;
-        Ok(article.content.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-pub async fn save(client: &reqwest::Client, url: &str) -> Result<(String, String), String> {
-    let u = Url::parse(url).map_err(|e| e.to_string())?;
-    let f = fetch(client, &u, PAGE_ACCEPT, None, Duration::from_secs(12), 8_000_000).await?;
-    if f.status >= 400 {
-        return Err(format!("HTTP {}", f.status));
-    }
-    let html = String::from_utf8_lossy(&f.body).to_string();
-    let final_url = f.url.to_string();
-    let host = f.url.host_str().unwrap_or("").to_string();
-    tokio::task::spawn_blocking(move || {
-        let mut r = dom_smoothie::Readability::new(html, Some(&final_url), None).map_err(|e| e.to_string())?;
-        let article = r.parse().map_err(|e| e.to_string())?;
-        let title = if article.title.trim().is_empty() { host } else { article.title.trim().to_string() };
-        Ok((title, article.content.to_string()))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    Ok((f.url.to_string(), String::from_utf8_lossy(&f.body).to_string()))
 }
 
 #[profiling::function]
+pub fn readability(url: &str, html: String) -> Result<Extracted, String> {
+    let mut r = dom_smoothie::Readability::new(html, Some(url), None).map_err(|e| e.to_string())?;
+    let article = r.parse().map_err(|e| e.to_string())?;
+    Ok(Extracted {
+        title: article.title.trim().to_string(),
+        html: article.content.to_string(),
+    })
+}
+
 pub fn read_opml(text: &str) -> Vec<(String, String)> {
     use quick_xml::events::Event;
     let mut reader = quick_xml::Reader::from_str(text);

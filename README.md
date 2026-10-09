@@ -37,6 +37,7 @@ The app binary is also the command:
 feedreader refresh            # fetch every feed now and report failures
 feedreader unread --limit 20  # unread entries as a Markdown list
 feedreader import <file>      # OPML or the old app's database
+feedreader extract <url>      # the clean article text of any page
 ```
 
 ## Profile it

@@ -13,6 +13,7 @@ png = "0.18.1"
 arboard = "3.6.1"
 profiling = "1"
 tracy-client = { version = "0.18", optional = true }
+serde_json = "1"
 
 [features]
 profile = ["dep:tracy-client", "profiling/profile-with-tracy", "toolkit/profile", "engine/profile"]

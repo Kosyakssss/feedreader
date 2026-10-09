@@ -174,8 +174,32 @@ pub struct Body {
     pub note: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+pub struct Extracted {
+    pub title: String,
+    pub html: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Extractor {
+    Defuddle,
+    Readability,
+}
+
+impl Extractor {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Defuddle => "Defuddle",
+            Self::Readability => "Readability",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Request {
+    UseWebExtractor,
+    Extracted(u64, Result<Extracted, String>),
+    Probe(String),
     SetRead(Vec<EntryId>, bool),
     SetBookmarked(Vec<EntryId>, bool),
     Refresh,
@@ -231,4 +255,6 @@ pub enum Event {
     Body(Body),
     Settings(Settings),
     Message(String),
+    Extract { job: u64, url: String, html: String },
+    Probed(String, Result<(Extracted, Extractor), String>),
 }

@@ -107,7 +107,7 @@ Several people per engine, each with their own subscriptions, state, folders, pi
 - Move to another machine: pair the new engine, transfer state and settings directly, make it the hub, repoint devices and the public link.
 
 ### 2.14 Command line
-The `feedreader` command is the same binary as the desktop app: `serve` (headless engine), `service install`, `pair`, `add <url>`, `import <file>`, `refresh`, `unread` (unread entries as a Markdown list, for scripts and agents) and `upgrade`. Bare `feedreader` opens the desktop app.
+The `feedreader` command is the same binary as the desktop app: `serve` (headless engine), `service install`, `pair`, `add <url>`, `import <file>`, `refresh`, `extract <url>` (the Clean text of any page), `unread` (unread entries as a Markdown list, for scripts and agents) and `upgrade`. Bare `feedreader` opens the desktop app.
 
 ## 3. UX
 
@@ -294,8 +294,8 @@ Status: done, partial or open. Each step is committed and pushed to `main` when 
 2. **Done.** Engine core: safe fetcher, parsing, storage, refresh every 5 minutes, discovery from link tags and common paths, OPML, retention, import from the old app.
 3. **Done.** App: list with selection and bulk actions, unread/all, filter, reader in three modes, text selection, Feeds and Settings pages, help, undo/redo, open all unread with confirmation.
 4. **Done.** Folders, pins, hide from Home, per-feed reading mode, mute rules, duplicate merging, I recommend feed and public listener, saved links, full-text index.
-5. **Open.** Defuddle in the extraction web view; headless fallback.
-6. **Open.** Profiling with Tracy; budgets.
+5. **Done.** Defuddle in the extraction web view; headless fallback; `feedreader extract`.
+6. **Partial.** Profiling with Tracy (zones, frames, allocations). Open: GPU zones, budgets checked automatically.
 7. **Open.** Images and the media cache; favicons; attachments and embeds in the web pane.
 8. **Open.** Command palette and search (`is:`, `in:`, `from:`), Cmd-K.
 9. **Open.** Tabs: history, background tabs, peek and kept, persistence; links opening as tabs with Add as feed and Bookmark.

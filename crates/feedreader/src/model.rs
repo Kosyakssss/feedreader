@@ -723,6 +723,7 @@ impl Model {
                 }
             }
             Event::Message(m) => self.message = Some(m),
+            Event::Extract { .. } | Event::Probed(..) => {}
         }
     }
 

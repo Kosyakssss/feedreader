@@ -37,6 +37,36 @@ pub fn data_dir() -> PathBuf {
     }
 }
 
+pub fn article_text(html: &str, base: &str) -> String {
+    let mut out = Vec::new();
+    for b in parse::blocks(html, Some(base)) {
+        let inline = |i: &[Inline]| {
+            i.iter()
+                .map(|x| match x {
+                    Inline::Text(t) | Inline::Bold(t) | Inline::Italic(t) | Inline::Code(t) | Inline::Link(t, _) => t.as_str(),
+                    Inline::Break => "\n",
+                })
+                .collect::<String>()
+        };
+        out.push(match b {
+            Block::Heading(_, i) => format!("## {}", inline(&i)),
+            Block::Paragraph(i) => inline(&i),
+            Block::Quote(i) => format!("> {}", inline(&i)),
+            Block::Item(depth, n, i) => format!(
+                "{}{} {}",
+                "  ".repeat(depth.saturating_sub(1) as usize),
+                n.map(|n| format!("{n}.")).unwrap_or_else(|| "-".into()),
+                inline(&i)
+            ),
+            Block::Code(c) => format!("```\n{c}\n```"),
+            Block::Image(src, alt) => format!("[image: {}] {src}", alt),
+            Block::Media(src, kind) => format!("[{kind}] {src}"),
+            Block::Rule => "---".into(),
+        });
+    }
+    out.join("\n\n")
+}
+
 pub fn check_input(input: &str) -> Result<(), String> {
     net::parse_url(input).map(|_| ())
 }
@@ -72,13 +102,20 @@ enum Fetch {
     Parsed(ParsedFeed, (Option<String>, Option<String>)),
 }
 
+#[derive(Clone)]
+enum Job {
+    Entry(EntryId),
+    Save(String),
+    Probe(String),
+}
+
 enum Internal {
+    Page(Job, Result<(String, String), String>),
+    Read(Job, Result<Extracted, String>, Extractor),
     Fetched(FeedId, Result<Fetch, String>),
     RefreshDone(u64),
     Discovered(String, Result<Vec<Candidate>, String>),
-    Extracted(EntryId, Result<String, String>),
     Added(FeedId, Result<Fetch, String>),
-    Saved(String, Result<(String, String), String>),
 }
 
 struct Engine {
@@ -92,6 +129,9 @@ struct Engine {
     itx: Option<UnboundedSender<Internal>>,
     published: public::Shared,
     public_url: Option<String>,
+    web_extractor: bool,
+    jobs: std::collections::HashMap<u64, (Job, String, String)>,
+    next_job: u64,
 }
 
 async fn fetch_feed(client: &reqwest::Client, url: &str, validators: (Option<String>, Option<String>)) -> Result<Fetch, String> {
@@ -127,6 +167,9 @@ impl Engine {
             itx: None,
             published: Default::default(),
             public_url: None,
+            web_extractor: false,
+            jobs: Default::default(),
+            next_job: 0,
         })
     }
 
@@ -192,6 +235,86 @@ impl Engine {
         tokio::spawn(async move {
             let _ = tx.send(fut.await);
         });
+    }
+
+    fn fetch_page(&self, job: Job, url: String) {
+        let client = self.client.clone();
+        self.spawn(async move {
+            let r = work::fetch_page(&client, &url).await;
+            Internal::Page(job, r)
+        });
+    }
+
+    fn read_locally(&self, job: Job, url: String, html: String) {
+        self.spawn(async move {
+            let r = tokio::task::spawn_blocking(move || work::readability(&url, html))
+                .await
+                .map_err(|e| e.to_string())
+                .and_then(|r| r);
+            Internal::Read(job, r, Extractor::Readability)
+        });
+    }
+
+    fn page(&mut self, job: Job, r: Result<(String, String), String>) {
+        match r {
+            Err(e) => self.read(job, Err(e), Extractor::Readability),
+            Ok((url, html)) if self.web_extractor => {
+                self.next_job += 1;
+                let id = self.next_job;
+                self.jobs.insert(id, (job, url.clone(), html.clone()));
+                (self.emit)(Event::Extract { job: id, url, html });
+            }
+            Ok((url, html)) => self.read_locally(job, url, html),
+        }
+    }
+
+    fn read(&mut self, job: Job, r: Result<Extracted, String>, by: Extractor) {
+        match job {
+            Job::Entry(id) => self.extracted(id, r.map(|x| x.html)),
+            Job::Save(url) => match r {
+                Ok(x) => {
+                    let title = if x.title.is_empty() {
+                        url::Url::parse(&url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_else(|| url.clone())
+                    } else {
+                        x.title
+                    };
+                    let e = self.store.save_link(&url, &title, &x.html, now());
+                    (self.emit)(Event::EntriesAdded(vec![e]));
+                    (self.emit)(Event::Message(format!("Saved \u{201C}{title}\u{201D} to Bookmarks.")));
+                }
+                Err(e) => (self.emit)(Event::Message(format!("Couldn't save {url}: {e}"))),
+            },
+            Job::Probe(url) => (self.emit)(Event::Probed(url, r.map(|x| (x, by)))),
+        }
+    }
+
+    fn extracted(&mut self, id: EntryId, r: Result<String, String>) {
+        let Some((entry, content, summary)) = self.store.entry(&id) else { return };
+        let feed_html = content.or(summary).unwrap_or_default();
+        let feed_text = parse::text_of(&feed_html, true).len();
+        let extracted = r.as_ref().map(|html| parse::text_of(html, true).len()).unwrap_or(0);
+        let use_feed = feed_text > 200 && extracted * 2 < feed_text;
+        let (blocks, note) = match r {
+            Ok(html) if !use_feed => {
+                self.store.set_clean_body(&id, &html, now());
+                (Ok(parse::blocks(&html, Some(&entry.url))), None)
+            }
+            Ok(_) => (
+                Ok(parse::blocks(&feed_html, Some(&entry.url))),
+                Some("The page had less text than the feed, so this is the feed's own text.".to_string()),
+            ),
+            Err(e) if feed_text > 0 => (
+                Ok(parse::blocks(&feed_html, Some(&entry.url))),
+                Some(format!("The page couldn't be extracted ({e}), so this is the feed's own text.")),
+            ),
+            Err(e) => (Err(e), None),
+        };
+        (self.emit)(Event::Body(Body {
+            entry: id,
+            mode: Mode::Clean,
+            blocks,
+            note,
+        }));
     }
 
     fn known(&self) -> HashSet<String> {
@@ -310,42 +433,8 @@ impl Engine {
             }
             Internal::RefreshDone(_) => {}
             Internal::Discovered(q, r) => (self.emit)(Event::Discovered(q, r)),
-            Internal::Extracted(id, r) => {
-                let Some((entry, content, summary)) = self.store.entry(&id) else { return };
-                let feed_html = content.or(summary).unwrap_or_default();
-                let feed_text = parse::text_of(&feed_html, true).len();
-                let extracted = r.as_ref().map(|html| parse::text_of(html, true).len()).unwrap_or(0);
-                let use_feed = feed_text > 200 && extracted * 2 < feed_text;
-                let (blocks, note) = match r {
-                    Ok(html) if !use_feed => {
-                        self.store.set_clean_body(&id, &html, now());
-                        (Ok(parse::blocks(&html, Some(&entry.url))), None)
-                    }
-                    Ok(_) if use_feed => (
-                        Ok(parse::blocks(&feed_html, Some(&entry.url))),
-                        Some("The page had less text than the feed, so this is the feed's own text.".to_string()),
-                    ),
-                    Err(e) if feed_text > 0 => (
-                        Ok(parse::blocks(&feed_html, Some(&entry.url))),
-                        Some(format!("The page couldn't be extracted ({e}), so this is the feed's own text.")),
-                    ),
-                    other => (other.map(|h| parse::blocks(&h, Some(&entry.url))), None),
-                };
-                (self.emit)(Event::Body(Body {
-                    entry: id,
-                    mode: Mode::Clean,
-                    blocks,
-                    note,
-                }));
-            }
-            Internal::Saved(url, r) => match r {
-                Ok((title, html)) => {
-                    let e = self.store.save_link(&url, &title, &html, now());
-                    (self.emit)(Event::EntriesAdded(vec![e]));
-                    (self.emit)(Event::Message(format!("Saved \u{201C}{title}\u{201D} to Bookmarks.")));
-                }
-                Err(e) => (self.emit)(Event::Message(format!("Couldn't save {url}: {e}"))),
-            },
+            Internal::Page(job, r) => self.page(job, r),
+            Internal::Read(job, r, by) => self.read(job, r, by),
             Internal::Added(id, r) => {
                 let result = self.apply_fetch(&id, r);
                 (self.emit)(Event::Feeds(self.store.feeds()));
@@ -485,11 +574,7 @@ impl Engine {
                             }));
                             return;
                         }
-                        let client = self.client.clone();
-                        self.spawn(async move {
-                            let r = work::extract(&client, &entry.url).await;
-                            Internal::Extracted(id, r)
-                        });
+                        self.fetch_page(Job::Entry(id), entry.url.clone());
                     }
                 }
             }
@@ -544,16 +629,21 @@ impl Engine {
                 let ids = self.store.search(&q);
                 (self.emit)(Event::SearchResults(q, ids));
             }
-            Request::SaveLink(input) => {
-                let client = self.client.clone();
-                self.spawn(async move {
-                    let r = match net::parse_url(&input) {
-                        Ok(u) => work::save(&client, u.as_str()).await,
-                        Err(e) => Err(e),
-                    };
-                    let url = net::parse_url(&input).map(|u| u.to_string()).unwrap_or(input);
-                    Internal::Saved(url, r)
-                });
+            Request::SaveLink(input) => match net::parse_url(&input) {
+                Ok(u) => self.fetch_page(Job::Save(u.to_string()), u.to_string()),
+                Err(e) => (self.emit)(Event::Message(format!("Couldn't save {input}: {e}"))),
+            },
+            Request::Probe(input) => match net::parse_url(&input) {
+                Ok(u) => self.fetch_page(Job::Probe(u.to_string()), u.to_string()),
+                Err(e) => (self.emit)(Event::Probed(input, Err(e))),
+            },
+            Request::UseWebExtractor => self.web_extractor = true,
+            Request::Extracted(id, r) => {
+                let Some((job, url, html)) = self.jobs.remove(&id) else { return };
+                match r {
+                    Ok(x) if !x.html.trim().is_empty() => self.read(job, Ok(x), Extractor::Defuddle),
+                    _ => self.read_locally(job, url, html),
+                }
             }
             Request::SetSettings(s) => {
                 let interval_changed = s.refresh_minutes != self.settings.refresh_minutes;

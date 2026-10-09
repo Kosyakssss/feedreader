@@ -1,5 +1,6 @@
 mod article;
 mod cmds;
+mod extract;
 mod model;
 mod view;
 
@@ -33,6 +34,8 @@ static ALLOC: tracy_client::ProfiledAllocator<std::alloc::System> = tracy_client
 enum Wake {
     Engine,
     WebClose,
+    ExtractorReady,
+    Extracted(String),
 }
 
 enum Drag {
@@ -65,6 +68,7 @@ struct State {
     frames: Vec<[f32; 3]>,
     ime_on: bool,
     clipboard: Option<arboard::Clipboard>,
+    extractor: extract::Extractor,
 }
 
 struct App {
@@ -574,7 +578,14 @@ impl State {
 
     fn drain_events(&mut self) {
         while let Ok(e) = self.events.try_recv() {
-            self.model.event(e);
+            match e {
+                Event::Extract { job, url, html } => {
+                    for r in self.extractor.push(&self.window, &self.proxy, job, url, html) {
+                        self.engine.send(r);
+                    }
+                }
+                e => self.model.event(e),
+            }
         }
     }
 }
@@ -627,7 +638,9 @@ impl ApplicationHandler<Wake> for App {
             frames: Vec::new(),
             ime_on: false,
             clipboard: arboard::Clipboard::new().ok(),
+            extractor: extract::Extractor::new(),
         };
+        state.engine.send(Request::UseWebExtractor);
         state.render();
         self.state = Some(state);
     }
@@ -639,6 +652,18 @@ impl ApplicationHandler<Wake> for App {
             Wake::WebClose => {
                 s.model.back();
                 s.window.focus_window();
+            }
+            Wake::ExtractorReady => {
+                for r in s.extractor.ready() {
+                    s.engine.send(r);
+                }
+                return;
+            }
+            Wake::Extracted(body) => {
+                if let Some(r) = extract::result(&body) {
+                    s.engine.send(r);
+                }
+                return;
             }
         }
         s.after();
@@ -875,8 +900,84 @@ fn snapshot(args: &[String]) {
     }
 }
 
+struct Probe {
+    url: String,
+    local: bool,
+    proxy: EventLoopProxy<Wake>,
+    run: Option<(Arc<Window>, engine::Handle, Receiver<Event>, extract::Extractor)>,
+}
+
+impl ApplicationHandler<Wake> for Probe {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.run.is_some() {
+            return;
+        }
+        let window = Arc::new(event_loop.create_window(Window::default_attributes().with_visible(false)).expect("window"));
+        let (tx, rx) = channel();
+        let proxy = self.proxy.clone();
+        let handle = engine::start(engine::data_dir(), move |e| {
+            let _ = tx.send(e);
+            let _ = proxy.send_event(Wake::Engine);
+        });
+        if !self.local {
+            handle.send(Request::UseWebExtractor);
+        }
+        handle.send(Request::Probe(self.url.clone()));
+        self.run = Some((window, handle, rx, extract::Extractor::new()));
+    }
+
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, wake: Wake) {
+        let Some((window, handle, rx, ex)) = self.run.as_mut() else { return };
+        let mut out = Vec::new();
+        match wake {
+            Wake::Engine => {
+                while let Ok(e) = rx.try_recv() {
+                    match e {
+                        Event::Extract { job, url, html } => out.extend(ex.push(window, &self.proxy, job, url, html)),
+                        Event::Probed(url, r) => {
+                            match r {
+                                Ok((x, by)) => {
+                                    println!("{}\n{url}\nextracted by {}\n", x.title, by.name());
+                                    println!("{}", engine::article_text(&x.html, &url));
+                                }
+                                Err(e) => eprintln!("Couldn't extract {url}: {e}"),
+                            }
+                            event_loop.exit();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Wake::ExtractorReady => out.extend(ex.ready()),
+            Wake::Extracted(body) => out.extend(extract::result(&body)),
+            Wake::WebClose => {}
+        }
+        for r in out {
+            handle.send(r);
+        }
+    }
+
+    fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+}
+
 fn cli(args: &[String]) -> bool {
     match args.get(1).map(String::as_str) {
+        Some("extract") => {
+            let Some(url) = args.get(2).filter(|a| !a.starts_with("--")) else {
+                eprintln!("usage: feedreader extract <url> [--local]");
+                return true;
+            };
+            let event_loop = EventLoop::<Wake>::with_user_event().build().expect("event loop");
+            let proxy = event_loop.create_proxy();
+            let mut probe = Probe {
+                url: url.clone(),
+                local: args.iter().any(|a| a == "--local"),
+                proxy,
+                run: None,
+            };
+            let _ = event_loop.run_app(&mut probe);
+            true
+        }
         Some("import") => {
             let Some(path) = args.get(2) else {
                 eprintln!("usage: feedreader import <file.opml | feedreader.sqlite>");
