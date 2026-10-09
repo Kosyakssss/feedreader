@@ -34,7 +34,8 @@ enum Wake {
 enum Drag {
     None,
     Paint { anchor: usize, on: bool },
-    Track(Rect, Scroll),
+    Track(Rect, Scroll, f32),
+    Select,
 }
 
 struct State {
@@ -56,6 +57,7 @@ struct State {
     hover: Option<Rect>,
     modifiers: ModifiersState,
     drag: Drag,
+    last_click: Option<(Instant, f32, f32)>,
     frames: Vec<[f32; 3]>,
     ime_on: bool,
     clipboard: Option<arboard::Clipboard>,
@@ -330,6 +332,25 @@ impl State {
         }
         let (x, y) = self.mouse;
         let hit = self.hit_at(x, y);
+        let shift = self.modifiers.shift_key();
+        let now = Instant::now();
+        let double = self.last_click.is_some_and(|(t, px, py)| {
+            now - t < Duration::from_millis(400) && (px - x).abs() < 6.0 && (py - y).abs() < 6.0
+        });
+        self.last_click = Some((now, x, y));
+        if matches!(hit, Some(Hit::Area(Scroll::Reader))) {
+            if let Some(point) = self.text_point(x, y) {
+                let word = if double { self.word_at(point) } else { None };
+                if let Some(r) = self.model.reader.as_mut() {
+                    r.sel = Some(word.unwrap_or((point, point)));
+                }
+                self.drag = Drag::Select;
+            }
+            return;
+        }
+        if let Some(r) = self.model.reader.as_mut() {
+            r.sel = None;
+        }
         let m = &mut self.model;
         if !matches!(hit, Some(Hit::Filter) | Some(Hit::Prompt) | Some(Hit::Cmd(_))) && m.focus == Focus::Filter {
             m.focus = Focus::Main;
@@ -338,6 +359,23 @@ impl State {
             Some(Hit::Cmd(c)) => cmds::exec(m, c),
             Some(Hit::View(v)) => m.show(v),
             Some(Hit::Page(p)) => m.go(p),
+            Some(Hit::Row(row) | Hit::Check(row)) if shift => {
+                let anchor = m.list.anchor.unwrap_or(m.list.cursor);
+                m.select_rows(anchor, row, true);
+                m.list.cursor = row;
+            }
+            Some(Hit::ReadToggle(row)) => {
+                let e = &m.entries[m.list.visible[row]];
+                let (id, to) = (e.id.clone(), !e.read);
+                let label = format!("Marked \u{201C}{}\u{201D} {}", e.title, if to { "read" } else { "unread" });
+                m.act(label, model::Op::Read(vec![(id, to)]));
+            }
+            Some(Hit::BookmarkToggle(row)) => {
+                let e = &m.entries[m.list.visible[row]];
+                let (id, to) = (e.id.clone(), !e.bookmarked);
+                let label = format!("{} \u{201C}{}\u{201D}", if to { "Bookmarked" } else { "Removed the bookmark from" }, e.title);
+                m.act(label, model::Op::Bookmark(vec![(id, to)]));
+            }
             Some(Hit::Row(row)) => {
                 m.list.cursor = row;
                 let id = m.entries[m.list.visible[row]].id.clone();
@@ -352,12 +390,18 @@ impl State {
             Some(Hit::Check(row)) => {
                 let id = m.entries[m.list.visible[row]].id.clone();
                 let on = !m.list.selected.contains(&id);
-                paint_select(m, row, row, on);
+                m.list.anchor = Some(row);
+                m.select_rows(row, row, on);
                 self.drag = Drag::Paint { anchor: row, on };
             }
             Some(Hit::Track(t, which)) => {
-                self.drag = Drag::Track(t, which);
-                self.track(t, which);
+                let grab = self.thumb(t, which).map(|(top, h)| {
+                    let into = self.mouse.1 - top;
+                    if (0.0..=h).contains(&into) { into } else { h / 2.0 }
+                });
+                let grab = grab.unwrap_or(0.0);
+                self.drag = Drag::Track(t, which, grab);
+                self.track(t, which, grab);
             }
             Some(Hit::Filter) => {
                 m.focus = Focus::Filter;
@@ -410,10 +454,22 @@ impl State {
         }
     }
 
-    fn track(&mut self, t: Rect, which: Scroll) {
-        let ratio = ((self.mouse.1 - t.y) / t.h).clamp(0.0, 1.0);
+    fn thumb(&mut self, t: Rect, which: Scroll) -> Option<(f32, f32)> {
+        let ch = self.metrics.cell_h;
+        let (scroll, content, view) = self.scroll_of(which)?;
+        let scroll = *scroll;
+        let h = if content <= view { t.h } else { (view / content * t.h).max(ch) };
+        let max = (content - view).max(1.0);
+        Some((t.y + (scroll / max).clamp(0.0, 1.0) * (t.h - h), h))
+    }
+
+    fn track(&mut self, t: Rect, which: Scroll, grab: f32) {
+        let Some((_, h)) = self.thumb(t, which) else { return };
+        let mouse = self.mouse.1;
         if let Some((scroll, content, view)) = self.scroll_of(which) {
-            *scroll = (ratio * content - view / 2.0).clamp(0.0, (content - view).max(0.0));
+            let max = (content - view).max(0.0);
+            let room = (t.h - h).max(1.0);
+            *scroll = (((mouse - grab - t.y) / room) * max).clamp(0.0, max);
         }
     }
 
@@ -440,14 +496,24 @@ impl State {
         match self.drag {
             Drag::Paint { anchor, on } => {
                 if let Some(Hit::Row(row) | Hit::Check(row)) = self.hit_at(self.mouse.0, self.mouse.1) {
-                    paint_select(&mut self.model, anchor, row, on);
+                    self.model.select_rows(anchor, row, on);
                     return true;
                 }
                 false
             }
-            Drag::Track(t, which) => {
-                self.track(t, which);
+            Drag::Track(t, which, grab) => {
+                self.track(t, which, grab);
                 true
+            }
+            Drag::Select => {
+                if let Some(point) = self.text_point(self.mouse.0, self.mouse.1)
+                    && let Some(r) = self.model.reader.as_mut()
+                    && let Some((a, _)) = r.sel
+                {
+                    r.sel = Some((a, point));
+                    return true;
+                }
+                false
             }
             Drag::None => {
                 let hover = self
@@ -460,6 +526,7 @@ impl State {
                 self.hover = hover;
                 let icon = match self.hit_at(self.mouse.0, self.mouse.1) {
                     Some(Hit::Filter | Hit::Prompt) => CursorIcon::Text,
+                    Some(Hit::Area(Scroll::Reader)) if self.text_point(self.mouse.0, self.mouse.1).is_some() => CursorIcon::Text,
                     Some(Hit::Area(_)) | None => CursorIcon::Default,
                     Some(_) => CursorIcon::Pointer,
                 };
@@ -469,21 +536,35 @@ impl State {
         }
     }
 
+    fn text_point(&mut self, x: f32, y: f32) -> Option<model::SelPoint> {
+        let r = self.model.reader.as_ref()?;
+        if r.geom.is_empty() {
+            return None;
+        }
+        let i = r
+            .geom
+            .iter()
+            .position(|g| y < g.y + g.h)
+            .unwrap_or(r.geom.len() - 1);
+        let g = &r.geom[i];
+        let spans = g.borrowed();
+        let ly = (y - g.y).clamp(0.0, g.h - 1.0);
+        let byte = self.text.byte_at(&spans, g.size, g.line, g.w, x - g.x, ly);
+        Some(model::SelPoint { block: i, byte })
+    }
+
+    fn word_at(&mut self, p: model::SelPoint) -> Option<(model::SelPoint, model::SelPoint)> {
+        let r = self.model.reader.as_ref()?;
+        let g = r.geom.get(p.block)?;
+        let spans = g.borrowed();
+        let (x, y) = (self.mouse.0 - g.x, (self.mouse.1 - g.y).clamp(0.0, g.h - 1.0));
+        let w = self.text.word_at(&spans, g.size, g.line, g.w, x, y);
+        Some((model::SelPoint { block: p.block, byte: w.start }, model::SelPoint { block: p.block, byte: w.end }))
+    }
+
     fn drain_events(&mut self) {
         while let Ok(e) = self.events.try_recv() {
             self.model.event(e);
-        }
-    }
-}
-
-fn paint_select(m: &mut Model, from: usize, to: usize, on: bool) {
-    let (a, b) = if from <= to { (from, to) } else { (to, from) };
-    for row in a..=b.min(m.list.visible.len().saturating_sub(1)) {
-        let id = m.entries[m.list.visible[row]].id.clone();
-        if on {
-            m.list.selected.insert(id);
-        } else {
-            m.list.selected.remove(&id);
         }
     }
 }
@@ -532,6 +613,7 @@ impl ApplicationHandler<Wake> for App {
             hover: None,
             modifiers: ModifiersState::empty(),
             drag: Drag::None,
+            last_click: None,
             frames: Vec::new(),
             ime_on: false,
             clipboard: arboard::Clipboard::new().ok(),
@@ -732,6 +814,15 @@ fn snapshot(args: &[String]) {
                             }
                             Focus::Main => {}
                         }
+                        continue;
+                    }
+                    other if other.starts_with("feed:") => {
+                        let q = other.trim_start_matches("feed:").replace('_', " ").to_lowercase();
+                        if let Some(f) = model.feeds.iter().find(|f| f.name().to_lowercase().contains(&q)) {
+                            let id = f.id.clone();
+                            model.show(model::View::Feed(id));
+                        }
+                        paint(&mut model, &mut text, &mut quads);
                         continue;
                     }
                     other if other.starts_with("cmd:") => {

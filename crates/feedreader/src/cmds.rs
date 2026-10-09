@@ -54,6 +54,10 @@ pub enum Cmd {
     PromptOk,
     PromptCancel,
     Lines,
+    ExtendDown,
+    ExtendUp,
+    Copy,
+    More,
 }
 
 fn idle(m: &Model) -> bool {
@@ -178,14 +182,20 @@ pub fn registry() -> Registry<Cmd, Model> {
                 _ => "edit".into(),
             }, |m| idle(m) && m.page == Page::Settings),
             c(Cmd::Refresh, vec![ch('r')], |m| if m.refresh.running { "refreshing".into() } else { "refresh".into() }, |m| idle(m) && m.reader.is_none()),
-            c(Cmd::Home, vec![ch('1')], |_| "home".into(), |m| idle(m) && m.reader.is_none()),
-            c(Cmd::Bookmarks, vec![ch('2')], |_| "bookmarks".into(), |m| idle(m) && m.reader.is_none()),
-            c(Cmd::Feeds, vec![ch('3')], |_| "feeds".into(), |m| idle(m) && m.reader.is_none()),
-            c(Cmd::Settings, vec![ch('4')], |_| "settings".into(), |m| idle(m) && m.reader.is_none()),
-            c(Cmd::Help, vec![ch('?')], |m| if m.page == Page::Help { "close help".into() } else { "help".into() }, |m| idle(m) && m.reader.is_none()),
+            c(Cmd::Copy, vec![Chord::cmd('c')], |_| "copy".into(), |m| {
+                m.reader.as_ref().is_some_and(|r| r.ordered().is_some())
+            }),
+            c(Cmd::ExtendDown, vec![Chord { key: Key::Char('j'), cmd: false, shift: true }, Chord { key: Key::Down, cmd: false, shift: true }], |_| "extend selection down".into(), |m| listing(m) && !m.list.visible.is_empty()),
+            c(Cmd::ExtendUp, vec![Chord { key: Key::Char('k'), cmd: false, shift: true }, Chord { key: Key::Up, cmd: false, shift: true }], |_| "extend selection up".into(), |m| listing(m) && !m.list.visible.is_empty()),
+            c(Cmd::Home, vec![ch('1')], |_| "home".into(), idle),
+            c(Cmd::Bookmarks, vec![ch('2')], |_| "bookmarks".into(), idle),
+            c(Cmd::Feeds, vec![ch('3')], |_| "feeds".into(), idle),
+            c(Cmd::Settings, vec![ch('4')], |_| "settings".into(), idle),
+            c(Cmd::Help, vec![ch('?')], |m| if m.page == Page::Help && m.reader.is_none() { "close help".into() } else { "help".into() }, idle),
             c(Cmd::Undo, vec![Chord::cmd('z')], |_| "undo".into(), |m| m.can_undo() && m.focus == Focus::Main),
             c(Cmd::Redo, vec![Chord::cmd_shift('z')], |_| "redo".into(), |m| m.can_redo() && m.focus == Focus::Main),
             c(Cmd::Lines, vec![], |m| format!("lines: {}", m.lines.name()), |_| false),
+            c(Cmd::More, vec![], |m| if m.bar_expanded { "less".into() } else { "more".into() }, |m| m.focus == Focus::Main && m.confirm.is_none()),
         ],
     }
 }
@@ -210,8 +220,27 @@ fn rank(cmd: Cmd) -> u8 {
         | Cmd::Edit
         | Cmd::Clean
         | Cmd::FeedMode
-        | Cmd::Original => 0,
-        Cmd::PageDown | Cmd::PageUp | Cmd::First | Cmd::Last | Cmd::ScrollUp | Cmd::Home | Cmd::Bookmarks | Cmd::Feeds | Cmd::Settings | Cmd::Lines => 2,
+        | Cmd::Original
+        | Cmd::Copy
+        | Cmd::Select
+        | Cmd::More => 0,
+        Cmd::PageDown
+        | Cmd::PageUp
+        | Cmd::First
+        | Cmd::Last
+        | Cmd::ScrollUp
+        | Cmd::ScrollDown
+        | Cmd::Home
+        | Cmd::Bookmarks
+        | Cmd::Feeds
+        | Cmd::Settings
+        | Cmd::Lines
+        | Cmd::ExtendDown
+        | Cmd::ExtendUp
+        | Cmd::Down
+        | Cmd::Up
+        | Cmd::Next
+        | Cmd::Previous => 2,
         _ => 1,
     }
 }
@@ -320,6 +349,7 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
         Cmd::Select => {
             if let Some(&i) = m.list.visible.get(m.list.cursor) {
                 let id = m.entries[i].id.clone();
+                m.list.anchor = Some(m.list.cursor);
                 if !m.list.selected.remove(&id) {
                     m.list.selected.insert(id);
                 }
@@ -426,7 +456,10 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
             m.focus = Focus::Main;
             m.reset_list();
         }
-        Cmd::Deselect => m.list.selected.clear(),
+        Cmd::Deselect => {
+            m.list.selected.clear();
+            m.list.anchor = None;
+        }
         Cmd::Close => m.back(),
         Cmd::Next => m.step_entry(true),
         Cmd::Previous => m.step_entry(false),
@@ -490,6 +523,15 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
             m.prompt = None;
             m.focus = Focus::Main;
         }
+        Cmd::ExtendDown => m.extend(true),
+        Cmd::ExtendUp => m.extend(false),
+        Cmd::Copy => {
+            if let Some(t) = m.reader.as_ref().and_then(|r| r.selected_text()) {
+                m.message = Some(format!("Copied {} characters.", t.chars().count()));
+                m.copy = Some(t);
+            }
+        }
+        Cmd::More => m.bar_expanded = !m.bar_expanded,
         Cmd::Lines => {
             let mut s = m.settings.clone();
             s.lines = m.lines.next().name().to_string();

@@ -4,7 +4,7 @@ use engine::{Block, Inline, Mode};
 use toolkit::text::{Face, SpanStyle};
 use toolkit::ui::{Rect, Scene};
 
-use crate::model::Model;
+use crate::model::{Geom, Model};
 use crate::view::{Hit, Scroll};
 
 struct Prepared {
@@ -168,16 +168,17 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
         };
         heights.push(h);
     }
-    let content: f32 = head_h + status_h + heights.iter().sum::<f32>() + gap * laid.len() as f32 + ch * 2.0;
+    let note_h = r.note.as_ref().map(|n| s.text.height(&[(n.as_str(), base)], mt.size, ch, width) + ch * 0.5).unwrap_or(0.0);
+    let content: f32 = head_h + note_h + status_h + heights.iter().sum::<f32>() + gap * laid.len() as f32 + ch * 2.0;
     r.content_h = content;
     r.view_h = area.h;
     r.scroll = r.scroll.clamp(0.0, (content - area.h).max(0.0));
     let scroll = r.scroll.round();
-    let track = Rect::new(area.right() - cw * 1.5, area.y, cw, area.h);
+    let track = Rect::new(area.right() - cw * 2.5, area.y, cw * 2.0, area.h);
+    s.hit(area, Hit::Area(Scroll::Reader));
     s.scrollbar(track, scroll, content);
     s.hit(track, Hit::Track(track, Scroll::Reader));
-    s.hit(area, Hit::Area(Scroll::Reader));
-    s.push_clip(Rect::new(area.x, area.y, area.w - cw * 1.5, area.h));
+    s.push_clip(Rect::new(area.x, area.y, area.w - cw * 2.5, area.h));
     let mut y = area.y - scroll + ch * 0.5;
     s.spans(&[(header.title.as_str(), title_style)], title_size, title_line, x0, y, Some(width), None, &colors);
     y += title_h;
@@ -185,17 +186,40 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
     y += ch;
     s.text(&header.url, mono, x0, y, Some(width), pal.faint);
     y += ch;
-    s.hline(y, area.x, area.right() - cw * 1.5);
+    s.hline(y, area.x - cw * 0.5, area.right());
     y += ch;
+    if let Some(n) = &r.note {
+        s.paragraph(n, mt.prop(400.0), ch, x0, y, width, pal.warn);
+        y += note_h;
+    }
     if let Some((t, c)) = &status {
         s.paragraph(t, mt.prop(400.0), line, x0, y, width, *c);
         y += status_h;
     }
+    let ordered = r.ordered();
+    let range_for = |block: usize, len: usize| -> Option<std::ops::Range<usize>> {
+        let (a, b) = ordered?;
+        if block < a.block || block > b.block {
+            return None;
+        }
+        let start = if block == a.block { a.byte } else { 0 };
+        let end = if block == b.block { b.byte.min(len) } else { len };
+        (start < end).then_some(start..end)
+    };
+    let mut geom: Vec<Geom> = Vec::new();
     for (l, h) in laid.iter().zip(heights) {
-        if y + h >= area.y && y <= area.bottom() {
-            match l {
-                Laid::Text { p, size, line, indent, marker, quote } => {
-                    let spans: Vec<(&str, SpanStyle)> = p.spans.iter().map(|(t, st)| (t.as_str(), *st)).collect();
+        let visible = y + h >= area.y && y <= area.bottom();
+        match l {
+            Laid::Text { p, size, line, indent, marker, quote } => {
+                let g = Geom { x: x0 + indent, y, w: width - indent, h, size: *size, line: *line, spans: p.spans.clone() };
+                if visible {
+                    let spans = g.borrowed();
+                    if let Some(range) = range_for(geom.len(), g.text().len()) {
+                        for rc in s.text.range_rects(&spans, g.size, g.line, g.w, range) {
+                            let c = pal.selection;
+                            s.fill(Rect::new(g.x + rc[0], g.y + rc[1], rc[2], rc[3]), c);
+                        }
+                    }
                     if let Some(mk) = marker {
                         let mw = s.measure(mk, mono);
                         s.text(mk, mono, x0 + indent - cw - mw, y + (line - ch) / 2.0, None, pal.muted);
@@ -203,7 +227,7 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
                     if *quote {
                         s.vline(x0, y, y + h);
                     }
-                    let drawn = s.spans(&spans, *size, *line, x0 + indent, y, Some(width - indent), None, &colors);
+                    let drawn = s.spans(&spans, *size, *line, g.x, y, Some(g.w), None, &colors);
                     for (rect, range) in drawn.underlines {
                         if let Some((_, url)) = p.links.iter().find(|(lr, _)| lr.start <= range.start && range.start < lr.end) {
                             let r = Rect::new(rect[0], rect[1], rect[2], rect[3]);
@@ -215,12 +239,33 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
                         }
                     }
                 }
-                Laid::Code(c) => {
+                geom.push(g);
+            }
+            Laid::Code(c) => {
+                let g = Geom {
+                    x: x0 + cw * 0.5,
+                    y: y + ch * 0.25,
+                    w: width - cw * 2.0,
+                    h: h - ch * 0.5,
+                    size: mt.size,
+                    line: ch,
+                    spans: vec![(c.clone(), SpanStyle::plain(Face::Mono))],
+                };
+                if visible {
                     s.fill(Rect::new(x0 - cw * 0.5, y, width + cw, h - ch * 0.5), pal.field);
-                    let spans = [(c.as_str(), SpanStyle::plain(Face::Mono))];
-                    s.spans(&spans, mt.size, ch, x0 + cw * 0.5, y + ch * 0.25, Some(width - cw * 2.0), None, &colors);
+                    let spans = g.borrowed();
+                    if let Some(range) = range_for(geom.len(), c.len()) {
+                        for rc in s.text.range_rects(&spans, g.size, g.line, g.w, range) {
+                            let col = pal.selection;
+                            s.fill(Rect::new(g.x + rc[0], g.y + rc[1], rc[2], rc[3]), col);
+                        }
+                    }
+                    s.spans(&spans, mt.size, ch, g.x, g.y, Some(g.w), None, &colors);
                 }
-                Laid::Line(text, src) => {
+                geom.push(g);
+            }
+            Laid::Line(text, src) => {
+                if visible {
                     let st = SpanStyle {
                         underline: true,
                         color: 3,
@@ -232,7 +277,11 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
                     s.spans(&[(text.as_str(), st)], mt.size, ch, x0, y, None, Some(width), &colors);
                     s.hit(r, Hit::Media(src.clone()));
                 }
-                Laid::Rule => s.hline(y, x0, x0 + width),
+            }
+            Laid::Rule => {
+                if visible {
+                    s.hline(y, x0, x0 + width);
+                }
             }
         }
         y += h + gap;
@@ -241,4 +290,5 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
         s.text("End of the article.", mt.prop(400.0), x0, y, None, pal.faint);
     }
     s.pop_clip();
+    r.geom = geom;
 }

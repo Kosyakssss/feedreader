@@ -226,6 +226,27 @@ impl Text {
         self.layout(spans, size, line, Some(wrap)).height()
     }
 
+    pub fn byte_at(&mut self, spans: &[(&str, SpanStyle)], size: f32, line: f32, wrap: f32, x: f32, y: f32) -> usize {
+        let layout = self.layout(spans, size, line, Some(wrap));
+        parley::Cursor::from_point(layout, x, y).index()
+    }
+
+    pub fn word_at(&mut self, spans: &[(&str, SpanStyle)], size: f32, line: f32, wrap: f32, x: f32, y: f32) -> Range<usize> {
+        let layout = self.layout(spans, size, line, Some(wrap));
+        parley::Selection::word_from_point(layout, x, y).text_range()
+    }
+
+    pub fn range_rects(&mut self, spans: &[(&str, SpanStyle)], size: f32, line: f32, wrap: f32, range: Range<usize>) -> Vec<[f32; 4]> {
+        let layout = self.layout(spans, size, line, Some(wrap));
+        let a = parley::Cursor::from_byte_index(layout, range.start, parley::Affinity::Downstream);
+        let b = parley::Cursor::from_byte_index(layout, range.end, parley::Affinity::Upstream);
+        parley::Selection::new(a, b)
+            .geometry(layout)
+            .into_iter()
+            .map(|(bb, _)| [bb.x0 as f32, bb.y0 as f32, (bb.x1 - bb.x0) as f32, (bb.y1 - bb.y0) as f32])
+            .collect()
+    }
+
     pub fn draw(
         &mut self,
         out: &mut Vec<Quad>,

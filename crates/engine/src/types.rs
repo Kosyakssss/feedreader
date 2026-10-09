@@ -134,6 +134,7 @@ pub struct Body {
     pub entry: EntryId,
     pub mode: Mode,
     pub blocks: Result<Vec<Block>, String>,
+    pub note: Option<String>,
 }
 
 #[derive(Debug)]
@@ -163,6 +164,7 @@ pub enum Event {
     },
     Feeds(Vec<Feed>),
     EntriesAdded(Vec<Entry>),
+    EntriesUpdated(Vec<(EntryId, String, i64)>),
     EntriesRemoved(Vec<EntryId>),
     Refresh(RefreshStatus),
     Discovered(String, Result<Vec<Candidate>, String>),

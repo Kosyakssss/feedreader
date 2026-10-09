@@ -198,11 +198,25 @@ impl Engine {
     }
 
     fn apply_fetch(&mut self, id: &str, result: Result<Fetch, String>) -> Result<Vec<Entry>, String> {
+        let r = self.apply_fetch_inner(id, result);
+        r.map(|(added, updated)| {
+            if !updated.is_empty() {
+                (self.emit)(Event::EntriesUpdated(updated));
+            }
+            added
+        })
+    }
+
+    fn apply_fetch_inner(
+        &mut self,
+        id: &str,
+        result: Result<Fetch, String>,
+    ) -> Result<(Vec<Entry>, Vec<(EntryId, String, i64)>), String> {
         let t = now();
         match result {
             Ok(Fetch::NotModified) => {
                 self.store.set_fetch_result(id, None, None, None, None, t);
-                Ok(Vec::new())
+                Ok((Vec::new(), Vec::new()))
             }
             Ok(Fetch::Parsed(parsed, validators)) => {
                 let error = parsed.entries.is_empty().then_some("Feed returned no entries");
@@ -255,15 +269,31 @@ impl Engine {
             Internal::RefreshDone(_) => {}
             Internal::Discovered(q, r) => (self.emit)(Event::Discovered(q, r)),
             Internal::Extracted(id, r) => {
-                let url = self.store.entry(&id).map(|(e, _, _)| e.url).unwrap_or_default();
-                let blocks = r.map(|html| {
-                    self.store.set_clean_body(&id, &html, now());
-                    parse::blocks(&html, Some(&url))
-                });
+                let Some((entry, content, summary)) = self.store.entry(&id) else { return };
+                let feed_html = content.or(summary).unwrap_or_default();
+                let feed_text = parse::text_of(&feed_html, true).len();
+                let extracted = r.as_ref().map(|html| parse::text_of(html, true).len()).unwrap_or(0);
+                let use_feed = feed_text > 200 && extracted * 2 < feed_text;
+                let (blocks, note) = match r {
+                    Ok(html) if !use_feed => {
+                        self.store.set_clean_body(&id, &html, now());
+                        (Ok(parse::blocks(&html, Some(&entry.url))), None)
+                    }
+                    Ok(_) if use_feed => (
+                        Ok(parse::blocks(&feed_html, Some(&entry.url))),
+                        Some("The page had less text than the feed, so this is the feed's own text.".to_string()),
+                    ),
+                    Err(e) if feed_text > 0 => (
+                        Ok(parse::blocks(&feed_html, Some(&entry.url))),
+                        Some(format!("The page couldn't be extracted ({e}), so this is the feed's own text.")),
+                    ),
+                    other => (other.map(|h| parse::blocks(&h, Some(&entry.url))), None),
+                };
                 (self.emit)(Event::Body(Body {
                     entry: id,
                     mode: Mode::Clean,
                     blocks,
+                    note,
                 }));
             }
             Internal::Added(id, r) => {
@@ -382,7 +412,7 @@ impl Engine {
                         } else {
                             Ok(parse::blocks(&html, Some(&entry.url)))
                         };
-                        (self.emit)(Event::Body(Body { entry: id, mode, blocks }));
+                        (self.emit)(Event::Body(Body { entry: id, mode, blocks, note: None }));
                     }
                     Mode::Clean => {
                         if let Some(html) = self.store.clean_body(&id) {
@@ -390,6 +420,7 @@ impl Engine {
                                 entry: id,
                                 mode,
                                 blocks: Ok(parse::blocks(&html, Some(&entry.url))),
+                                note: None,
                             }));
                             return;
                         }
@@ -398,6 +429,7 @@ impl Engine {
                                 entry: id,
                                 mode,
                                 blocks: Err("This entry has no link to extract.".into()),
+                                note: None,
                             }));
                             return;
                         }

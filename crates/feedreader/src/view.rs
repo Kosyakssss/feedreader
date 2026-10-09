@@ -29,6 +29,8 @@ pub enum Hit {
     Feed(usize),
     Setting(usize),
     Candidate(usize),
+    ReadToggle(usize),
+    BookmarkToggle(usize),
     Link(String),
     Media(String),
     Prompt,
@@ -98,29 +100,85 @@ fn ago(ms: Option<i64>) -> String {
     }
 }
 
-fn wrap_parts(s: &mut Scene<Hit>, parts: &[(String, [f32; 4], Option<Hit>)], x0: f32, y0: f32, right: f32, gap: f32) -> f32 {
+pub struct Part {
+    key: String,
+    label: String,
+    color: [f32; 4],
+    hit: Option<Hit>,
+    optional: bool,
+}
+
+impl Part {
+    fn info(label: String, color: [f32; 4]) -> Self {
+        Self { key: String::new(), label, color, hit: None, optional: false }
+    }
+
+    fn button(key: String, label: String, color: [f32; 4], hit: Hit) -> Self {
+        Self { key, label, color, hit: Some(hit), optional: false }
+    }
+
+    fn text(&self) -> String {
+        match (&self.hit, self.key.is_empty()) {
+            (None, _) => self.label.clone(),
+            (Some(_), true) => format!("[{}]", self.label),
+            (Some(_), false) => format!("[{} {}]", self.key, self.label),
+        }
+    }
+}
+
+fn button(s: &mut Scene<Hit>, p: &Part, x: f32, y: f32) -> f32 {
     let mono = s.m.mono();
-    let ch = s.m.cell_h;
-    let (mut x, mut y) = (x0, y0);
-    for (text, color, hit) in parts {
-        let w = s.measure(text, mono);
-        let optional = hit.is_none() && *color == s.palette.faint;
-        if optional && x + w > right {
-            continue;
-        }
+    let (cw, ch) = (s.m.cell_w, s.m.cell_h);
+    let pal = s.palette;
+    let w = s.measure(&p.text(), mono);
+    let Some(hit) = &p.hit else {
+        s.text(&p.label, mono, x, y, None, p.color);
+        return w;
+    };
+    let r = Rect::new(x - cw * 0.25, y, w + cw * 0.5, ch);
+    let hovered = s.hover(r);
+    let mut cx = x;
+    cx += s.text("[", mono, cx, y, None, pal.faint).width;
+    if !p.key.is_empty() {
+        cx += s.text(&p.key, mono, cx, y, None, pal.ink).width;
+        cx += cw;
+    }
+    let label = if hovered { pal.ink } else { p.color };
+    cx += s.text(&p.label, mono, cx, y, None, label).width;
+    s.text("]", mono, cx, y, None, pal.faint);
+    s.hit(r, hit.clone());
+    w
+}
+
+fn layout_parts(s: &mut Scene<Hit>, parts: &[Part], x0: f32, right: f32, gap: f32) -> Vec<Vec<(usize, f32)>> {
+    let mono = s.m.mono();
+    let mut rows: Vec<Vec<(usize, f32)>> = vec![Vec::new()];
+    let mut x = x0;
+    for (i, p) in parts.iter().enumerate() {
+        let w = s.measure(&p.text(), mono);
         if x + w > right && x > x0 {
+            if p.optional {
+                continue;
+            }
+            rows.push(Vec::new());
             x = x0;
-            y += ch;
         }
-        let r = Rect::new(x - s.m.cell_w * 0.5, y, w + s.m.cell_w, ch);
-        let color = if hit.is_some() && s.hover(r) { s.palette.ink } else { *color };
-        s.text(text, mono, x, y, Some(right - x), color);
-        if let Some(h) = hit {
-            s.hit(r, h.clone());
-        }
+        rows.last_mut().unwrap().push((i, x));
         x += w + gap;
     }
-    y + ch
+    rows
+}
+
+fn draw_parts(s: &mut Scene<Hit>, parts: &[Part], rows: &[Vec<(usize, f32)>], y0: f32) -> f32 {
+    let ch = s.m.cell_h;
+    let mut y = y0;
+    for row in rows {
+        for &(i, x) in row {
+            button(s, &parts[i], x, y);
+        }
+        y += ch;
+    }
+    y
 }
 
 pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stats: FrameStats) -> PaintOut {
@@ -129,6 +187,7 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
     let pal = s.palette;
     let mono = mt.mono();
     let mut out = PaintOut { webview: None, ime: None };
+    let hair = mt.scale.round().max(1.0);
 
     let refresh = if !m.ready {
         "starting".to_string()
@@ -143,69 +202,66 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
         }
     };
     let mut parts = vec![
-        ("Feedreader".to_string(), pal.ink, None),
-        (format!("{} unread", m.unread_home), pal.ink, Some(Hit::View(View::Home))),
-        (refresh, pal.muted, Some(Hit::Cmd(Cmd::Refresh))),
+        Part::info("FEEDREADER".into(), pal.ink),
+        Part::info(format!("{} unread", m.unread_home), pal.ink),
+        Part::info(refresh, pal.muted),
     ];
     let failing = m.failing();
     if failing > 0 {
-        parts.push((
+        parts.push(Part::button(
+            String::new(),
             format!("{failing} {} failing", if failing == 1 { "feed" } else { "feeds" }),
             pal.danger,
-            Some(Hit::Page(Page::Feeds)),
+            Hit::Page(Page::Feeds),
         ));
     }
-    parts.push((
+    let mut perf = Part::info(
         format!("paint {:.1} ms (max {:.1}) gpu {:.1} (max {:.1})", stats.paint, stats.max_paint, stats.gpu, stats.max_gpu),
         pal.faint,
-        None,
-    ));
-    let top = wrap_parts(s, &parts, cw, 0.0, mt.width - cw, cw * 3.0);
+    );
+    perf.optional = true;
+    parts.push(perf);
+    let rows = layout_parts(s, &parts, cw, mt.width - cw, cw * 3.0);
+    let top = draw_parts(s, &parts, &rows, 0.0);
     s.hline(top, 0.0, mt.width);
     let body_top = top + ch;
 
-    let mut candidates: Vec<(u8, String, [f32; 4], Hit)> = reg
+    let mut commands: Vec<(u8, Part)> = reg
         .available(m)
-        .filter(|c| c.rank < 2)
+        .filter(|c| c.id != Cmd::More && (m.bar_expanded || c.rank == 0))
         .map(|c| {
-            let keys = keys_label(&c.keys);
-            let label = (c.label)(m);
-            if keys.is_empty() {
-                (c.rank, format!("[{label}]"), pal.ink, Hit::Cmd(c.id))
-            } else {
-                (c.rank, format!("{keys} {label}"), pal.muted, Hit::Cmd(c.id))
-            }
+            let key = c.keys.first().map(|k| k.label()).unwrap_or_default();
+            let color = if key.is_empty() { pal.ink } else { pal.muted };
+            (c.rank, Part::button(key, (c.label)(m), color, Hit::Cmd(c.id)))
         })
         .collect();
-    candidates.sort_by_key(|c| c.0);
+    commands.sort_by_key(|c| c.0);
+    let mut bar: Vec<Part> = commands.into_iter().map(|c| c.1).collect();
+    let more = reg.is_available(m, Cmd::More);
     let total_rows = (mt.height / ch).floor() as usize;
-    let max_rows = if total_rows < 22 { 1 } else if total_rows < 34 { 2 } else { 3 };
-    let more_w = s.measure("[? 99 more]", mono) + cw * 3.0;
-    let mut bar_parts: Vec<(String, [f32; 4], Option<Hit>)> = Vec::new();
-    let mut rows_needed = 1;
-    {
-        let mut x = cw;
-        let mut hidden = 0;
-        let n = candidates.len();
-        for (i, (_, t, color, hit)) in candidates.into_iter().enumerate() {
-            let w = s.measure(&t, mono);
-            let last_row = rows_needed == max_rows;
-            let reserve = if last_row && i + 1 < n { more_w } else { 0.0 };
-            if hidden > 0 || (last_row && x + w + reserve > mt.width - cw) {
-                hidden += 1;
-                continue;
+    let max_rows = if m.bar_expanded { total_rows / 3 } else if total_rows < 22 { 1 } else { 2 };
+    let mut bar_rows = layout_parts(s, &bar, cw, mt.width - cw, cw * 2.0);
+    if more {
+        let label = if m.bar_expanded { "less".to_string() } else { "more".to_string() };
+        let more_part = Part::button(String::new(), label, pal.ink, Hit::Cmd(Cmd::More));
+        let more_w = s.measure(&more_part.text(), mono);
+        bar_rows.truncate(max_rows.max(1));
+        let last = bar_rows.last_mut().unwrap();
+        while let Some(&(i, x)) = last.last() {
+            let w = s.measure(&bar[i].text(), mono);
+            if x + w + cw * 2.0 + more_w <= mt.width - cw {
+                break;
             }
-            if x + w > mt.width - cw && x > cw {
-                rows_needed += 1;
-                x = cw;
-            }
-            bar_parts.push((t, color, Some(hit)));
-            x += w + cw * 3.0;
+            last.pop();
         }
-        if hidden > 0 {
-            bar_parts.push((format!("[? {hidden} more]"), pal.ink, Some(Hit::Cmd(Cmd::Help))));
-        }
+        let x = last
+            .last()
+            .map(|&(i, x)| x + s.measure(&bar[i].text(), mono) + cw * 2.0)
+            .unwrap_or(cw);
+        bar.push(more_part);
+        last.push((bar.len() - 1, x));
     }
+    let mut rows_needed = bar_rows.len();
     if m.prompt.is_some() {
         rows_needed += 1;
     }
@@ -237,20 +293,15 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
         s.text(&q, mono, cw, y, None, pal.ink);
         y += ch;
     }
-    wrap_parts(s, &bar_parts, cw, y, mt.width - cw, cw * 3.0);
+    draw_parts(s, &bar, &bar_rows, y);
     let msg_y = mt.height - ch;
     if let Some(msg) = &m.message {
         let undo = m.can_undo() && m.focus == Focus::Main;
-        let room = if undo { mt.width - cw * 14.0 } else { mt.width - cw * 2.0 };
-        let w = s.text(msg, mt.prop(400.0), cw, msg_y, Some(room), pal.ink).width;
+        let undo_part = Part::button(Chord::cmd('z').label(), "undo".into(), pal.muted, Hit::Cmd(Cmd::Undo));
+        let uw = if undo { s.measure(&undo_part.text(), mono) + cw * 3.0 } else { 0.0 };
+        let w = s.text(msg, mt.prop(400.0), cw, msg_y, Some(mt.width - cw * 2.0 - uw), pal.ink).width;
         if undo {
-            let label = format!("{} undo", Chord::cmd('z').label());
-            let x = cw * 3.0 + w;
-            let uw = s.measure(&label, mono);
-            let r = Rect::new(x - cw * 0.5, msg_y, uw + cw, ch);
-            let color = if s.hover(r) { pal.ink } else { pal.muted };
-            s.text(&label, mono, x, msg_y, None, color);
-            s.hit(r, Hit::Cmd(Cmd::Undo));
+            button(s, &undo_part, cw * 3.0 + w, msg_y);
         }
     }
 
@@ -258,7 +309,11 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
     let main = if wide {
         let pane_w = cw * 26.0;
         paint_pane(m, s, Rect::new(0.0, body_top, pane_w, body_bottom - body_top));
-        s.vline(pane_w, body_top, body_bottom);
+        if m.lines == toolkit::ui::LineStyle::Ascii {
+            s.vline(pane_w, body_top, body_bottom);
+        } else {
+            s.vline(pane_w, (top + ch / 2.0).floor(), (body_bottom + ch / 2.0).floor() + hair);
+        }
         Rect::new(pane_w + cw, body_top, mt.width - pane_w - cw, body_bottom - body_top)
     } else {
         paint_strip(m, s, Rect::new(0.0, body_top, mt.width, ch));
@@ -395,7 +450,7 @@ fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOut)
     let mono = mt.mono();
 
     let state = if m.view == View::Bookmarks { "newest first" } else if m.unread_only { "unread" } else { "all" };
-    let title = format!("{} \u{00B7} {state}", m.view_name());
+    let title = format!("{} \u{00B7} {state}", m.view_name()).to_uppercase();
     let tw = s.text(&title, mono, main.x + cw, main.y, Some(main.w * 0.4), pal.ink).width;
     let count = if m.list.visible.is_empty() {
         String::new()
@@ -421,10 +476,10 @@ fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOut)
     m.list.view_h = list.h;
     let max = (m.list.visible.len() as f32 * m.list.row_h - list.h).max(0.0);
     m.list.scroll = m.list.scroll.clamp(0.0, max);
-    let track = Rect::new(main.right() - cw * 1.5, list.y, cw, list.h);
+    let track = Rect::new(main.right() - cw * 2.5, list.y, cw * 2.0, list.h);
+    s.hit(list, Hit::Area(Scroll::List));
     s.scrollbar(track, m.list.scroll, m.list.visible.len() as f32 * m.list.row_h);
     s.hit(track, Hit::Track(track, Scroll::List));
-    s.hit(list, Hit::Area(Scroll::List));
 
     if m.list.visible.is_empty() {
         let text = if !m.filter.text.is_empty() {
@@ -442,7 +497,7 @@ fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOut)
         return;
     }
 
-    s.push_clip(Rect::new(list.x, list.y, list.w - cw * 1.5, list.h));
+    s.push_clip(Rect::new(list.x, list.y, list.w - cw * 2.5, list.h));
     let scroll = m.list.scroll.round();
     let row_h = m.list.row_h;
     let first = (scroll / row_h).floor() as usize;
@@ -451,7 +506,7 @@ fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOut)
         let i = m.list.visible[row];
         let e = &m.entries[i];
         let y = list.y + row as f32 * row_h - scroll;
-        let r = Rect::new(list.x, y, list.w - cw * 1.5, row_h);
+        let r = Rect::new(list.x, y, list.w - cw * 2.5, row_h);
         let selected = m.list.selected.contains(&e.id);
         if row == m.list.cursor {
             s.fill(r, pal.cursor);
@@ -462,13 +517,24 @@ fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOut)
         s.checkbox(x, y, selected);
         s.hit(Rect::new(list.x, y, cw * 4.5, row_h), Hit::Check(row));
         x += cw * 4.0;
-        let flags = format!("{}{}", if e.read { ' ' } else { 'N' }, if e.bookmarked { 'B' } else { ' ' });
-        s.text(&flags, mono, x, y, None, pal.ink);
+        let read_cell = Rect::new(x - cw * 0.25, y, cw * 1.5, row_h);
+        let mark_cell = Rect::new(x + cw * 1.25, y, cw * 1.5, row_h);
+        for (cell, on, glyph) in [(read_cell, !e.read, "N"), (mark_cell, e.bookmarked, "B")] {
+            let hovered = s.hovered(cell);
+            if hovered {
+                let c = pal.cursor;
+                s.fill(cell, c);
+            }
+            let (t, c) = if on { (glyph, pal.ink) } else if hovered { (glyph, pal.faint) } else { ("\u{00B7}", pal.rule) };
+            s.text(t, mono, cell.x + cw * 0.25, y, None, c);
+        }
+        s.hit(read_cell, Hit::ReadToggle(row));
+        s.hit(mark_cell, Hit::BookmarkToggle(row));
         x += cw * 3.0;
         let w = when(e.published);
         let ww = s.measure(&w, mono);
-        s.text(&w, mono, x + cw * 6.0 - ww, y, None, pal.muted);
-        x += cw * 8.0;
+        s.text(&w, mono, x + cw * 8.0 - ww, y, None, pal.muted);
+        x += cw * 10.0;
         let src = m.feed_name(&e.feed_id).to_string();
         let style = mt.prop(if e.read { 400.0 } else { 600.0 });
         let color = if e.read { pal.muted } else { pal.ink };
@@ -482,7 +548,7 @@ fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOut)
             x += cw * 20.0;
             s.text(title, style, x, y, Some(r.right() - x - cw), color);
         }
-        s.hit(Rect::new(list.x + cw * 4.5, y, r.w - cw * 4.5, row_h), Hit::Row(row));
+        s.hit(Rect::new(list.x + cw * 7.0, y, r.w - cw * 7.0, row_h), Hit::Row(row));
     }
     if last == m.list.visible.len() {
         let y = list.y + m.list.visible.len() as f32 * row_h - scroll;
@@ -507,7 +573,7 @@ fn paint_reader(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOu
         Target::Page(url) => {
             s.text(url, mono, x, y, Some(width), pal.muted);
             y += ch;
-            s.hline(y, main.x, main.right());
+            s.hline(y, main.x - cw * 0.5, main.right());
             y += ch;
             let web = Rect::new(main.x, y, main.w, main.bottom() - y);
             s.text("Loading the page\u{2026}", mono, web.x + cw, web.y, None, pal.faint);
@@ -534,7 +600,7 @@ fn paint_reader(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOu
                 y += ch;
                 s.text(&meta, mono, x, y, Some(width), pal.muted);
                 y += ch;
-                s.hline(y, main.x, main.right());
+                s.hline(y, main.x - cw * 0.5, main.right());
                 y += ch;
                 let rest = Rect::new(main.x, y, main.w, main.bottom() - y);
                 s.text("Loading the page\u{2026}", mono, rest.x + cw, rest.y, None, pal.faint);
@@ -552,9 +618,9 @@ fn paint_feeds(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
     let pal = s.palette;
     let mono = mt.mono();
     let failing = m.failing();
-    let mut head = format!("FEEDS \u{00B7} {} subscribed", m.feeds.len());
+    let mut head = format!("FEEDS \u{00B7} {} SUBSCRIBED", m.feeds.len());
     if failing > 0 {
-        head.push_str(&format!(" \u{00B7} {failing} failing"));
+        head.push_str(&format!(" \u{00B7} {failing} FAILING"));
     }
     s.text(&head, mono, main.x + cw, main.y, Some(main.w - cw * 2.0), pal.ink);
     let mut y = main.y + ch;
@@ -563,13 +629,13 @@ fn paint_feeds(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
         Some(Discovery::Searching(q)) => {
             s.text(&format!("Looking for feeds at {q}\u{2026}"), mono, main.x + cw, y, Some(main.w - cw * 2.0), pal.muted);
             y += ch;
-            s.hline(y, main.x, main.right());
+            s.hline(y, main.x - cw * 0.5, main.right());
             y += ch;
         }
         Some(Discovery::Failed(q, e)) => {
             s.text(&format!("Couldn't find a feed at {q}: {e}"), mono, main.x + cw, y, Some(main.w - cw * 2.0), pal.danger);
             y += ch;
-            s.hline(y, main.x, main.right());
+            s.hline(y, main.x - cw * 0.5, main.right());
             y += ch;
         }
         Some(Discovery::Found(q, cands, cur)) => {
@@ -602,7 +668,7 @@ fn paint_feeds(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
                 s.hit(r, Hit::Candidate(i));
                 y += ch * 2.0;
             }
-            s.hline(y, main.x, main.right());
+            s.hline(y, main.x - cw * 0.5, main.right());
             y += ch;
         }
         None => {}
@@ -615,10 +681,10 @@ fn paint_feeds(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
     p.row_h = row_h;
     p.view_h = list.h;
     p.clamp(m.feeds_order.len());
-    let track = Rect::new(main.right() - cw * 1.5, list.y, cw, list.h);
+    let track = Rect::new(main.right() - cw * 2.5, list.y, cw * 2.0, list.h);
+    s.hit(list, Hit::Area(Scroll::Feeds));
     s.scrollbar(track, p.scroll, m.feeds_order.len() as f32 * row_h);
     s.hit(track, Hit::Track(track, Scroll::Feeds));
-    s.hit(list, Hit::Area(Scroll::Feeds));
     if m.feeds_order.is_empty() {
         s.text(
             "No feeds yet. Press a to add one by its address, or i to import an OPML file.",
@@ -630,7 +696,7 @@ fn paint_feeds(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
         );
         return;
     }
-    s.push_clip(Rect::new(list.x, list.y, list.w - cw * 1.5, list.h));
+    s.push_clip(Rect::new(list.x, list.y, list.w - cw * 2.5, list.h));
     let scroll = p.scroll.round();
     let first = (scroll / row_h).floor() as usize;
     let last = (((scroll + list.h) / row_h).ceil() as usize).min(m.feeds_order.len());
@@ -638,7 +704,7 @@ fn paint_feeds(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
     for row in first..last {
         let f = &m.feeds[m.feeds_order[row]];
         let y = list.y + row as f32 * row_h - scroll;
-        let r = Rect::new(list.x, y, list.w - cw * 1.5, row_h);
+        let r = Rect::new(list.x, y, list.w - cw * 2.5, row_h);
         let armed = m.armed.as_ref() == Some(&f.id);
         if row == cursor {
             s.fill(r, pal.cursor);
@@ -732,7 +798,7 @@ fn paint_help(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, mai
     let (cw, ch) = (mt.cell_w, mt.cell_h);
     let pal = s.palette;
     let mono = mt.mono();
-    s.text("HELP \u{00B7} every command", mono, main.x + cw, main.y, None, pal.ink);
+    s.text("HELP \u{00B7} EVERY COMMAND", mono, main.x + cw, main.y, None, pal.ink);
     let area = Rect::new(main.x, main.y + ch, main.w, main.h - ch);
     let mut lines: Vec<(String, String)> = Vec::new();
     let mut seen = std::collections::HashSet::new();

@@ -68,6 +68,7 @@ pub struct Palette {
     pub rule: [f32; 4],
     pub cursor: [f32; 4],
     pub hover: [f32; 4],
+    pub selection: [f32; 4],
     pub field: [f32; 4],
     pub link: [f32; 4],
     pub danger: [f32; 4],
@@ -82,6 +83,7 @@ pub const LIGHT: Palette = Palette {
     rule: [0.72, 0.72, 0.73, 1.0],
     cursor: [0.905, 0.905, 0.9, 1.0],
     hover: [0.94, 0.94, 0.935, 1.0],
+    selection: [0.8, 0.86, 0.97, 1.0],
     field: [0.935, 0.935, 0.93, 1.0],
     link: [0.13, 0.32, 0.66, 1.0],
     danger: [0.72, 0.16, 0.13, 1.0],
@@ -406,42 +408,44 @@ impl<'a, H> Scene<'a, H> {
             (view / content * track.h).max(self.m.cell_h)
         };
         let max = (content - view).max(1.0);
-        let thumb_y = track.y + (offset / max).clamp(0.0, 1.0) * (track.h - thumb_h);
+        let thumb_y = (track.y + (offset / max).clamp(0.0, 1.0) * (track.h - thumb_h)).round();
         let rule = self.palette.rule;
-        let ink = self.palette.muted;
+        let ink = if self.hovered(track) { self.palette.ink } else { self.palette.muted };
         let t = self.hair();
         let mid = (track.x + track.w / 2.0).floor();
+        let thumb_w = (track.w * 0.4).round().max(t * 3.0);
+        let thumb_x = (track.x + (track.w - thumb_w) / 2.0).round();
         match self.style {
             LineStyle::Ascii => {
                 let mono = self.m.mono();
                 let mut y = track.y;
                 while y + self.m.cell_h <= track.bottom() + 0.5 {
                     let on = y + self.m.cell_h > thumb_y && y < thumb_y + thumb_h;
-                    self.text(if on { "#" } else { "." }, mono, track.x, y, None, if on { ink } else { rule });
+                    let x = track.x + (track.w - self.m.cell_w * 2.0) / 2.0;
+                    self.text(if on { "##" } else { ".." }, mono, x, y, None, if on { ink } else { rule });
                     y += self.m.cell_h;
                 }
             }
-            LineStyle::Light | LineStyle::Dotted => {
-                if self.style == LineStyle::Light {
-                    self.fill(Rect::new(mid, track.y, t, track.h), rule);
-                } else {
-                    let mut y = track.y;
-                    while y < track.bottom() {
-                        self.fill(Rect::new(mid, y.floor(), t, t), rule);
-                        y += self.m.cell_h / 4.0;
-                    }
+            LineStyle::Light => {
+                self.fill(Rect::new(mid, track.y, t, track.h), rule);
+                self.fill(Rect::new(thumb_x, thumb_y, thumb_w, thumb_h), ink);
+            }
+            LineStyle::Dotted => {
+                let mut y = track.y;
+                while y < track.bottom() {
+                    self.fill(Rect::new(mid, y.floor(), t, t), rule);
+                    y += self.m.cell_h / 4.0;
                 }
-                self.fill(Rect::new(mid - t, thumb_y, t * 3.0, thumb_h), ink);
+                self.fill(Rect::new(thumb_x, thumb_y, thumb_w, thumb_h), ink);
             }
             LineStyle::Heavy => {
                 self.fill(Rect::new(mid - t, track.y, t * 3.0, track.h), rule);
-                let w = (track.w * 0.5).round();
-                self.fill(Rect::new((track.x + (track.w - w) / 2.0).floor(), thumb_y, w, thumb_h), ink);
+                self.fill(Rect::new(thumb_x, thumb_y, thumb_w, thumb_h), ink);
             }
             LineStyle::Double => {
-                self.fill(Rect::new(mid - t * 2.0, track.y, t, track.h), rule);
-                self.fill(Rect::new(mid + t, track.y, t, track.h), rule);
-                self.fill(Rect::new(mid - t * 2.0, thumb_y, t * 4.0, thumb_h), ink);
+                self.fill(Rect::new(thumb_x - t * 2.0, track.y, t, track.h), rule);
+                self.fill(Rect::new(thumb_x + thumb_w + t, track.y, t, track.h), rule);
+                self.fill(Rect::new(thumb_x, thumb_y, thumb_w, thumb_h), ink);
             }
         }
     }

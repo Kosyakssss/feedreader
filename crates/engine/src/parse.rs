@@ -1,3 +1,4 @@
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use scraper::{ElementRef, Html, Node};
 use url::Url;
 
@@ -19,9 +20,66 @@ pub struct NewEntry {
     pub content: Option<String>,
 }
 
+pub fn parse_date(raw: &str) -> Option<DateTime<Utc>> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if let Ok(d) = DateTime::parse_from_rfc3339(s) {
+        return Some(d.with_timezone(&Utc));
+    }
+    if let Ok(d) = DateTime::parse_from_rfc2822(s) {
+        return Some(d.with_timezone(&Utc));
+    }
+    let mut t = s.replace(" UTC", " +0000").replace(" Z", " +0000");
+    if let Some(i) = t.find(", ") {
+        if t[..i].chars().all(|c| c.is_alphabetic()) {
+            t = t[i + 2..].to_string();
+        }
+    }
+    let parts: Vec<&str> = t.split_whitespace().collect();
+    let fixed: Vec<String> = parts
+        .iter()
+        .map(|p| {
+            if p.contains(':') && p.split(':').next().is_some_and(|h| h.len() == 1) {
+                format!("0{p}")
+            } else {
+                p.to_string()
+            }
+        })
+        .collect();
+    let t = fixed.join(" ");
+    if let Ok(d) = DateTime::parse_from_rfc2822(&format!("Mon, {t}").replace("Mon, Mon, ", "Mon, ")) {
+        return Some(d.with_timezone(&Utc));
+    }
+    for f in ["%d %b %Y %H:%M:%S %z", "%d %b %Y %H:%M %z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S %z", "%Y-%m-%dT%H:%M:%S%.f%z"] {
+        if let Ok(d) = DateTime::parse_from_str(&t, f) {
+            return Some(d.with_timezone(&Utc));
+        }
+    }
+    for f in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M", "%d %b %Y %H:%M:%S", "%d %b %Y %H:%M", "%Y-%m-%dT%H:%M:%S%.f"] {
+        if let Ok(d) = NaiveDateTime::parse_from_str(&t, f) {
+            return Some(d.and_utc());
+        }
+    }
+    for f in ["%Y-%m-%d", "%Y/%m/%d", "%d %b %Y", "%B %d, %Y", "%b %d, %Y", "%d %B %Y"] {
+        if let Ok(d) = NaiveDate::parse_from_str(&t, f) {
+            return d.and_hms_opt(0, 0, 0).map(|d| d.and_utc());
+        }
+    }
+    if let Ok(d) = NaiveDate::parse_from_str(&format!("{t}-01"), "%Y-%m-%d") {
+        return d.and_hms_opt(0, 0, 0).map(|d| d.and_utc());
+    }
+    if t.len() == 4 && let Ok(y) = t.parse::<i32>() && (1990..=2100).contains(&y) {
+        return NaiveDate::from_ymd_opt(y, 1, 1).and_then(|d| d.and_hms_opt(0, 0, 0)).map(|d| d.and_utc());
+    }
+    None
+}
+
 pub fn parse_feed(bytes: &[u8], base: &str) -> Result<ParsedFeed, String> {
     let parser = feed_rs::parser::Builder::new()
         .base_uri(Some(base))
+        .timestamp_parser(parse_date)
         .id_generator(|links, title, _| {
             links
                 .first()
@@ -74,7 +132,7 @@ pub fn parse_feed(bytes: &[u8], base: &str) -> Result<ParsedFeed, String> {
                 title
             };
             let author = e.authors.first().and_then(|a| a.name.clone()).filter(|a| !a.is_empty());
-            let published = e.published.or(e.updated).map(|d| d.timestamp_millis());
+            let published = e.published.or(e.updated).map(|d| d.timestamp_millis()).filter(|&t| t > 631_152_000_000);
             let mut media = String::new();
             for m in &e.media {
                 for c in &m.content {

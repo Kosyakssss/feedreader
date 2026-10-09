@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use engine::{Block, Candidate, Entry, EntryId, Event, Feed, FeedId, Mode, RefreshStatus, Request, Settings};
 use toolkit::field::Field;
+use toolkit::text::SpanStyle;
 use toolkit::ui::LineStyle;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -32,18 +33,78 @@ pub enum Target {
     Page(String),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct SelPoint {
+    pub block: usize,
+    pub byte: usize,
+}
+
+#[derive(Clone)]
+pub struct Geom {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub size: f32,
+    pub line: f32,
+    pub spans: Vec<(String, SpanStyle)>,
+}
+
+impl Geom {
+    pub fn text(&self) -> String {
+        self.spans.iter().map(|(t, _)| t.as_str()).collect()
+    }
+
+    pub fn borrowed(&self) -> Vec<(&str, SpanStyle)> {
+        self.spans.iter().map(|(t, s)| (t.as_str(), *s)).collect()
+    }
+}
+
 pub struct Reader {
     pub history: Vec<Target>,
     pub mode: Mode,
     pub body: Option<Result<Vec<Block>, String>>,
+    pub note: Option<String>,
     pub scroll: f32,
     pub content_h: f32,
     pub view_h: f32,
+    pub geom: Vec<Geom>,
+    pub sel: Option<(SelPoint, SelPoint)>,
 }
 
 impl Reader {
     pub fn target(&self) -> &Target {
         self.history.last().expect("reader has a target")
+    }
+
+    pub fn ordered(&self) -> Option<(SelPoint, SelPoint)> {
+        let (a, b) = self.sel?;
+        if a == b {
+            return None;
+        }
+        Some(if a <= b { (a, b) } else { (b, a) })
+    }
+
+    pub fn range_in(&self, block: usize) -> Option<std::ops::Range<usize>> {
+        let (a, b) = self.ordered()?;
+        if block < a.block || block > b.block {
+            return None;
+        }
+        let len = self.geom.get(block)?.text().len();
+        let start = if block == a.block { a.byte } else { 0 };
+        let end = if block == b.block { b.byte } else { len };
+        (start < end).then_some(start..end)
+    }
+
+    pub fn selected_text(&self) -> Option<String> {
+        let (a, b) = self.ordered()?;
+        let parts: Vec<String> = (a.block..=b.block)
+            .filter_map(|i| {
+                let r = self.range_in(i)?;
+                self.geom[i].text().get(r).map(str::to_string)
+            })
+            .collect();
+        (!parts.is_empty()).then(|| parts.join("\n\n"))
     }
 }
 
@@ -120,6 +181,7 @@ pub struct ListState {
     pub row_h: f32,
     pub selected: BTreeSet<EntryId>,
     pub sticky: HashSet<EntryId>,
+    pub anchor: Option<usize>,
 }
 
 #[derive(Default)]
@@ -177,6 +239,7 @@ pub struct Model {
     pub prompt: Option<Prompt>,
     pub confirm: Option<Confirm>,
     pub message: Option<String>,
+    pub bar_expanded: bool,
     pub lines: LineStyle,
     pub out: Vec<Request>,
     pub open: Vec<String>,
@@ -229,6 +292,7 @@ impl Model {
             prompt: None,
             confirm: None,
             message: None,
+            bar_expanded: false,
             lines: LineStyle::Light,
             out: Vec::new(),
             open: Vec::new(),
@@ -375,6 +439,7 @@ impl Model {
     pub fn reset_list(&mut self) {
         self.list.sticky.clear();
         self.list.selected.clear();
+        self.list.anchor = None;
         self.list.cursor = 0;
         self.list.scroll = 0.0;
         self.list.visible.clear();
@@ -444,6 +509,16 @@ impl Model {
                 self.recount();
                 self.rebuild();
             }
+            Event::EntriesUpdated(list) => {
+                for (id, title, published) in list {
+                    if let Some(&i) = self.entry_index.get(&id) {
+                        self.entries[i].title = title;
+                        self.entries[i].published = published;
+                    }
+                }
+                self.reindex_entries();
+                self.rebuild();
+            }
             Event::EntriesRemoved(ids) => {
                 let gone: HashSet<EntryId> = ids.into_iter().collect();
                 self.entries.retain(|e| !gone.contains(&e.id));
@@ -482,6 +557,8 @@ impl Model {
                     && r.mode == b.mode
                 {
                     r.body = Some(b.blocks);
+                    r.note = b.note;
+                    r.sel = None;
                 }
             }
             Event::Settings(s) => {
@@ -617,9 +694,12 @@ impl Model {
             history: vec![Target::Entry(id.clone())],
             mode,
             body: None,
+            note: None,
             scroll: 0.0,
             content_h: 0.0,
             view_h: 0.0,
+            geom: Vec::new(),
+            sel: None,
         });
         self.page = Page::List;
         if let Some(row) = self.list.visible.iter().position(|&i| self.entries[i].id == id) {
@@ -644,6 +724,8 @@ impl Model {
         }
         r.mode = mode;
         r.body = None;
+        r.note = None;
+        r.sel = None;
         r.scroll = 0.0;
         if let Target::Entry(id) = r.target().clone()
             && mode != Mode::Original
@@ -675,6 +757,44 @@ impl Model {
         } else {
             self.message = Some(if forward { "That's the last entry in this view." } else { "That's the first entry in this view." }.into());
         }
+    }
+}
+
+impl Model {
+    pub fn select_rows(&mut self, from: usize, to: usize, on: bool) {
+        let (a, b) = if from <= to { (from, to) } else { (to, from) };
+        for row in a..=b.min(self.list.visible.len().saturating_sub(1)) {
+            let id = self.entries[self.list.visible[row]].id.clone();
+            if on {
+                self.list.selected.insert(id);
+            } else {
+                self.list.selected.remove(&id);
+            }
+        }
+    }
+
+    pub fn extend(&mut self, down: bool) {
+        let len = self.list.visible.len();
+        if len == 0 {
+            return;
+        }
+        let cur = self.list.cursor;
+        let anchor = *self.list.anchor.get_or_insert(cur);
+        if self.list.selected.is_empty() {
+            self.select_rows(cur, cur, true);
+        }
+        let next = if down { (cur + 1).min(len - 1) } else { cur.saturating_sub(1) };
+        if next == cur {
+            return;
+        }
+        let away = if down { next > anchor } else { next < anchor };
+        if away {
+            self.select_rows(next, next, true);
+        } else if cur != anchor {
+            self.select_rows(cur, cur, false);
+        }
+        self.list.cursor = next;
+        self.list.reveal_cursor();
     }
 }
 

@@ -202,9 +202,10 @@ impl Store {
         }
     }
 
-    pub fn insert_entries(&mut self, feed: &str, items: Vec<NewEntry>, now: i64) -> Vec<Entry> {
+    pub fn insert_entries(&mut self, feed: &str, items: Vec<NewEntry>, now: i64) -> (Vec<Entry>, Vec<(EntryId, String, i64)>) {
         let tx = self.db.transaction().unwrap();
         let mut added = Vec::new();
+        let mut updated = Vec::new();
         {
             let mut insert = tx
                 .prepare_cached(
@@ -212,10 +213,12 @@ impl Store {
                      values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 )
                 .unwrap();
+            let mut current = tx.prepare_cached("select title, published from entries where id = ?1").unwrap();
             let mut fill = tx
                 .prepare_cached(
                     "update entries set content = coalesce(content, ?2), summary = coalesce(summary, ?3), author = coalesce(author, ?4),
-                     title = case when title in ('', 'Untitled', 'untitled') then ?5 else title end where id = ?1",
+                     title = case when title in ('', 'Untitled', 'untitled') then ?5 else title end,
+                     published = case when published < 631152000000 then ?6 else published end where id = ?1",
                 )
                 .unwrap();
             for (i, item) in items.into_iter().enumerate() {
@@ -255,12 +258,19 @@ impl Store {
                         bookmarked: false,
                     });
                 } else {
-                    let _ = fill.execute(params![id, item.content, item.summary, item.author, item.title]);
+                    let before: Option<(String, i64)> = current.query_row([&id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
+                    let _ = fill.execute(params![id, item.content, item.summary, item.author, item.title, published]);
+                    let after: Option<(String, i64)> = current.query_row([&id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
+                    if let (Some(b), Some(a)) = (before, after)
+                        && b != a
+                    {
+                        updated.push((id, a.0, a.1));
+                    }
                 }
             }
         }
         tx.commit().unwrap();
-        added
+        (added, updated)
     }
 
     pub fn set_read(&mut self, ids: &[EntryId], read: bool, now: i64) {
