@@ -1,27 +1,50 @@
 # Feedreader
 
-A self-hosted feed reader with a web UI and a terminal client. The Bun server fetches feeds and keeps subscriptions, entries, and read/starred state in one place; both clients use the same API. It supports RSS, Atom, and JSON Feed, plus OPML import and export.
+A calm, finite reader for everything that publishes a feed: RSS, Atom and JSON Feed, every feed treated the same, recommendations from friends instead of algorithms. Native and text-first, written in Rust, running on your own devices.
 
-## Run the server
+- Home, Bookmarks, folders and pinned feeds; mute words and duplicate links globally, per folder or per feed.
+- Read any entry as a clean extracted article, the feed's own text, or the original page.
+- An "I recommend" feed: recommend entries with a note, and friends follow one public link in any feed reader.
+- Every action is on screen, every change is undoable, nothing moves on its own.
 
-Install [Bun](https://bun.sh/), then run:
+The plan and the decisions behind it are in [`docs/spec.md`](docs/spec.md).
 
-```sh
-bun install
-bun run build
-bun run start
-```
+## Run it
 
-Open [http://127.0.0.1:8787/feedreader/](http://127.0.0.1:8787/feedreader/). The server listens on localhost by default and stores its SQLite database and configuration in `data/`.
-
-## Use the terminal client
-
-Install Rust, leave the server running, and run:
+Install [Rust](https://rustup.rs), then from the repository:
 
 ```sh
-bun run tui
+cargo run --release
 ```
 
-The client connects to the local server by default. Use `bun run tui --server URL` or `FEEDREADER_URL` for another server, and `bun run tui --check` to test the connection. Press `?` for shortcuts; `1`–`4` switch views, `j`/`k` move through entries, and `q` quits. Mouse navigation, scrolling, selection, and hover are supported.
+Data lives in `~/Library/Application Support/Feedreader` on macOS and `$XDG_DATA_HOME/Feedreader` on Linux. Set `FEEDREADER_HOME` to use another folder.
 
-See the [terminal client guide](tui/README.md) for the rest of the controls and appearance options.
+Press `?` for every command and its keys. `1`–`4` switch between Home, Bookmarks, Feeds and Settings, `j`/`k` move, `o` opens, `m` and `s` toggle read and bookmark, `x` selects, `r` refreshes.
+
+## Bring your feeds
+
+Drop an OPML file, or the old Feedreader's `feedreader.sqlite`, on the window, or:
+
+```sh
+feedreader import ~/Downloads/subscriptions.opml
+```
+
+## Command line
+
+The app binary is also the command:
+
+```sh
+feedreader refresh            # fetch every feed now and report failures
+feedreader unread --limit 20  # unread entries as a Markdown list
+feedreader import <file>      # OPML or the old app's database
+```
+
+## Profile it
+
+Feedreader is instrumented for [Tracy](https://github.com/wolfpld/tracy). Start Tracy, then:
+
+```sh
+cargo run --release --features profile
+```
+
+Frames, zones in the view, text and GPU code, and the engine's work show up live. For a quick look without Tracy, the status line shows the paint and GPU time of the last frame and the worst recent one, and `feedreader --snapshot out.png --keys "3 j j"` renders a state offscreen and prints its paint time.
