@@ -1,5 +1,7 @@
 mod net;
 mod parse;
+mod public;
+pub mod rules;
 mod store;
 mod types;
 mod work;
@@ -33,6 +35,10 @@ pub fn data_dir() -> PathBuf {
         Some(d) => PathBuf::from(d),
         None => dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("Feedreader"),
     }
+}
+
+pub fn check_input(input: &str) -> Result<(), String> {
+    net::parse_url(input).map(|_| ())
 }
 
 pub fn now() -> i64 {
@@ -71,6 +77,7 @@ enum Internal {
     Discovered(String, Result<Vec<Candidate>, String>),
     Extracted(EntryId, Result<String, String>),
     Added(FeedId, Result<Fetch, String>),
+    Saved(String, Result<(String, String), String>),
 }
 
 struct Engine {
@@ -82,6 +89,8 @@ struct Engine {
     status: RefreshStatus,
     next: Instant,
     itx: Option<UnboundedSender<Internal>>,
+    published: public::Shared,
+    public_url: Option<String>,
 }
 
 async fn fetch_feed(client: &reqwest::Client, url: &str, validators: (Option<String>, Option<String>)) -> Result<Fetch, String> {
@@ -115,6 +124,8 @@ impl Engine {
             status: RefreshStatus::default(),
             next: Instant::now() + Duration::from_millis(800),
             itx: None,
+            published: Default::default(),
+            public_url: None,
         })
     }
 
@@ -124,12 +135,39 @@ impl Engine {
             entries: self.store.entries(),
             settings: self.settings.clone(),
             data_dir: self.dir.display().to_string(),
+            folders: self.store.folders(),
+            rules: self.store.rules(),
+            recommendations: self.store.recommendations(),
+            public_url: self.public_url.clone(),
         });
+    }
+
+    fn publish(&mut self) {
+        let token = self.store.token();
+        let base = format!("http://127.0.0.1:{}/{token}/", self.settings.public_port);
+        let items = self.store.public_items();
+        let mut p = self.published.write().unwrap();
+        p.atom = public::atom(&token, &base, &items);
+        p.html = public::page(&base, &items);
+        p.token = token;
     }
 
     async fn run(mut self, mut rx: UnboundedReceiver<Request>) {
         let (itx, mut irx) = unbounded_channel();
         self.itx = Some(itx);
+        self.publish();
+        let port = self.settings.public_port;
+        match std::net::TcpListener::bind(("127.0.0.1", port)) {
+            Ok(probe) => {
+                drop(probe);
+                let shared = self.published.clone();
+                tokio::spawn(async move {
+                    let _ = public::serve(port, shared).await;
+                });
+                self.public_url = Some(format!("http://127.0.0.1:{port}/{}/", self.store.token()));
+            }
+            Err(_) => self.public_url = None,
+        }
         self.snapshot();
         loop {
             tokio::select! {
@@ -154,14 +192,14 @@ impl Engine {
     }
 
     fn known(&self) -> HashSet<String> {
-        self.store.feeds().into_iter().map(|f| f.id).collect()
+        self.store.feeds().into_iter().filter(|f| f.id != SAVED).map(|f| f.id).collect()
     }
 
     fn start_refresh(&mut self) {
         if self.status.running {
             return;
         }
-        let feeds = self.store.feeds();
+        let feeds: Vec<Feed> = self.store.feeds().into_iter().filter(|f| f.id != SAVED).collect();
         self.status = RefreshStatus {
             run: self.status.run + 1,
             running: true,
@@ -296,6 +334,14 @@ impl Engine {
                     note,
                 }));
             }
+            Internal::Saved(url, r) => match r {
+                Ok((title, html)) => {
+                    let e = self.store.save_link(&url, &title, &html, now());
+                    (self.emit)(Event::EntriesAdded(vec![e]));
+                    (self.emit)(Event::Message(format!("Saved \u{201C}{title}\u{201D} to Bookmarks.")));
+                }
+                Err(e) => (self.emit)(Event::Message(format!("Couldn't save {url}: {e}"))),
+            },
             Internal::Added(id, r) => {
                 let result = self.apply_fetch(&id, r);
                 (self.emit)(Event::Feeds(self.store.feeds()));
@@ -387,9 +433,10 @@ impl Engine {
                 }
             }
             Request::ExportOpml(path) => {
-                let text = work::write_opml(&self.store.feeds());
+                let feeds: Vec<Feed> = self.store.feeds().into_iter().filter(|f| f.id != SAVED).collect();
+                let text = work::write_opml(&feeds);
                 let msg = match std::fs::write(&path, text) {
-                    Ok(()) => format!("Exported {} feeds to {}", self.store.feeds().len(), path.display()),
+                    Ok(()) => format!("Exported {} feeds to {}", feeds.len(), path.display()),
                     Err(e) => format!("Couldn't write {}: {e}", path.display()),
                 };
                 (self.emit)(Event::Message(msg));
@@ -440,6 +487,68 @@ impl Engine {
                         });
                     }
                 }
+            }
+            Request::SetFeedFolders(feed, names) => {
+                self.store.set_feed_folders(&feed, &names, now());
+                (self.emit)(Event::Folders(self.store.folders()));
+            }
+            Request::RenameFolder(id, name) => {
+                self.store.rename_folder(&id, &name);
+                (self.emit)(Event::Folders(self.store.folders()));
+            }
+            Request::DeleteFolder(id) => {
+                self.store.delete_folder(&id);
+                (self.emit)(Event::Folders(self.store.folders()));
+            }
+            Request::RestoreFolder(f) => {
+                self.store.restore_folder(&f);
+                (self.emit)(Event::Folders(self.store.folders()));
+            }
+            Request::SetPinned(id, on) => {
+                self.store.set_feed_flag(&id, "pinned", on);
+                (self.emit)(Event::Feeds(self.store.feeds()));
+            }
+            Request::SetHidden(id, on) => {
+                self.store.set_feed_flag(&id, "hidden", on);
+                (self.emit)(Event::Feeds(self.store.feeds()));
+            }
+            Request::SetFeedMode(id, mode) => {
+                self.store.set_feed_mode(&id, mode);
+                (self.emit)(Event::Feeds(self.store.feeds()));
+            }
+            Request::AddRule(rule) => {
+                self.store.add_rule(&rule);
+                (self.emit)(Event::Rules(self.store.rules()));
+            }
+            Request::RemoveRule(id) => {
+                self.store.remove_rule(&id);
+                (self.emit)(Event::Rules(self.store.rules()));
+            }
+            Request::Recommend(id, note) => {
+                if self.store.recommend(&id, &note, now()) {
+                    self.publish();
+                }
+                (self.emit)(Event::Recommendations(self.store.recommendations()));
+            }
+            Request::Unrecommend(id) => {
+                self.store.unrecommend(&id, now());
+                self.publish();
+                (self.emit)(Event::Recommendations(self.store.recommendations()));
+            }
+            Request::Search(q) => {
+                let ids = self.store.search(&q);
+                (self.emit)(Event::SearchResults(q, ids));
+            }
+            Request::SaveLink(input) => {
+                let client = self.client.clone();
+                self.spawn(async move {
+                    let r = match net::parse_url(&input) {
+                        Ok(u) => work::save(&client, u.as_str()).await,
+                        Err(e) => Err(e),
+                    };
+                    let url = net::parse_url(&input).map(|u| u.to_string()).unwrap_or(input);
+                    Internal::Saved(url, r)
+                });
             }
             Request::SetSettings(s) => {
                 let interval_changed = s.refresh_minutes != self.settings.refresh_minutes;

@@ -449,6 +449,7 @@ impl State {
             Scroll::List => Some((&mut m.list.scroll, m.list.visible.len() as f32 * m.list.row_h, m.list.view_h)),
             Scroll::Feeds => Some((&mut m.feeds_page.scroll, m.feeds_order.len() as f32 * m.feeds_page.row_h, m.feeds_page.view_h)),
             Scroll::Help => Some((&mut m.help.scroll, f32::MAX, m.help.view_h)),
+            Scroll::Settings => Some((&mut m.settings_page.scroll, f32::MAX, m.settings_page.view_h)),
             Scroll::Reader => m.reader.as_mut().map(|r| (&mut r.scroll, r.content_h, r.view_h)),
             Scroll::Pane => Some((&mut m.pane_scroll, f32::MAX, 0.0)),
         }

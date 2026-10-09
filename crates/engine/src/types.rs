@@ -11,6 +11,39 @@ pub struct Feed {
     pub position: i64,
     pub last_fetched: Option<i64>,
     pub error: Option<String>,
+    pub pinned: bool,
+    pub hidden: bool,
+    pub mode: Option<Mode>,
+}
+
+pub const SAVED: &str = "saved";
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Folder {
+    pub id: String,
+    pub name: String,
+    pub feeds: Vec<FeedId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Scope {
+    All,
+    Feed(FeedId),
+    Folder(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Rule {
+    pub id: String,
+    pub word: String,
+    pub scope: Scope,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Recommendation {
+    pub entry: EntryId,
+    pub note: String,
+    pub at: i64,
 }
 
 impl Feed {
@@ -69,6 +102,8 @@ pub struct Settings {
     pub confirm_open_over: u32,
     pub reading_mode: Mode,
     pub lines: String,
+    pub merge_duplicates: bool,
+    pub public_port: u16,
 }
 
 impl Default for Settings {
@@ -80,6 +115,8 @@ impl Default for Settings {
             confirm_open_over: 20,
             reading_mode: Mode::Clean,
             lines: "light".into(),
+            merge_duplicates: true,
+            public_port: 8791,
         }
     }
 }
@@ -152,6 +189,19 @@ pub enum Request {
     ImportLegacy(std::path::PathBuf),
     LoadBody(EntryId, Mode),
     SetSettings(Settings),
+    SetFeedFolders(FeedId, Vec<String>),
+    RenameFolder(String, String),
+    DeleteFolder(String),
+    RestoreFolder(Folder),
+    SetPinned(FeedId, bool),
+    SetHidden(FeedId, bool),
+    SetFeedMode(FeedId, Option<Mode>),
+    AddRule(Rule),
+    RemoveRule(String),
+    SaveLink(String),
+    Recommend(EntryId, String),
+    Unrecommend(EntryId),
+    Search(String),
 }
 
 #[derive(Clone, Debug)]
@@ -161,7 +211,16 @@ pub enum Event {
         entries: Vec<Entry>,
         settings: Settings,
         data_dir: String,
+        folders: Vec<Folder>,
+        rules: Vec<Rule>,
+        recommendations: Vec<Recommendation>,
+        public_url: Option<String>,
     },
+    Folders(Vec<Folder>),
+    Rules(Vec<Rule>),
+    Recommendations(Vec<Recommendation>),
+    PublicUrl(Option<String>),
+    SearchResults(String, Vec<EntryId>),
     Feeds(Vec<Feed>),
     EntriesAdded(Vec<Entry>),
     EntriesUpdated(Vec<(EntryId, String, i64)>),

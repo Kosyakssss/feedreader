@@ -4,7 +4,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
 use crate::parse::NewEntry;
-use crate::types::{Entry, EntryId, Feed, FeedId, Mode, Settings};
+use crate::types::{Entry, EntryId, Feed, FeedId, Folder, Mode, Recommendation, Rule, SAVED, Scope, Settings};
 
 const SCHEMA: &str = "
 create table if not exists feeds (
@@ -51,6 +51,33 @@ create table if not exists settings (
   key text primary key,
   value text not null
 ) strict;
+create table if not exists folders (
+  id text primary key,
+  name text not null,
+  position integer not null default 0
+) strict;
+create table if not exists folder_feeds (
+  folder_id text not null references folders(id) on delete cascade,
+  feed_id text not null,
+  primary key (folder_id, feed_id)
+) strict;
+create table if not exists rules (
+  id text primary key,
+  word text not null,
+  scope text not null
+) strict;
+create table if not exists recommendations (
+  entry_id text primary key,
+  note text not null default '',
+  title text not null,
+  url text not null,
+  source text not null,
+  published integer not null,
+  content text,
+  at integer not null,
+  removed_at integer
+) strict;
+create virtual table if not exists entries_fts using fts5(id unindexed, title, body);
 ";
 
 pub struct Store {
@@ -90,10 +117,40 @@ fn feed_row(r: &rusqlite::Row) -> rusqlite::Result<Feed> {
         position: r.get(5)?,
         last_fetched: r.get(6)?,
         error: r.get(7)?,
+        pinned: r.get::<_, i64>(8)? == 1,
+        hidden: r.get::<_, i64>(9)? == 1,
+        mode: r.get::<_, Option<String>>(10)?.and_then(|m| Mode::parse(&m)),
     })
 }
 
-const FEED_COLS: &str = "id, url, title, label, site_url, position, last_fetched, error";
+fn scope_text(s: &Scope) -> String {
+    match s {
+        Scope::All => "all".into(),
+        Scope::Feed(f) => format!("feed:{f}"),
+        Scope::Folder(f) => format!("folder:{f}"),
+    }
+}
+
+fn scope_parse(s: &str) -> Scope {
+    if let Some(f) = s.strip_prefix("feed:") {
+        Scope::Feed(f.to_string())
+    } else if let Some(f) = s.strip_prefix("folder:") {
+        Scope::Folder(f.to_string())
+    } else {
+        Scope::All
+    }
+}
+
+fn fts_query(q: &str) -> String {
+    q.split_whitespace()
+        .map(|t| t.chars().filter(|c| c.is_alphanumeric()).collect::<String>())
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("\"{t}\"*"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+const FEED_COLS: &str = "id, url, title, label, site_url, position, last_fetched, error, pinned, hidden, mode";
 const ENTRY_COLS: &str = "e.id, e.feed_id, e.url, e.title, e.author, e.published, coalesce(s.read, 0), coalesce(s.bookmarked, 0)";
 
 fn entry_row(r: &rusqlite::Row) -> rusqlite::Result<Entry> {
@@ -117,7 +174,28 @@ impl Store {
         db.pragma_update(None, "synchronous", "full")?;
         db.busy_timeout(std::time::Duration::from_secs(5))?;
         db.execute_batch(SCHEMA)?;
-        db.pragma_update(None, "user_version", 1)?;
+        let cols: Vec<String> = db
+            .prepare("select name from pragma_table_info('feeds')")?
+            .query_map([], |r| r.get(0))?
+            .filter_map(Result::ok)
+            .collect();
+        for (col, def) in [("pinned", "integer not null default 0"), ("hidden", "integer not null default 0"), ("mode", "text")] {
+            if !cols.iter().any(|c| c == col) {
+                db.execute_batch(&format!("alter table feeds add column {col} {def}"))?;
+            }
+        }
+        let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version < 2 {
+            db.execute_batch(
+                "delete from entries_fts;
+                 insert into entries_fts (id, title, body) select id, title, coalesce(content, summary, '') from entries;",
+            )?;
+        }
+        db.pragma_update(None, "user_version", 2)?;
+        db.execute(
+            "insert or ignore into feeds (id, url, title, position, hidden) values (?1, 'feedreader:saved', 'Saved links', 1000000, 1)",
+            [SAVED],
+        )?;
         Ok(Self { db })
     }
 
@@ -247,6 +325,10 @@ impl Store {
                     ])
                     .unwrap_or(0);
                 if n == 1 {
+                    let _ = tx.execute(
+                        "insert into entries_fts (id, title, body) values (?1, ?2, ?3)",
+                        params![id, item.title, item.content.as_deref().or(item.summary.as_deref()).unwrap_or("")],
+                    );
                     added.push(Entry {
                         id,
                         feed_id: feed.to_string(),
@@ -260,6 +342,9 @@ impl Store {
                 } else {
                     let before: Option<(String, i64)> = current.query_row([&id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
                     let _ = fill.execute(params![id, item.content, item.summary, item.author, item.title, published]);
+                    if let Some(body) = item.content.as_deref().or(item.summary.as_deref()) {
+                        let _ = tx.execute("update entries_fts set body = ?2 where id = ?1 and body = ''", params![id, body]);
+                    }
                     let after: Option<(String, i64)> = current.query_row([&id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
                     if let (Some(b), Some(a)) = (before, after)
                         && b != a
@@ -336,8 +421,9 @@ impl Store {
         let mut st = self
             .db
             .prepare_cached(
-                "select e.id, e.published, coalesce(s.bookmarked, 0) from entries e
-                 join feeds f on f.id = e.feed_id and f.removed_at is null
+                "select e.id, e.published, coalesce(s.bookmarked, 0) or exists (select 1 from recommendations r where r.entry_id = e.id and r.removed_at is null)
+                 from entries e
+                 join feeds f on f.id = e.feed_id and f.removed_at is null and f.id <> 'saved'
                  left join states s on s.entry_id = e.id order by e.published desc, e.id",
             )
             .unwrap();
@@ -364,6 +450,7 @@ impl Store {
             let _ = tx.execute("delete from entries where id = ?1", [id]);
             let _ = tx.execute("delete from states where entry_id = ?1", [id]);
             let _ = tx.execute("delete from bodies where entry_id = ?1", [id]);
+            let _ = tx.execute("delete from entries_fts where id = ?1", [id]);
         }
         tx.commit().unwrap();
         doomed
@@ -400,6 +487,8 @@ impl Store {
                 "confirm_open_over" => s.confirm_open_over = v.parse().unwrap_or(s.confirm_open_over),
                 "reading_mode" => s.reading_mode = Mode::parse(&v).unwrap_or(s.reading_mode),
                 "lines" => s.lines = v,
+                "merge_duplicates" => s.merge_duplicates = v == "1",
+                "public_port" => s.public_port = v.parse().unwrap_or(s.public_port),
                 _ => {}
             }
         }
@@ -414,12 +503,200 @@ impl Store {
             ("confirm_open_over", s.confirm_open_over.to_string()),
             ("reading_mode", s.reading_mode.name().to_string()),
             ("lines", s.lines.clone()),
+            ("merge_duplicates", if s.merge_duplicates { "1".into() } else { "0".into() }),
+            ("public_port", s.public_port.to_string()),
         ];
         for (k, v) in pairs {
             let _ = self.db.execute(
                 "insert into settings (key, value) values (?1, ?2) on conflict(key) do update set value = excluded.value",
                 params![k, v],
             );
+        }
+    }
+
+    pub fn token(&self) -> String {
+        if let Ok(t) = self.db.query_row("select value from settings where key = 'public_token'", [], |r| r.get::<_, String>(0)) {
+            return t;
+        }
+        let mut bytes = [0u8; 24];
+        getrandom::fill(&mut bytes).expect("system randomness");
+        let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        let _ = self.db.execute("insert into settings (key, value) values ('public_token', ?1)", [&token]);
+        token
+    }
+
+    pub fn folders(&self) -> Vec<Folder> {
+        let mut st = self.db.prepare_cached("select id, name from folders order by position, name collate nocase").unwrap();
+        let list: Vec<(String, String)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().filter_map(Result::ok).collect();
+        let mut members = self.db.prepare_cached("select feed_id from folder_feeds where folder_id = ?1").unwrap();
+        list.into_iter()
+            .map(|(id, name)| {
+                let feeds = members.query_map([&id], |r| r.get(0)).unwrap().filter_map(Result::ok).collect();
+                Folder { id, name, feeds }
+            })
+            .collect()
+    }
+
+    pub fn set_feed_folders(&mut self, feed: &str, names: &[String], now: i64) {
+        let tx = self.db.transaction().unwrap();
+        let _ = tx.execute("delete from folder_feeds where feed_id = ?1", [feed]);
+        for (i, name) in names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).enumerate() {
+            let existing: Option<String> = tx
+                .query_row("select id from folders where name = ?1 collate nocase", [name], |r| r.get(0))
+                .optional()
+                .unwrap_or(None);
+            let id = existing.unwrap_or_else(|| {
+                let id = format!("{:x}{i}", now);
+                let _ = tx.execute("insert into folders (id, name) values (?1, ?2)", params![id, name]);
+                id
+            });
+            let _ = tx.execute("insert or ignore into folder_feeds (folder_id, feed_id) values (?1, ?2)", params![id, feed]);
+        }
+        tx.commit().unwrap();
+    }
+
+    pub fn rename_folder(&self, id: &str, name: &str) {
+        let _ = self.db.execute("update folders set name = ?2 where id = ?1", params![id, name]);
+    }
+
+    pub fn delete_folder(&self, id: &str) {
+        let _ = self.db.execute("delete from folders where id = ?1", [id]);
+    }
+
+    pub fn restore_folder(&mut self, f: &Folder) {
+        let tx = self.db.transaction().unwrap();
+        let _ = tx.execute("insert or replace into folders (id, name) values (?1, ?2)", params![f.id, f.name]);
+        for feed in &f.feeds {
+            let _ = tx.execute("insert or ignore into folder_feeds (folder_id, feed_id) values (?1, ?2)", params![f.id, feed]);
+        }
+        tx.commit().unwrap();
+    }
+
+    pub fn set_feed_flag(&self, id: &str, column: &str, on: bool) {
+        let sql = format!("update feeds set {column} = ?2 where id = ?1");
+        let _ = self.db.execute(&sql, params![id, on as i64]);
+    }
+
+    pub fn set_feed_mode(&self, id: &str, mode: Option<Mode>) {
+        let _ = self.db.execute("update feeds set mode = ?2 where id = ?1", params![id, mode.map(|m| m.name())]);
+    }
+
+    pub fn rules(&self) -> Vec<Rule> {
+        let mut st = self.db.prepare_cached("select id, word, scope from rules order by rowid").unwrap();
+        st.query_map([], |r| {
+            Ok(Rule {
+                id: r.get(0)?,
+                word: r.get(1)?,
+                scope: scope_parse(&r.get::<_, String>(2)?),
+            })
+        })
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect()
+    }
+
+    pub fn add_rule(&self, rule: &Rule) {
+        let _ = self.db.execute(
+            "insert or replace into rules (id, word, scope) values (?1, ?2, ?3)",
+            params![rule.id, rule.word, scope_text(&rule.scope)],
+        );
+    }
+
+    pub fn remove_rule(&self, id: &str) {
+        let _ = self.db.execute("delete from rules where id = ?1", [id]);
+    }
+
+    pub fn recommendations(&self) -> Vec<Recommendation> {
+        let mut st = self
+            .db
+            .prepare_cached("select entry_id, note, at from recommendations where removed_at is null order by at desc")
+            .unwrap();
+        st.query_map([], |r| Ok(Recommendation { entry: r.get(0)?, note: r.get(1)?, at: r.get(2)? }))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect()
+    }
+
+    pub fn recommend(&self, id: &str, note: &str, now: i64) -> bool {
+        let Some((e, content, summary)) = self.entry(id) else { return false };
+        let source = self.feed(&e.feed_id).map(|f| f.name().to_string()).unwrap_or_default();
+        let body = self.clean_body(id).or(content).or(summary);
+        self.db
+            .execute(
+                "insert into recommendations (entry_id, note, title, url, source, published, content, at, removed_at)
+                 values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, null)
+                 on conflict(entry_id) do update set note = excluded.note, at = excluded.at, removed_at = null",
+                params![id, note, e.title, e.url, source, e.published, body, now],
+            )
+            .is_ok()
+    }
+
+    pub fn unrecommend(&self, id: &str, now: i64) {
+        let _ = self.db.execute("update recommendations set removed_at = ?2 where entry_id = ?1", params![id, now]);
+    }
+
+    pub fn public_items(&self) -> Vec<PublicItem> {
+        let mut st = self
+            .db
+            .prepare_cached(
+                "select entry_id, note, title, url, source, published, content, at, removed_at from recommendations
+                 where removed_at is null or removed_at > ?1 order by at desc limit 200",
+            )
+            .unwrap();
+        let since = crate::now() - 60 * 86_400_000;
+        st.query_map([since], |r| {
+            Ok(PublicItem {
+                entry: r.get(0)?,
+                note: r.get(1)?,
+                title: r.get(2)?,
+                url: r.get(3)?,
+                source: r.get(4)?,
+                published: r.get(5)?,
+                content: r.get(6)?,
+                at: r.get(7)?,
+                removed_at: r.get(8)?,
+            })
+        })
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect()
+    }
+
+    pub fn search(&self, q: &str) -> Vec<EntryId> {
+        let fq = fts_query(q);
+        if fq.is_empty() {
+            return Vec::new();
+        }
+        let Ok(mut st) = self.db.prepare_cached("select id from entries_fts where entries_fts match ?1 limit 2000") else {
+            return Vec::new();
+        };
+        st.query_map([fq], |r| r.get(0))
+            .map(|rows| rows.filter_map(Result::ok).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn save_link(&mut self, url: &str, title: &str, html: &str, now: i64) -> Entry {
+        let id = entry_id(SAVED, url);
+        let _ = self.db.execute(
+            "insert into entries (id, feed_id, source_id, url, title, published, first_seen, content)
+             values (?1, ?2, ?3, ?3, ?4, ?5, ?5, ?6)
+             on conflict(id) do update set content = excluded.content, title = excluded.title",
+            params![id, SAVED, url, title, now, html],
+        );
+        let _ = self.db.execute("delete from entries_fts where id = ?1", [&id]);
+        let _ = self.db.execute("insert into entries_fts (id, title, body) values (?1, ?2, ?3)", params![id, title, html]);
+        self.set_clean_body(&id, html, now);
+        self.set_bookmarked(std::slice::from_ref(&id), true, now);
+        self.set_read(std::slice::from_ref(&id), true, now);
+        Entry {
+            id,
+            feed_id: SAVED.into(),
+            url: url.into(),
+            title: title.into(),
+            author: None,
+            published: now,
+            read: true,
+            bookmarked: true,
         }
     }
 
@@ -483,6 +760,9 @@ impl Store {
                     )
                     .unwrap_or(0);
                 count += n;
+                if n == 1 {
+                    let _ = tx.execute("insert into entries_fts (id, title, body) values (?1, ?2, '')", params![id, title]);
+                }
                 if read.is_some() || starred.is_some() {
                     let _ = tx.execute(
                         "insert or replace into states (entry_id, read, read_at, bookmarked, bookmarked_at) values (?1, ?2, ?3, ?4, ?5)",
@@ -500,4 +780,16 @@ impl Store {
         tx.commit().map_err(|e| e.to_string())?;
         Ok((feeds.len(), count))
     }
+}
+
+pub struct PublicItem {
+    pub entry: String,
+    pub note: String,
+    pub title: String,
+    pub url: String,
+    pub source: String,
+    pub published: i64,
+    pub content: Option<String>,
+    pub at: i64,
+    pub removed_at: Option<i64>,
 }

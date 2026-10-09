@@ -5,12 +5,13 @@ use toolkit::ui::{Rect, Scene};
 
 use crate::article;
 use crate::cmds::Cmd;
-use crate::model::{Confirm, Discovery, Focus, Model, Page, SETTINGS, Setting, Target, View};
+use crate::model::{Confirm, Discovery, Focus, Model, Page, Row, Setting, Target, View, settings_rows};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scroll {
     List,
     Feeds,
+    Settings,
     Help,
     Reader,
     Pane,
@@ -338,31 +339,46 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
     out
 }
 
-fn nav_items(m: &Model) -> Vec<(Hit, String, String, bool)> {
+pub enum Nav {
+    Heading(&'static str),
+    Item { hit: Hit, name: String, count: String, active: bool, label: bool },
+}
+
+fn nav_items(m: &Model) -> Vec<Nav> {
+    let on_list = m.page == Page::List;
+    let item = |hit: Hit, name: String, count: String, active: bool, label: bool| Nav::Item { hit, name, count, active, label };
     let mut v = vec![
-        (Hit::View(View::Home), "1 Home".to_string(), m.unread_home.to_string(), m.page == Page::List && m.view == View::Home),
-        (
-            Hit::View(View::Bookmarks),
-            "2 Bookmarks".to_string(),
-            m.bookmarks.to_string(),
-            m.page == Page::List && m.view == View::Bookmarks,
-        ),
-        (
-            Hit::Page(Page::Feeds),
-            "3 Feeds".to_string(),
-            m.feeds.len().to_string(),
-            m.page == Page::Feeds,
-        ),
-        (Hit::Page(Page::Settings), "4 Settings".to_string(), String::new(), m.page == Page::Settings),
+        Nav::Heading("VIEWS"),
+        item(Hit::View(View::Home), "1 HOME".into(), String::new(), on_list && m.view == View::Home, true),
+        item(Hit::View(View::Bookmarks), "2 BOOKMARKS".into(), String::new(), on_list && m.view == View::Bookmarks, true),
+        item(Hit::View(View::Recommended), "  I RECOMMEND".into(), String::new(), on_list && m.view == View::Recommended, true),
     ];
-    for i in m.alphabetical() {
-        let f = &m.feeds[i];
-        let view = View::Feed(f.id.clone());
-        let active = m.page == Page::List && m.view == view;
-        let n = m.unread_by_feed.get(&f.id).copied().unwrap_or(0);
-        v.push((Hit::View(view), f.name().to_string(), if n > 0 { n.to_string() } else { String::new() }, active));
+    if !m.folders.is_empty() {
+        v.push(Nav::Heading("FOLDERS"));
+        for f in &m.folders {
+            let view = View::Folder(f.id.clone());
+            let n = m.unread_by_folder.get(&f.id).copied().unwrap_or(0);
+            v.push(item(Hit::View(view.clone()), f.name.clone(), count(n), on_list && m.view == view, false));
+        }
     }
+    let pinned = m.pinned();
+    if !pinned.is_empty() {
+        v.push(Nav::Heading("PINNED"));
+        for i in pinned {
+            let f = &m.feeds[i];
+            let view = View::Feed(f.id.clone());
+            let n = m.unread_by_feed.get(&f.id).copied().unwrap_or(0);
+            v.push(item(Hit::View(view.clone()), f.name().to_string(), count(n), on_list && m.view == view, false));
+        }
+    }
+    v.push(Nav::Heading("LIBRARY"));
+    v.push(item(Hit::Page(Page::Feeds), "3 FEEDS".into(), String::new(), m.page == Page::Feeds, true));
+    v.push(item(Hit::Page(Page::Settings), "4 SETTINGS".into(), String::new(), m.page == Page::Settings, true));
     v
+}
+
+fn count(n: usize) -> String {
+    if n > 0 { n.to_string() } else { String::new() }
 }
 
 fn paint_pane(m: &mut Model, s: &mut Scene<Hit>, r: Rect) {
@@ -370,36 +386,44 @@ fn paint_pane(m: &mut Model, s: &mut Scene<Hit>, r: Rect) {
     let pal = s.palette;
     let mono = s.m.mono();
     let items = nav_items(m);
-    let content = ch * (items.len() + 2) as f32;
+    let content = ch * (items.len() + 1) as f32;
     m.pane_scroll = m.pane_scroll.clamp(0.0, (content - r.h).max(0.0));
     s.hit(r, Hit::Area(Scroll::Pane));
     s.push_clip(r);
     let mut y = r.y - m.pane_scroll.round();
-    for (n, (hit, name, count, active)) in items.into_iter().enumerate() {
-        if n == 4 {
-            y += ch;
-            s.text("FEEDS", mono, cw, y, None, pal.faint);
-            y += ch;
+    for (n, item) in items.into_iter().enumerate() {
+        if let Nav::Heading(_) = item
+            && n > 0
+        {
+            y += ch * 0.5;
         }
         if y + ch < r.y || y > r.bottom() {
             y += ch;
             continue;
         }
-        let row = Rect::new(r.x, y, r.w, ch);
-        if active {
-            s.fill(row, pal.cursor);
-        } else {
-            s.hover(row);
+        match item {
+            Nav::Heading(h) => {
+                s.text(h, mono, cw, y, None, pal.faint);
+            }
+            Nav::Item { hit, name, count, active, label } => {
+                let row = Rect::new(r.x, y, r.w, ch);
+                if active {
+                    s.fill(row, pal.cursor);
+                } else {
+                    s.hover(row);
+                }
+                let color = if active { pal.ink } else { pal.muted };
+                let cw_count = if count.is_empty() { 0.0 } else { s.measure(&count, mono) };
+                let style = if label { mono } else { s.m.prop(if count.is_empty() { 400.0 } else { 600.0 }) };
+                let name_color = if !label && !count.is_empty() { pal.ink } else { color };
+                let x = if label { cw } else { cw * 3.0 };
+                s.text(&name, style, x, y, Some(r.w - x - cw * 2.0 - cw_count), name_color);
+                if !count.is_empty() {
+                    s.text(&count, mono, r.right() - cw - cw_count, y, None, color);
+                }
+                s.hit(row, hit);
+            }
         }
-        let color = if active { pal.ink } else { pal.muted };
-        let cw_count = if count.is_empty() { 0.0 } else { s.measure(&count, mono) };
-        let name_style = if n < 4 { mono } else { s.m.prop(if count.is_empty() { 400.0 } else { 600.0 }) };
-        let name_color = if n >= 4 && !count.is_empty() { pal.ink } else { color };
-        s.text(&name, name_style, cw, y, Some(r.w - cw * 3.0 - cw_count), name_color);
-        if !count.is_empty() {
-            s.text(&count, mono, r.right() - cw - cw_count, y, None, color);
-        }
-        s.hit(row, hit);
         y += ch;
     }
     s.pop_clip();
@@ -409,25 +433,28 @@ fn paint_strip(m: &mut Model, s: &mut Scene<Hit>, r: Rect) {
     let cw = s.m.cell_w;
     let pal = s.palette;
     let mono = s.m.mono();
-    let items = nav_items(m);
-    let labels: Vec<String> = items
-        .iter()
-        .map(|(_, n, c, _)| {
-            let name: String = if n.chars().count() > 24 {
-                n.chars().take(23).collect::<String>().trim_end().to_string() + "\u{2026}"
-            } else {
-                n.clone()
-            };
-            if c.is_empty() { name } else { format!("{name} {c}") }
+    let items: Vec<(Hit, String, bool)> = nav_items(m)
+        .into_iter()
+        .filter_map(|n| match n {
+            Nav::Item { hit, name, count, active, .. } => {
+                let name = name.trim().to_string();
+                let name: String = if name.chars().count() > 24 {
+                    name.chars().take(23).collect::<String>().trim_end().to_string() + "\u{2026}"
+                } else {
+                    name
+                };
+                Some((hit, if count.is_empty() { name } else { format!("{name} {count}") }, active))
+            }
+            Nav::Heading(_) => None,
         })
         .collect();
-    let content: f32 = labels.iter().map(|l| s.measure(l, mono) + cw * 2.0).sum::<f32>() + cw;
+    let content: f32 = items.iter().map(|(_, l, _)| s.measure(l, mono) + cw * 2.0).sum::<f32>() + cw;
     m.pane_scroll = m.pane_scroll.clamp(0.0, (content - r.w).max(0.0));
     s.hit(r, Hit::Area(Scroll::Pane));
     s.push_clip(r);
     let mut x = cw - m.pane_scroll.round();
-    for ((hit, _, _, active), label) in items.into_iter().zip(&labels) {
-        let w = s.measure(label, mono);
+    for (hit, label, active) in items {
+        let w = s.measure(&label, mono);
         if x + w > 0.0 && x < r.right() {
             let cell = Rect::new(x - cw * 0.5, r.y, w + cw, r.h);
             if active {
@@ -435,7 +462,7 @@ fn paint_strip(m: &mut Model, s: &mut Scene<Hit>, r: Rect) {
             } else {
                 s.hover(cell);
             }
-            s.text(label, mono, x, r.y, None, if active { pal.ink } else { pal.muted });
+            s.text(&label, mono, x, r.y, None, if active { pal.ink } else { pal.muted });
             s.hit(cell, hit);
         }
         x += w + cw * 2.0;
@@ -449,7 +476,7 @@ fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOut)
     let pal = s.palette;
     let mono = mt.mono();
 
-    let state = if m.view == View::Bookmarks { "newest first" } else if m.unread_only { "unread" } else { "all" };
+    let state = if !m.view.filters_read() { "newest first" } else if m.unread_only { "unread" } else { "all" };
     let title = format!("{} \u{00B7} {state}", m.view_name()).to_uppercase();
     let tw = s.text(&title, mono, main.x + cw, main.y, Some(main.w * 0.4), pal.ink).width;
     let count = if m.list.visible.is_empty() {
@@ -488,6 +515,8 @@ fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOut)
             "No feeds yet. Press 3 for the Feeds page, then a to add one.".to_string()
         } else if m.view == View::Bookmarks {
             "No bookmarks yet. Press s on an entry to keep it here.".to_string()
+        } else if m.view == View::Recommended {
+            "Nothing recommended yet. Use recommend on an entry to share it with friends through your public link.".to_string()
         } else if m.unread_only {
             "Nothing unread here. Press h to see everything.".to_string()
         } else {
@@ -718,7 +747,21 @@ fn paint_feeds(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
         } else if let Some(e) = &f.error {
             (e.clone(), pal.danger)
         } else {
-            (format!("checked {}", ago(f.last_fetched)), pal.muted)
+            let mut parts = vec![format!("checked {}", ago(f.last_fetched))];
+            if f.pinned {
+                parts.push("pinned".into());
+            }
+            if f.hidden {
+                parts.push("not on home".into());
+            }
+            let folders: Vec<&str> = m.folders_of(&f.id).iter().map(|x| x.name.as_str()).collect();
+            if !folders.is_empty() {
+                parts.push(format!("in {}", folders.join(", ")));
+            }
+            if let Some(mode) = f.mode {
+                parts.push(format!("opens in {}", mode.name()));
+            }
+            (parts.join(" \u{00B7} "), pal.muted)
         };
         let n = if unread > 0 { unread.to_string() } else { String::new() };
         let style = mt.prop(if unread > 0 { 600.0 } else { 400.0 });
@@ -731,8 +774,8 @@ fn paint_feeds(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
             s.text(f.name(), style, x0, y, Some(cw * 30.0), pal.ink);
             let nw = s.measure(&n, mono);
             s.text(&n, mono, x0 + cw * 36.0 - nw, y, None, pal.ink);
-            s.text(&status.0, mono, x0 + cw * 38.0, y, Some(cw * 34.0), status.1);
-            let ux = x0 + cw * 74.0;
+            s.text(&status.0, mono, x0 + cw * 38.0, y, Some(cw * 56.0), status.1);
+            let ux = x0 + cw * 96.0;
             if ux < r.right() - cw * 6.0 {
                 s.text(&f.url, mono, ux, y, Some(r.right() - ux - cw), pal.faint);
             }
@@ -754,8 +797,26 @@ fn setting_row(m: &Model, s: Setting) -> (&'static str, String) {
             st.max_age_days.map(|d| format!("{d} days")).unwrap_or_else(|| "never".into()),
         ),
         Setting::ConfirmOver => ("Ask before opening more than", format!("{} entries", st.confirm_open_over)),
-        Setting::ImportLegacy => ("Import from the current app", "choose a file".into()),
+        Setting::MergeDuplicates => (
+            "The same link from several feeds",
+            if st.merge_duplicates { "shows once".into() } else { "shows every time".into() },
+        ),
+        Setting::PublicLink => (
+            "I recommend, public link",
+            m.public_url.clone().unwrap_or_else(|| "not available".into()),
+        ),
+        Setting::ImportLegacy => ("Import from the old app", "choose a file".into()),
+        Setting::Mute => ("Mute a word or phrase", "add".into()),
     }
+}
+
+fn rule_text(m: &Model, r: &engine::Rule) -> (String, String) {
+    let place = match &r.scope {
+        engine::Scope::All => "everywhere".to_string(),
+        engine::Scope::Feed(f) => format!("in {}", m.feed_name(f)),
+        engine::Scope::Folder(f) => format!("in the folder {}", m.folder(f).map(|x| x.name.as_str()).unwrap_or("?")),
+    };
+    (format!("\u{201C}{}\u{201D}", r.word), format!("muted {place}"))
 }
 
 fn paint_settings(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
@@ -764,18 +825,36 @@ fn paint_settings(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
     let pal = s.palette;
     let mono = mt.mono();
     s.text("SETTINGS", mono, main.x + cw, main.y, None, pal.ink);
-    let mut y = main.y + ch;
+    let area = Rect::new(main.x, main.y + ch, main.w, main.h - ch);
+    let rows = settings_rows(m);
+    let first_rule = rows.iter().position(|r| matches!(r, Row::Rule(_)));
+    let extra = if first_rule.is_some() { 2 } else { 0 };
     m.settings_page.row_h = ch;
-    m.settings_page.view_h = main.h - ch;
-    for (i, &setting) in SETTINGS.iter().enumerate() {
+    m.settings_page.view_h = area.h - ch * 4.0;
+    m.settings_page.clamp(rows.len() + extra);
+    s.hit(area, Hit::Area(Scroll::Settings));
+    s.push_clip(area);
+    let mut y = area.y - m.settings_page.scroll.round();
+    for (i, row) in rows.iter().enumerate() {
+        if Some(i) == first_rule {
+            y += ch;
+            s.text("MUTED", mono, main.x + cw, y, None, pal.faint);
+            y += ch;
+        }
         let r = Rect::new(main.x, y, main.w - cw, ch);
         if i == m.settings_page.cursor {
             s.fill(r, pal.cursor);
         } else {
             s.hover(r);
         }
-        let (label, value) = setting_row(m, setting);
-        s.text(label, mt.prop(400.0), main.x + cw, y, Some(cw * 36.0), pal.ink);
+        let (label, value) = match row {
+            Row::Setting(st) => {
+                let (l, v) = setting_row(m, *st);
+                (l.to_string(), v)
+            }
+            Row::Rule(k) => rule_text(m, &m.rules[*k]),
+        };
+        s.text(&label, mt.prop(400.0), main.x + cw, y, Some(cw * 36.0), pal.ink);
         s.text(&value, mono, main.x + cw * 40.0, y, Some(main.w - cw * 42.0), pal.muted);
         s.hit(r, Hit::Setting(i));
         y += ch;
@@ -784,13 +863,14 @@ fn paint_settings(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
     s.text(&format!("Data folder   {}", m.data_dir), mono, main.x + cw, y, Some(main.w - cw * 2.0), pal.faint);
     y += ch;
     s.text(
-        "Drop an OPML file or the current app's feedreader.sqlite on this window to import it.",
+        "Drop an OPML file or the old app's feedreader.sqlite on this window to import it.",
         mt.prop(400.0),
         main.x + cw,
         y,
         Some(main.w - cw * 2.0),
         pal.faint,
     );
+    s.pop_clip();
 }
 
 fn paint_help(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, main: Rect) {

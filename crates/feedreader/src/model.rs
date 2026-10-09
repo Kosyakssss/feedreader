@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use engine::{Block, Candidate, Entry, EntryId, Event, Feed, FeedId, Mode, RefreshStatus, Request, Settings};
+use engine::{Block, Candidate, Entry, EntryId, Event, Feed, FeedId, Folder, Mode, Recommendation, RefreshStatus, Request, Rule, SAVED, Settings};
 use toolkit::field::Field;
 use toolkit::text::SpanStyle;
 use toolkit::ui::LineStyle;
@@ -9,6 +9,8 @@ use toolkit::ui::LineStyle;
 pub enum View {
     Home,
     Bookmarks,
+    Recommended,
+    Folder(String),
     Feed(FeedId),
 }
 
@@ -117,6 +119,9 @@ pub enum Setting {
     RefreshMinutes,
     ConfirmOver,
     ImportLegacy,
+    MergeDuplicates,
+    PublicLink,
+    Mute,
 }
 
 pub const SETTINGS: &[Setting] = &[
@@ -126,13 +131,35 @@ pub const SETTINGS: &[Setting] = &[
     Setting::MaxEntries,
     Setting::MaxAge,
     Setting::ConfirmOver,
+    Setting::MergeDuplicates,
+    Setting::PublicLink,
     Setting::ImportLegacy,
+    Setting::Mute,
 ];
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Row {
+    Setting(Setting),
+    Rule(usize),
+}
+
+pub fn settings_rows(m: &Model) -> Vec<Row> {
+    SETTINGS
+        .iter()
+        .map(|&s| Row::Setting(s))
+        .chain((0..m.rules.len()).map(Row::Rule))
+        .collect()
+}
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum PromptKind {
     AddFeed,
+    SaveLink,
     Rename(FeedId),
+    Folders(FeedId),
+    RenameFolder(String),
+    Mute,
+    Recommend(Vec<EntryId>),
     ImportOpml,
     ExportOpml,
     ImportLegacy,
@@ -165,6 +192,16 @@ pub enum Op {
     RestoreFeed(FeedId),
     Rename(FeedId, Option<String>),
     Settings(Settings),
+    Pin(FeedId, bool),
+    Hide(FeedId, bool),
+    FeedMode(FeedId, Option<Mode>),
+    Folders(FeedId, Vec<String>),
+    RenameFolder(String, String),
+    DeleteFolder(Folder),
+    RestoreFolder(Folder),
+    AddRule(Rule),
+    RemoveRule(Rule),
+    Recommend(Vec<(EntryId, Option<String>)>),
 }
 
 struct Change {
@@ -221,6 +258,13 @@ pub struct Model {
     pub unread_home: usize,
     pub bookmarks: usize,
     pub settings: Settings,
+    pub folders: Vec<Folder>,
+    pub rules: Vec<Rule>,
+    pub recommendations: Vec<Recommendation>,
+    pub recommended: HashMap<EntryId, String>,
+    pub public_url: Option<String>,
+    pub hidden: HashSet<EntryId>,
+    pub unread_by_folder: HashMap<String, usize>,
     pub refresh: RefreshStatus,
     pub page: Page,
     pub view: View,
@@ -258,6 +302,12 @@ pub fn lines_from(name: &str) -> LineStyle {
     }
 }
 
+impl View {
+    pub fn filters_read(&self) -> bool {
+        !matches!(self, View::Bookmarks | View::Recommended)
+    }
+}
+
 impl Model {
     pub fn new() -> Self {
         Self {
@@ -271,6 +321,13 @@ impl Model {
             unread_home: 0,
             bookmarks: 0,
             settings: Settings::default(),
+            folders: Vec::new(),
+            rules: Vec::new(),
+            recommendations: Vec::new(),
+            recommended: HashMap::new(),
+            public_url: None,
+            hidden: HashSet::new(),
+            unread_by_folder: HashMap::new(),
             refresh: RefreshStatus::default(),
             page: Page::List,
             view: View::Home,
@@ -326,12 +383,69 @@ impl Model {
         match &self.view {
             View::Home => "Home".into(),
             View::Bookmarks => "Bookmarks".into(),
+            View::Recommended => "I recommend".into(),
+            View::Folder(id) => self.folder(id).map(|f| f.name.clone()).unwrap_or_else(|| "removed folder".into()),
             View::Feed(id) => self.feed_name(id).to_string(),
         }
     }
 
+    pub fn folder(&self, id: &str) -> Option<&Folder> {
+        self.folders.iter().find(|f| f.id == id)
+    }
+
+    pub fn folders_of(&self, feed: &str) -> Vec<&Folder> {
+        self.folders.iter().filter(|f| f.feeds.iter().any(|x| x == feed)).collect()
+    }
+
+    pub fn subscriptions(&self) -> impl Iterator<Item = &Feed> {
+        self.feeds.iter().filter(|f| f.id != SAVED)
+    }
+
     pub fn failing(&self) -> usize {
-        self.feeds.iter().filter(|f| f.error.is_some()).count()
+        self.subscriptions().filter(|f| f.error.is_some()).count()
+    }
+
+    pub fn pinned(&self) -> Vec<usize> {
+        let mut v: Vec<usize> = (0..self.feeds.len()).filter(|&i| self.feeds[i].pinned).collect();
+        v.sort_by_key(|&i| self.feeds[i].name().to_lowercase());
+        v
+    }
+
+    fn rehide(&mut self) {
+        let mut folder_of: HashMap<&str, Vec<&str>> = HashMap::new();
+        for f in &self.folders {
+            for feed in &f.feeds {
+                folder_of.entry(feed.as_str()).or_default().push(f.id.as_str());
+            }
+        }
+        let mut hidden = HashSet::new();
+        if !self.rules.is_empty() {
+            for e in &self.entries {
+                let folders = folder_of.get(e.feed_id.as_str()).map(Vec::as_slice).unwrap_or(&[]);
+                if engine::rules::muted(&e.title, &e.feed_id, folders, &self.rules) {
+                    hidden.insert(e.id.clone());
+                }
+            }
+        }
+        if self.settings.merge_duplicates {
+            let mut seen: HashMap<String, &str> = HashMap::new();
+            for e in self.entries.iter().rev() {
+                if e.url.is_empty() || e.feed_id == SAVED {
+                    continue;
+                }
+                let key = engine::rules::link_key(&e.url);
+                match seen.get(&key) {
+                    Some(first) if *first != e.feed_id => {
+                        hidden.insert(e.id.clone());
+                    }
+                    Some(_) => {}
+                    None => {
+                        seen.insert(key, &e.feed_id);
+                    }
+                }
+            }
+        }
+        self.hidden = hidden;
     }
 
     fn reindex_entries(&mut self) {
@@ -345,26 +459,40 @@ impl Model {
     }
 
     fn recount(&mut self) {
-        self.unread_by_feed.clear();
-        self.unread_home = 0;
-        self.bookmarks = 0;
+        let mut by_feed: HashMap<FeedId, usize> = HashMap::new();
+        let (mut home, mut bookmarks) = (0, 0);
         for e in &self.entries {
-            if !self.feed_index.contains_key(&e.feed_id) {
+            let Some(feed) = self.feed(&e.feed_id) else { continue };
+            if e.bookmarked {
+                bookmarks += 1;
+            }
+            if e.read || self.hidden.contains(&e.id) {
                 continue;
             }
-            if !e.read {
-                self.unread_home += 1;
-                *self.unread_by_feed.entry(e.feed_id.clone()).or_default() += 1;
+            if !feed.hidden {
+                home += 1;
             }
-            if e.bookmarked {
-                self.bookmarks += 1;
-            }
+            *by_feed.entry(e.feed_id.clone()).or_default() += 1;
         }
+        self.unread_by_feed = by_feed;
+        self.unread_home = home;
+        self.bookmarks = bookmarks;
+        self.unread_by_folder.clear();
+        for f in &self.folders {
+            let n = f.feeds.iter().map(|id| self.unread_by_feed.get(id).copied().unwrap_or(0)).sum();
+            self.unread_by_folder.insert(f.id.clone(), n);
+        }
+    }
+
+    fn refold(&mut self) {
+        self.rehide();
+        self.recount();
+        self.rebuild();
     }
 
     pub fn sort_feeds(&mut self) {
         let keep = self.feeds_order.get(self.feeds_page.cursor).and_then(|&i| self.feeds.get(i)).map(|f| f.id.clone());
-        let mut order: Vec<usize> = (0..self.feeds.len()).collect();
+        let mut order: Vec<usize> = (0..self.feeds.len()).filter(|&i| self.feeds[i].id != SAVED).collect();
         order.sort_by(|&a, &b| {
             let (fa, fb) = (&self.feeds[a], &self.feeds[b]);
             let ua = self.unread_by_feed.get(&fa.id).copied().unwrap_or(0);
@@ -379,24 +507,20 @@ impl Model {
         }
     }
 
-    pub fn alphabetical(&self) -> Vec<usize> {
-        let mut order: Vec<usize> = (0..self.feeds.len()).collect();
-        order.sort_by_key(|&i| self.feeds[i].name().to_lowercase());
-        order
-    }
-
     fn matches(&self, e: &Entry, needle: &str) -> bool {
-        if !self.feed_index.contains_key(&e.feed_id) {
-            return false;
-        }
+        let Some(feed) = self.feed(&e.feed_id) else { return false };
         let in_view = match &self.view {
-            View::Home => true,
+            View::Home => !feed.hidden && !self.hidden.contains(&e.id),
             View::Bookmarks => e.bookmarked,
-            View::Feed(id) => &e.feed_id == id,
+            View::Recommended => self.recommended.contains_key(&e.id),
+            View::Folder(id) => {
+                !self.hidden.contains(&e.id) && self.folder(id).is_some_and(|f| f.feeds.contains(&e.feed_id))
+            }
+            View::Feed(id) => &e.feed_id == id && !self.hidden.contains(&e.id),
         };
         let state_ok = !self.unread_only
             || !e.read
-            || self.view == View::Bookmarks
+            || !self.view.filters_read()
             || self.list.sticky.contains(&e.id);
         let text_ok = needle.is_empty()
             || e.title.to_lowercase().contains(needle)
@@ -469,6 +593,10 @@ impl Model {
                 entries,
                 settings,
                 data_dir,
+                folders,
+                rules,
+                recommendations,
+                public_url,
             } => {
                 self.ready = true;
                 self.data_dir = data_dir;
@@ -476,12 +604,35 @@ impl Model {
                 self.entries = entries;
                 self.lines = lines_from(&settings.lines);
                 self.settings = settings;
+                self.folders = folders;
+                self.rules = rules;
+                self.set_recommendations(recommendations);
+                self.public_url = public_url;
                 self.reindex_feeds();
                 self.reindex_entries();
-                self.recount();
                 self.sort_feeds();
+                self.refold();
+            }
+            Event::Folders(folders) => {
+                self.folders = folders;
+                if let View::Folder(id) = &self.view
+                    && self.folder(id).is_none()
+                {
+                    self.view = View::Home;
+                    self.reset_list();
+                }
+                self.refold();
+            }
+            Event::Rules(rules) => {
+                self.rules = rules;
+                self.refold();
+            }
+            Event::Recommendations(list) => {
+                self.set_recommendations(list);
                 self.rebuild();
             }
+            Event::PublicUrl(url) => self.public_url = url,
+            Event::SearchResults(..) => {}
             Event::Feeds(feeds) => {
                 self.feeds = feeds;
                 self.reindex_feeds();
@@ -491,9 +642,8 @@ impl Model {
                     self.view = View::Home;
                     self.reset_list();
                 }
-                self.recount();
                 self.sort_feeds();
-                self.rebuild();
+                self.refold();
                 let n = self.feeds_order.len();
                 self.feeds_page.reveal(n);
             }
@@ -506,8 +656,7 @@ impl Model {
                     }
                 }
                 self.reindex_entries();
-                self.recount();
-                self.rebuild();
+                self.refold();
             }
             Event::EntriesUpdated(list) => {
                 for (id, title, published) in list {
@@ -523,8 +672,7 @@ impl Model {
                 let gone: HashSet<EntryId> = ids.into_iter().collect();
                 self.entries.retain(|e| !gone.contains(&e.id));
                 self.reindex_entries();
-                self.recount();
-                self.rebuild();
+                self.refold();
             }
             Event::Refresh(status) => {
                 let finished = self.refresh.running && !status.running;
@@ -562,8 +710,12 @@ impl Model {
                 }
             }
             Event::Settings(s) => {
+                let merge = s.merge_duplicates != self.settings.merge_duplicates;
                 self.lines = lines_from(&s.lines);
                 self.settings = s;
+                if merge {
+                    self.refold();
+                }
             }
             Event::Message(m) => self.message = Some(m),
         }
@@ -627,12 +779,99 @@ impl Model {
             }
             Op::Settings(s) => {
                 let old = self.settings.clone();
+                let merge = s.merge_duplicates != old.merge_duplicates;
                 self.lines = lines_from(&s.lines);
                 self.settings = s.clone();
                 self.out.push(Request::SetSettings(s));
+                if merge {
+                    self.refold();
+                }
                 Op::Settings(old)
             }
+            Op::Pin(id, on) => {
+                self.set_feed(&id, |f| f.pinned = on);
+                self.out.push(Request::SetPinned(id.clone(), on));
+                Op::Pin(id, !on)
+            }
+            Op::Hide(id, on) => {
+                self.set_feed(&id, |f| f.hidden = on);
+                self.out.push(Request::SetHidden(id.clone(), on));
+                self.refold();
+                Op::Hide(id, !on)
+            }
+            Op::FeedMode(id, mode) => {
+                let old = self.feed(&id).and_then(|f| f.mode);
+                self.set_feed(&id, |f| f.mode = mode);
+                self.out.push(Request::SetFeedMode(id.clone(), mode));
+                Op::FeedMode(id, old)
+            }
+            Op::Folders(id, names) => {
+                let old = self.folders_of(&id).iter().map(|f| f.name.clone()).collect();
+                self.out.push(Request::SetFeedFolders(id.clone(), names));
+                Op::Folders(id, old)
+            }
+            Op::RenameFolder(id, name) => {
+                let old = self.folder(&id).map(|f| f.name.clone()).unwrap_or_default();
+                if let Some(f) = self.folders.iter_mut().find(|f| f.id == id) {
+                    f.name = name.clone();
+                }
+                self.out.push(Request::RenameFolder(id.clone(), name));
+                Op::RenameFolder(id, old)
+            }
+            Op::DeleteFolder(f) => {
+                self.folders.retain(|x| x.id != f.id);
+                self.out.push(Request::DeleteFolder(f.id.clone()));
+                if self.view == View::Folder(f.id.clone()) {
+                    self.show(View::Home);
+                }
+                self.refold();
+                Op::RestoreFolder(f)
+            }
+            Op::RestoreFolder(f) => {
+                self.out.push(Request::RestoreFolder(f.clone()));
+                Op::DeleteFolder(f)
+            }
+            Op::AddRule(r) => {
+                self.rules.push(r.clone());
+                self.out.push(Request::AddRule(r.clone()));
+                self.refold();
+                Op::RemoveRule(r)
+            }
+            Op::RemoveRule(r) => {
+                self.rules.retain(|x| x.id != r.id);
+                self.out.push(Request::RemoveRule(r.id.clone()));
+                self.refold();
+                Op::AddRule(r)
+            }
+            Op::Recommend(list) => {
+                let mut inverse = Vec::new();
+                for (id, note) in list {
+                    inverse.push((id.clone(), self.recommended.get(&id).cloned()));
+                    match note {
+                        Some(n) => {
+                            self.recommended.insert(id.clone(), n.clone());
+                            self.out.push(Request::Recommend(id, n));
+                        }
+                        None => {
+                            self.recommended.remove(&id);
+                            self.out.push(Request::Unrecommend(id));
+                        }
+                    }
+                }
+                Op::Recommend(inverse)
+            }
         }
+    }
+
+    fn set_feed(&mut self, id: &str, f: impl FnOnce(&mut Feed)) {
+        if let Some(&i) = self.feed_index.get(id) {
+            f(&mut self.feeds[i]);
+        }
+    }
+
+    fn set_recommendations(&mut self, list: Vec<Recommendation>) {
+        self.recommended = list.iter().map(|r| (r.entry.clone(), r.note.clone())).collect();
+        self.recommendations = list;
     }
 
     pub fn act(&mut self, label: String, op: Op) {
@@ -686,7 +925,9 @@ impl Model {
 
     pub fn open_entry(&mut self, id: EntryId, mode: Option<Mode>) {
         let Some(e) = self.entry(&id).cloned() else { return };
-        let mode = mode.unwrap_or(self.settings.reading_mode);
+        let mode = mode
+            .or_else(|| self.feed(&e.feed_id).and_then(|f| f.mode))
+            .unwrap_or(self.settings.reading_mode);
         if mode != Mode::Original {
             self.out.push(Request::LoadBody(id.clone(), mode));
         }
@@ -727,10 +968,19 @@ impl Model {
         r.note = None;
         r.sel = None;
         r.scroll = 0.0;
-        if let Target::Entry(id) = r.target().clone()
-            && mode != Mode::Original
-        {
-            self.out.push(Request::LoadBody(id, mode));
+        if let Target::Entry(id) = r.target().clone() {
+            if mode != Mode::Original {
+                self.out.push(Request::LoadBody(id.clone(), mode));
+            }
+            if let Some(feed) = self.entry(&id).map(|e| e.feed_id.clone())
+                && feed != SAVED
+            {
+                let remembered = (mode != self.settings.reading_mode).then_some(mode);
+                if self.feed(&feed).map(|f| f.mode) != Some(remembered) {
+                    self.set_feed(&feed, |f| f.mode = remembered);
+                    self.out.push(Request::SetFeedMode(feed, remembered));
+                }
+            }
         }
     }
 

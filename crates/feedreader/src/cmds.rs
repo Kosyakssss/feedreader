@@ -1,8 +1,8 @@
-use engine::{Mode, Request};
+use engine::{Mode, Request, Rule};
 use toolkit::commands::{Chord, Command, Key, Registry};
 use toolkit::field::Field;
 
-use crate::model::{Confirm, Discovery, Focus, Model, Op, Page, Prompt, PromptKind, SETTINGS, Setting, Target, View};
+use crate::model::{Confirm, Discovery, Focus, Model, Op, Page, Prompt, PromptKind, Row, Setting, Target, View};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cmd {
@@ -58,6 +58,20 @@ pub enum Cmd {
     ExtendUp,
     Copy,
     More,
+    Recommended,
+    Recommend,
+    CopyPublicLink,
+    Mute,
+    SaveLink,
+    AddAsFeed,
+    Pin,
+    HideFromHome,
+    FeedFolders,
+    FeedReadingMode,
+    RenameFolder,
+    DeleteFolder,
+    RemoveRule,
+    Retry,
 }
 
 fn idle(m: &Model) -> bool {
@@ -90,6 +104,26 @@ fn scrollable(m: &Model) -> bool {
 
 fn entry_action(m: &Model) -> bool {
     idle(m) && m.current_entry().is_some() && (m.page == Page::List || m.reader.is_some())
+}
+
+fn reading_page(m: &Model) -> bool {
+    reading(m) && matches!(m.reader.as_ref().map(|r| r.target()), Some(Target::Page(_)))
+}
+
+fn current_feed(m: &Model) -> Option<&engine::Feed> {
+    m.feeds_order.get(m.feeds_page.cursor).and_then(|&i| m.feeds.get(i))
+}
+
+fn feed_row(m: &Model) -> bool {
+    feeds_page(m) && current_feed(m).is_some()
+}
+
+fn folder_view(m: &Model) -> bool {
+    listing(m) && matches!(m.view, View::Folder(_))
+}
+
+fn rule_row(m: &Model) -> bool {
+    idle(m) && m.page == Page::Settings && m.reader.is_none() && crate::model::settings_rows(m).get(m.settings_page.cursor).is_some_and(|r| matches!(r, crate::model::Row::Rule(_)))
 }
 
 fn plural(n: usize) -> String {
@@ -163,7 +197,7 @@ pub fn registry() -> Registry<Cmd, Model> {
             c(Cmd::CopyLink, vec![Chord::cmd_shift('c')], |_| "copy link".into(), |m| entry_action(m) || reading(m)),
             c(Cmd::UnreadAll, vec![ch('h'), ch('l')], |m| {
                 if m.unread_only { "show all".into() } else { "show unread".into() }
-            }, |m| listing(m) && m.view != View::Bookmarks),
+            }, |m| listing(m) && m.view.filters_read()),
             c(Cmd::OpenAllUnread, vec![Chord { key: Key::Char('o'), cmd: false, shift: true }], |_| "open all unread".into(), |m| {
                 listing(m) && m.list.selected.is_empty()
             }),
@@ -177,16 +211,44 @@ pub fn registry() -> Registry<Cmd, Model> {
             c(Cmd::Import, vec![ch('i')], |_| "import OPML".into(), feeds_page),
             c(Cmd::Export, vec![ch('e')], |_| "export OPML".into(), feeds_page),
             c(Cmd::Open, vec![ch('o'), k(Key::Enter)], |_| "show entries".into(), |m| feeds_page(m) && !m.feeds.is_empty()),
-            c(Cmd::Edit, vec![k(Key::Enter), ch('o')], |m| match SETTINGS.get(m.settings_page.cursor) {
-                Some(Setting::ReadingMode | Setting::Lines) => "change".into(),
+            c(Cmd::Edit, vec![k(Key::Enter), ch('o')], |m| match crate::model::settings_rows(m).get(m.settings_page.cursor) {
+                Some(crate::model::Row::Setting(Setting::ReadingMode | Setting::Lines | Setting::MergeDuplicates)) => "change".into(),
                 _ => "edit".into(),
-            }, |m| idle(m) && m.page == Page::Settings),
+            }, |m| idle(m) && m.page == Page::Settings && !rule_row(m)),
             c(Cmd::Refresh, vec![ch('r')], |m| if m.refresh.running { "refreshing".into() } else { "refresh".into() }, |m| idle(m) && m.reader.is_none()),
             c(Cmd::Copy, vec![Chord::cmd('c')], |_| "copy".into(), |m| {
                 m.reader.as_ref().is_some_and(|r| r.ordered().is_some())
             }),
             c(Cmd::ExtendDown, vec![Chord { key: Key::Char('j'), cmd: false, shift: true }, Chord { key: Key::Down, cmd: false, shift: true }], |_| "extend selection down".into(), |m| listing(m) && !m.list.visible.is_empty()),
             c(Cmd::ExtendUp, vec![Chord { key: Key::Char('k'), cmd: false, shift: true }, Chord { key: Key::Up, cmd: false, shift: true }], |_| "extend selection up".into(), |m| listing(m) && !m.list.visible.is_empty()),
+            c(Cmd::Recommend, vec![], |m| {
+                let t = m.targets();
+                let all = !t.is_empty() && t.iter().all(|id| m.recommended.contains_key(id));
+                let n = if t.len() > 1 { format!(" {}", t.len()) } else { String::new() };
+                format!("{}{n}", if all { "unrecommend" } else { "recommend" })
+            }, entry_action),
+            c(Cmd::Mute, vec![], |_| "mute word".into(), |m| entry_action(m) || (idle(m) && m.page == Page::Settings)),
+            c(Cmd::SaveLink, vec![], |m| if reading_page(m) { "bookmark".into() } else { "save link".into() }, |m| {
+                (listing(m) || feeds_page(m)) || reading_page(m)
+            }),
+            c(Cmd::AddAsFeed, vec![], |_| "add as feed".into(), reading_page),
+            c(Cmd::CopyPublicLink, vec![], |_| "copy public link".into(), |m| {
+                listing(m) && m.view == View::Recommended && m.public_url.is_some()
+            }),
+            c(Cmd::Pin, vec![], |m| if current_feed(m).is_some_and(|f| f.pinned) { "unpin".into() } else { "pin".into() }, feed_row),
+            c(Cmd::HideFromHome, vec![], |m| {
+                if current_feed(m).is_some_and(|f| f.hidden) { "show on home".into() } else { "hide from home".into() }
+            }, feed_row),
+            c(Cmd::FeedFolders, vec![], |_| "folders".into(), feed_row),
+            c(Cmd::FeedReadingMode, vec![], |m| {
+                let mode = current_feed(m).and_then(|f| f.mode).map(|m| m.name()).unwrap_or("default");
+                format!("opens in: {mode}")
+            }, feed_row),
+            c(Cmd::Retry, vec![], |_| "retry".into(), |m| feed_row(m) && current_feed(m).is_some_and(|f| f.error.is_some())),
+            c(Cmd::RenameFolder, vec![], |_| "rename folder".into(), folder_view),
+            c(Cmd::DeleteFolder, vec![], |_| "delete folder".into(), folder_view),
+            c(Cmd::RemoveRule, vec![ch('d')], |_| "remove rule".into(), rule_row),
+            c(Cmd::Recommended, vec![], |_| "i recommend".into(), |_| false),
             c(Cmd::Home, vec![ch('1')], |_| "home".into(), idle),
             c(Cmd::Bookmarks, vec![ch('2')], |_| "bookmarks".into(), idle),
             c(Cmd::Feeds, vec![ch('3')], |_| "feeds".into(), idle),
@@ -223,6 +285,9 @@ fn rank(cmd: Cmd) -> u8 {
         | Cmd::Original
         | Cmd::Copy
         | Cmd::Select
+        | Cmd::Recommend
+        | Cmd::AddAsFeed
+        | Cmd::RemoveRule
         | Cmd::More => 0,
         Cmd::PageDown
         | Cmd::PageUp
@@ -339,7 +404,7 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
                     return;
                 }
                 Page::Feeds => (m.feeds_order.len(), &mut m.feeds_page),
-                Page::Settings => (SETTINGS.len(), &mut m.settings_page),
+                Page::Settings => (crate::model::settings_rows(m).len(), &mut m.settings_page),
                 Page::Help => (registry().commands.len() + 8, &mut m.help),
             };
             let rows = page_rows(s.view_h, s.row_h);
@@ -532,6 +597,100 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
             }
         }
         Cmd::More => m.bar_expanded = !m.bar_expanded,
+        Cmd::Recommended => m.show(View::Recommended),
+        Cmd::Recommend => {
+            let t = m.targets();
+            if t.is_empty() {
+                return;
+            }
+            if t.iter().all(|id| m.recommended.contains_key(id)) {
+                let n = t.len();
+                m.act(format!("Removed {} from I recommend", plural(n)), Op::Recommend(t.into_iter().map(|id| (id, None)).collect()));
+            } else {
+                let label = if t.len() == 1 { "Note for your friends (optional, up to 280 words)" } else { "Note for these entries (optional, up to 280 words)" };
+                prompt(m, PromptKind::Recommend(t), label, "");
+            }
+        }
+        Cmd::CopyPublicLink => {
+            if let Some(u) = m.public_url.clone() {
+                m.message = Some(format!("Copied {u}"));
+                m.copy = Some(u);
+            }
+        }
+        Cmd::Mute => {
+            let hint = m.current_entry().filter(|_| m.page != Page::Settings).map(|e| format!(" from:{}", m.feed_name(&e.feed_id))).unwrap_or_default();
+            prompt(m, PromptKind::Mute, "Mute a word or phrase (add in:folder or from:feed to narrow it)", &hint);
+            if let Some(p) = m.prompt.as_mut() {
+                p.field.home();
+            }
+        }
+        Cmd::SaveLink => {
+            if let Some(Target::Page(url)) = m.reader.as_ref().map(|r| r.target().clone()) {
+                m.out.push(Request::SaveLink(url.clone()));
+                m.message = Some(format!("Saving {url}\u{2026}"));
+            } else {
+                prompt(m, PromptKind::SaveLink, "Page address to keep in Bookmarks", "");
+            }
+        }
+        Cmd::AddAsFeed => {
+            if let Some(Target::Page(url)) = m.reader.as_ref().map(|r| r.target().clone()) {
+                m.go(Page::Feeds);
+                m.discovery = Some(Discovery::Searching(url.clone()));
+                m.out.push(Request::Discover(url));
+            }
+        }
+        Cmd::Pin => {
+            if let Some(f) = current_feed(m).cloned() {
+                let label = format!("{} {}", if f.pinned { "Unpinned" } else { "Pinned" }, f.name());
+                m.act(label, Op::Pin(f.id, !f.pinned));
+            }
+        }
+        Cmd::HideFromHome => {
+            if let Some(f) = current_feed(m).cloned() {
+                let label = if f.hidden { format!("{} shows on Home again", f.name()) } else { format!("{} no longer shows on Home", f.name()) };
+                m.act(label, Op::Hide(f.id, !f.hidden));
+            }
+        }
+        Cmd::FeedFolders => {
+            if let Some(f) = current_feed(m).cloned() {
+                let names: Vec<String> = m.folders_of(&f.id).iter().map(|x| x.name.clone()).collect();
+                prompt(m, PromptKind::Folders(f.id), "Folders, separated by commas", &names.join(", "));
+            }
+        }
+        Cmd::FeedReadingMode => {
+            if let Some(f) = current_feed(m).cloned() {
+                let next = match f.mode {
+                    None => Some(Mode::Clean),
+                    Some(Mode::Clean) => Some(Mode::Feed),
+                    Some(Mode::Feed) => Some(Mode::Original),
+                    Some(Mode::Original) => None,
+                };
+                let what = next.map(|n| format!("in {} mode", n.name())).unwrap_or_else(|| "in the default mode".into());
+                m.act(format!("{} opens {what}", f.name()), Op::FeedMode(f.id, next));
+            }
+        }
+        Cmd::Retry => m.out.push(Request::Refresh),
+        Cmd::RenameFolder => {
+            if let View::Folder(id) = m.view.clone()
+                && let Some(f) = m.folder(&id).cloned()
+            {
+                prompt(m, PromptKind::RenameFolder(id), "New folder name", &f.name);
+            }
+        }
+        Cmd::DeleteFolder => {
+            if let View::Folder(id) = m.view.clone()
+                && let Some(f) = m.folder(&id).cloned()
+            {
+                m.act(format!("Deleted the folder {}; its feeds stay", f.name), Op::DeleteFolder(f));
+            }
+        }
+        Cmd::RemoveRule => {
+            if let Some(Row::Rule(i)) = crate::model::settings_rows(m).get(m.settings_page.cursor).cloned()
+                && let Some(r) = m.rules.get(i).cloned()
+            {
+                m.act(format!("Unmuted \u{201C}{}\u{201D}", r.word), Op::RemoveRule(r));
+            }
+        }
         Cmd::Lines => {
             let mut s = m.settings.clone();
             s.lines = m.lines.next().name().to_string();
@@ -555,9 +714,23 @@ fn step(cursor: usize, len: usize, page: usize, cmd: Cmd) -> usize {
 }
 
 fn edit_setting(m: &mut Model) {
-    let Some(&setting) = SETTINGS.get(m.settings_page.cursor) else { return };
+    let Some(Row::Setting(setting)) = crate::model::settings_rows(m).get(m.settings_page.cursor).cloned() else { return };
     let s = m.settings.clone();
     match setting {
+        Setting::MergeDuplicates => {
+            let mut n = s.clone();
+            n.merge_duplicates = !s.merge_duplicates;
+            let label = if n.merge_duplicates { "Showing each link once" } else { "Showing duplicate links from every feed" };
+            m.act(label.into(), Op::Settings(n));
+        }
+        Setting::Mute => exec(m, Cmd::Mute),
+        Setting::PublicLink => match m.public_url.clone() {
+            Some(u) => {
+                m.message = Some(format!("Copied {u}"));
+                m.copy = Some(u);
+            }
+            None => m.message = Some("The public listener isn't running; another program may be using its port.".into()),
+        },
         Setting::ReadingMode => {
             let mut n = s.clone();
             n.reading_mode = match s.reading_mode {
@@ -609,6 +782,60 @@ fn submit(m: &mut Model) {
             }
             m.discovery = Some(Discovery::Searching(value.clone()));
             m.out.push(Request::Discover(value));
+        }
+        PromptKind::SaveLink => {
+            if value.is_empty() {
+                return fail(m, "Type a page address");
+            }
+            if let Err(e) = engine::check_input(&value) {
+                return fail(m, &e);
+            }
+            m.out.push(Request::SaveLink(value.clone()));
+            m.message = Some(format!("Saving {value}\u{2026}"));
+        }
+        PromptKind::Folders(id) => {
+            let names: Vec<String> = value.split(',').map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
+            let name = m.feed_name(&id).to_string();
+            let label = if names.is_empty() { format!("Took {name} out of every folder") } else { format!("Put {name} in {}", names.join(", ")) };
+            m.act(label, Op::Folders(id, names));
+        }
+        PromptKind::RenameFolder(id) => {
+            if value.is_empty() {
+                return fail(m, "Type a name");
+            }
+            if m.folders.iter().any(|f| f.id != id && f.name.eq_ignore_ascii_case(&value)) {
+                return fail(m, "Another folder already has that name");
+            }
+            m.act(format!("Renamed the folder to {value}"), Op::RenameFolder(id, value));
+        }
+        PromptKind::Mute => {
+            let feeds: Vec<(String, String)> = m.subscriptions().map(|f| (f.id.clone(), f.name().to_string())).collect();
+            let folders: Vec<(String, String)> = m.folders.iter().map(|f| (f.id.clone(), f.name.clone())).collect();
+            match engine::rules::parse_rule(&value, &feeds, &folders) {
+                Ok((word, scope)) => {
+                    let id = format!("{:x}", engine::now());
+                    let place = match &scope {
+                        engine::Scope::All => String::new(),
+                        engine::Scope::Feed(f) => format!(" in {}", m.feed_name(f)),
+                        engine::Scope::Folder(f) => format!(" in the folder {}", m.folder(f).map(|x| x.name.as_str()).unwrap_or("")),
+                    };
+                    m.act(format!("Muted \u{201C}{word}\u{201D}{place}"), Op::AddRule(Rule { id, word, scope }));
+                }
+                Err(e) => return fail(m, &e),
+            }
+        }
+        PromptKind::Recommend(ids) => {
+            let words = value.split_whitespace().count();
+            if words > 280 {
+                return fail(m, &format!("That's {words} words; keep it to 280"));
+            }
+            let n = ids.len();
+            let label = if n == 1 {
+                format!("Recommended \u{201C}{}\u{201D}", m.entry(&ids[0]).map(|e| e.title.as_str()).unwrap_or(""))
+            } else {
+                format!("Recommended {}", plural(n))
+            };
+            m.act(label, Op::Recommend(ids.into_iter().map(|id| (id, Some(value.clone()))).collect()));
         }
         PromptKind::Rename(id) => {
             let label = if value.is_empty() || m.feed(&id).is_some_and(|f| f.title == value) { None } else { Some(value) };

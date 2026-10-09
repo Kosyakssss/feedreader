@@ -927,6 +927,7 @@ dependencies = [
  "dom_smoothie",
  "feed-rs",
  "futures",
+ "getrandom 0.3.4",
  "html-escape",
  "quick-xml 0.42.0",
  "reqwest",
