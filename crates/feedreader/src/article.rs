@@ -68,7 +68,8 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
     let Some(r) = m.reader.as_mut() else { return };
     let colors = [pal.ink, pal.link, pal.ink, pal.muted];
     let x0 = area.x + cw;
-    let width = (area.w - cw * 5.0).min(cw * 78.0).max(cw * 10.0);
+    let width = (area.w - cw * 5.0).min(cw * m.settings.reading_width as f32).max(cw * 10.0);
+    let reading = m.settings.reading_size as f32 / 100.0;
     let blocks: Vec<Block> = match &r.body {
         Some(Ok(b)) => b.clone(),
         _ => Vec::new(),
@@ -89,8 +90,8 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
         )),
         Some(Ok(_)) => None,
     };
-    let body = (mt.size * 1.12).round();
-    let line = (ch * 1.3).round();
+    let body = (mt.size * 1.12 * reading).round();
+    let line = (ch * 1.3 * reading).round();
     let base = SpanStyle::plain(Face::Prop);
     let laid: Vec<Laid> = blocks
         .iter()

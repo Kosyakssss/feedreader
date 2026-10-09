@@ -4,6 +4,7 @@ mod extract;
 mod model;
 mod palette;
 mod tabs;
+mod theme;
 mod view;
 
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use engine::{Event, Request};
 use toolkit::commands::{Chord, Key, Registry};
 use toolkit::gpu::Gpu;
 use toolkit::text::{Face, Text, TextStyle};
-use toolkit::ui::{LIGHT, Metrics, Rect, Scene};
+use toolkit::ui::{DARK, LIGHT, Metrics, Palette, Rect, Scene};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
@@ -39,6 +40,7 @@ enum Wake {
     ExtractorReady,
     Extracted(String),
     Images,
+    Theme,
 }
 
 enum Drag {
@@ -72,6 +74,9 @@ struct State {
     ime_on: bool,
     clipboard: Option<arboard::Clipboard>,
     extractor: extract::Extractor,
+    theme: theme::Theme,
+    system_dark: bool,
+    _watcher: Option<notify::RecommendedWatcher>,
 }
 
 struct App {
@@ -102,7 +107,7 @@ fn player(src: &str, kind: &str) -> String {
     let tag = if kind == "audio" { "audio" } else { "video" };
     let src = src.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
     format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{{margin:0;height:100%;background:#f9f9f7}}body{{display:flex;align-items:center;justify-content:center}}video,audio{{max-width:92%;max-height:92%}}audio{{width:80%}}</style></head><body><{tag} controls autoplay preload=\"metadata\" src=\"{src}\"></{tag}></body></html>"
+        "<!doctype html><html><head><meta charset=\"utf-8\"><style>:root{{color-scheme:light dark}}html,body{{margin:0;height:100%;background:transparent}}body{{display:flex;align-items:center;justify-content:center}}video,audio{{max-width:92%;max-height:92%}}audio{{width:80%}}</style></head><body><{tag} controls autoplay preload=\"metadata\" src=\"{src}\"></{tag}></body></html>"
     )
 }
 
@@ -128,14 +133,54 @@ fn flush(model: &mut Model, engine: &engine::Handle, clipboard: &mut Option<arbo
     }
 }
 
+fn watch(dir: &std::path::Path, proxy: EventLoopProxy<Wake>) -> Option<notify::RecommendedWatcher> {
+    use notify::Watcher;
+    let mut w = notify::recommended_watcher(move |r: notify::Result<notify::Event>| {
+        if let Ok(e) = r
+            && e.paths.iter().any(|p| p.file_name().is_some_and(|n| n == "theme.toml"))
+        {
+            let _ = proxy.send_event(Wake::Theme);
+        }
+    })
+    .ok()?;
+    w.watch(dir, notify::RecursiveMode::NonRecursive).ok()?;
+    Some(w)
+}
+
 impl State {
+    fn palette(&self) -> Palette {
+        let dark = match self.model.settings.appearance.as_str() {
+            "dark" => true,
+            "light" => false,
+            _ => self.system_dark,
+        };
+        if dark { self.theme.dark } else { self.theme.light }
+    }
+
+    fn reload_theme(&mut self) {
+        match self.theme.reload() {
+            Ok(true) => self.model.message = Some("Theme updated.".into()),
+            Ok(false) => {}
+            Err(e) => self.model.message = Some(format!("{e}. Keeping the last good colors.")),
+        }
+    }
+
+    fn edit_theme(&mut self) {
+        if !self.theme.path.exists() {
+            let _ = std::fs::write(&self.theme.path, self.theme.template());
+        }
+        open_external(&self.theme.path.display().to_string());
+        self.model.message = Some(format!("Opened {}; saving it applies the colors.", self.theme.path.display()));
+    }
+
     #[profiling::function]
     fn render(&mut self) {
         let started = Instant::now();
         self.text.begin_frame();
         self.model.images.begin_frame();
         let stats = FrameStats::from(&self.frames);
-        let mut scene = Scene::new(&mut self.text, self.metrics, self.model.lines, LIGHT);
+        let palette = self.palette();
+        let mut scene = Scene::new(&mut self.text, self.metrics, self.model.lines, palette);
         scene.pointer = self.pointer_inside.then_some(self.mouse);
         let out = view::paint(&mut self.model, &self.registry, &mut scene, stats);
         let quads = std::mem::take(&mut scene.quads);
@@ -154,7 +199,7 @@ impl State {
             self.engine.send(r);
         }
         let painted = Instant::now();
-        self.gpu.render(&quads, LIGHT.bg);
+        self.gpu.render(&quads, palette.bg);
         let presented = Instant::now();
         self.sync_webview(out.webview);
         self.sync_ime(out.ime);
@@ -203,12 +248,10 @@ impl State {
                 };
                 self.webview = builder
                     .with_bounds(bounds)
-                    .with_background_color((
-                        (LIGHT.bg[0] * 255.0) as u8,
-                        (LIGHT.bg[1] * 255.0) as u8,
-                        (LIGHT.bg[2] * 255.0) as u8,
-                        255,
-                    ))
+                    .with_background_color({
+                        let bg = self.palette().bg;
+                        ((bg[0] * 255.0) as u8, (bg[1] * 255.0) as u8, (bg[2] * 255.0) as u8, 255)
+                    })
                     .with_initialization_script(
                         "document.addEventListener('keydown', e => { if (e.key === 'Escape' || (e.metaKey && e.key === 'w')) { e.preventDefault(); window.ipc.postMessage('close'); } }, true);",
                     )
@@ -241,6 +284,9 @@ impl State {
     }
 
     fn after(&mut self) {
+        if std::mem::take(&mut self.model.edit_theme) {
+            self.edit_theme();
+        }
         flush(&mut self.model, &self.engine, &mut self.clipboard);
         self.window.request_redraw();
     }
@@ -723,7 +769,13 @@ impl ApplicationHandler<Wake> for App {
             ime_on: false,
             clipboard: arboard::Clipboard::new().ok(),
             extractor: extract::Extractor::new(),
+            theme: theme::Theme::new(&engine::data_dir()),
+            system_dark: false,
+            _watcher: watch(&engine::data_dir(), self.proxy.clone()),
         };
+        state.system_dark = state.window.theme() == Some(winit::window::Theme::Dark);
+        state.reload_theme();
+        state.model.message = None;
         state.engine.send(Request::UseWebExtractor);
         state.render();
         self.state = Some(state);
@@ -750,6 +802,7 @@ impl ApplicationHandler<Wake> for App {
                 return;
             }
             Wake::Images => {}
+            Wake::Theme => s.reload_theme(),
         }
         s.after();
     }
@@ -821,6 +874,10 @@ impl ApplicationHandler<Wake> for App {
                 true
             }
             WindowEvent::Occluded(false) => true,
+            WindowEvent::ThemeChanged(t) => {
+                s.system_dark = t == winit::window::Theme::Dark;
+                true
+            }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
@@ -905,7 +962,7 @@ fn snapshot(args: &[String]) {
         let started = Instant::now();
         text.begin_frame();
         model.images.begin_frame();
-        let mut scene = Scene::new(text, mt, model.lines, LIGHT);
+        let mut scene = Scene::new(text, mt, model.lines, if model.settings.appearance == "dark" { DARK } else { LIGHT });
         scene.pointer = pointer;
         view::paint(model, &registry, &mut scene, FrameStats::default());
         *quads = std::mem::take(&mut scene.quads);
@@ -1006,7 +1063,7 @@ fn snapshot(args: &[String]) {
     for (id, d) in model.images.take_uploads() {
         gpu.add_image(id, d.width, d.height, &d.rgba);
     }
-    let pixels = gpu.snapshot(&quads, LIGHT.bg);
+    let pixels = gpu.snapshot(&quads, if model.settings.appearance == "dark" { DARK.bg } else { LIGHT.bg });
     let file = std::fs::File::create(&out).unwrap();
     let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
     enc.set_color(png::ColorType::Rgba);
@@ -1068,7 +1125,7 @@ impl ApplicationHandler<Wake> for Probe {
             }
             Wake::ExtractorReady => out.extend(ex.ready()),
             Wake::Extracted(body) => out.extend(extract::result(&body)),
-            Wake::WebClose | Wake::Images => {}
+            Wake::WebClose | Wake::Images | Wake::Theme => {}
         }
         for r in out {
             handle.send(r);

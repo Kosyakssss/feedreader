@@ -104,6 +104,9 @@ pub struct Settings {
     pub lines: String,
     pub merge_duplicates: bool,
     pub public_port: u16,
+    pub appearance: String,
+    pub reading_size: u32,
+    pub reading_width: u32,
 }
 
 impl Default for Settings {
@@ -117,6 +120,9 @@ impl Default for Settings {
             lines: "light".into(),
             merge_duplicates: true,
             public_port: 8791,
+            appearance: "system".into(),
+            reading_size: 100,
+            reading_width: 78,
         }
     }
 }

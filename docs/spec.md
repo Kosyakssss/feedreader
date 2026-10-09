@@ -49,7 +49,7 @@ Anything source-specific: YouTube or podcast apps inside the app, SponsorBlock a
 - Opening an entry marks it read: in a tab, in a background tab, in the system browser, one or many at once. The read toggle marks it unread again and undo reverts it.
 - Links inside an entry open as new in-app tabs. A tab opened from a link that isn't a followed feed or a known entry offers both **Add as feed** (discovery and picker) and **Bookmark** (keeps it as a saved link).
 - Clean and Feed text is selectable and copyable.
-- Reading settings: text size and column width (Proposed: the proportional face stays Google Sans Code Proportional).
+- Reading settings: article text size and column width. The proportional face stays Google Sans Code Proportional (Proposed).
 - Original pages open in a web view per tab, with ad and tracker blocking (Later).
 
 ### 2.5 Bookmarks and saved links
@@ -300,7 +300,7 @@ Status: done, partial or open. Each step is committed and pushed to `main` when 
 8. **Done.** Command palette and search: every available command, views, folders, feeds, and entries by title and full text with `is:`, `in:`, `from:`; Cmd-K.
 9. **Partial.** Tabs: history, background tabs (middle-click, bulk open), peek and kept, Cmd-W, Cmd-Shift-T, Cmd-Shift-[ and ], undoable closing, persistence; links open in the tab with Add as feed and Bookmark. Open: reordering by drag, one web view per tab.
 10. **Partial.** Discovery: link tags on the page and the site root, common paths, YouTube channels, handles and playlists, Medium, Substack, GitHub, Reddit; the picker with recent titles and subscribing into folders; identity by address and by title and site; OPML folders both ways; Follow this site after saving a link. Open: JSON-LD, h-feed, sitemaps.
-11. **Open.** Themes: dark mode following the system, theme files with hot reload; reading settings.
+11. **Done.** Light and dark palettes following the system (or fixed in Settings), `theme.toml` in the data folder with live reload and the last good colors kept on errors, article text size and column width.
 12. **Open.** Persistent 24-hour undo; commands and the change log.
 13. **Open.** Background engine (`serve`, lock file, attach), `service install`, retiring the old Bun service.
 14. **Open.** Sync: hub and satellites, pairing, Tailscale serve and funnel.

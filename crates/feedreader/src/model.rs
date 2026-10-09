@@ -124,11 +124,19 @@ pub enum Setting {
     MergeDuplicates,
     PublicLink,
     Mute,
+    Appearance,
+    ReadingSize,
+    ReadingWidth,
+    ThemeFile,
 }
 
 pub const SETTINGS: &[Setting] = &[
     Setting::ReadingMode,
+    Setting::Appearance,
     Setting::Lines,
+    Setting::ReadingSize,
+    Setting::ReadingWidth,
+    Setting::ThemeFile,
     Setting::RefreshMinutes,
     Setting::MaxEntries,
     Setting::MaxAge,
@@ -301,6 +309,7 @@ pub struct Model {
     pub images: Images,
     pub open: Vec<String>,
     pub copy: Option<String>,
+    pub edit_theme: bool,
     undo: Vec<Change>,
     redo: Vec<Change>,
 }
@@ -375,6 +384,7 @@ impl Model {
             images,
             open: Vec::new(),
             copy: None,
+            edit_theme: false,
             undo: Vec::new(),
             redo: Vec::new(),
         }

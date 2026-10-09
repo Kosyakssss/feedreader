@@ -899,6 +899,14 @@ fn setting_row(m: &Model, s: Setting) -> (&'static str, String) {
         ),
         Setting::ImportLegacy => ("Import from the old app", "choose a file".into()),
         Setting::Mute => ("Mute a word or phrase", "add".into()),
+        Setting::Appearance => ("Appearance", match st.appearance.as_str() {
+            "light" => "light".into(),
+            "dark" => "dark".into(),
+            _ => "follows the system".into(),
+        }),
+        Setting::ReadingSize => ("Article text size", format!("{}%", st.reading_size)),
+        Setting::ReadingWidth => ("Article column width", format!("{} characters", st.reading_width)),
+        Setting::ThemeFile => ("Theme colors", "edit theme.toml".into()),
     }
 }
 

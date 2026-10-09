@@ -528,6 +528,9 @@ impl Store {
                 "lines" => s.lines = v,
                 "merge_duplicates" => s.merge_duplicates = v == "1",
                 "public_port" => s.public_port = v.parse().unwrap_or(s.public_port),
+                "appearance" => s.appearance = v,
+                "reading_size" => s.reading_size = v.parse().unwrap_or(s.reading_size),
+                "reading_width" => s.reading_width = v.parse().unwrap_or(s.reading_width),
                 _ => {}
             }
         }
@@ -544,6 +547,9 @@ impl Store {
             ("lines", s.lines.clone()),
             ("merge_duplicates", if s.merge_duplicates { "1".into() } else { "0".into() }),
             ("public_port", s.public_port.to_string()),
+            ("appearance", s.appearance.clone()),
+            ("reading_size", s.reading_size.to_string()),
+            ("reading_width", s.reading_width.to_string()),
         ];
         for (k, v) in pairs {
             let _ = self.db.execute(

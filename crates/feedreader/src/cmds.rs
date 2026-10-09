@@ -245,7 +245,7 @@ pub fn registry() -> Registry<Cmd, Model> {
             c(Cmd::Export, vec![ch('e')], |_| "export OPML".into(), feeds_page),
             c(Cmd::Open, vec![ch('o'), k(Key::Enter)], |_| "show entries".into(), |m| feeds_page(m) && !m.feeds.is_empty()),
             c(Cmd::Edit, vec![k(Key::Enter), ch('o')], |m| match crate::model::settings_rows(m).get(m.settings_page.cursor) {
-                Some(crate::model::Row::Setting(Setting::ReadingMode | Setting::Lines | Setting::MergeDuplicates)) => "change".into(),
+                Some(crate::model::Row::Setting(Setting::ReadingMode | Setting::Lines | Setting::MergeDuplicates | Setting::Appearance)) => "change".into(),
                 _ => "edit".into(),
             }, |m| idle(m) && m.page == Page::Settings && !rule_row(m)),
             c(Cmd::Refresh, vec![ch('r')], |m| if m.refresh.running { "refreshing".into() } else { "refresh".into() }, |m| idle(m) && m.reader.is_none()),
@@ -817,6 +817,23 @@ fn edit_setting(m: &mut Model) {
             m.act(label.into(), Op::Settings(n));
         }
         Setting::Mute => exec(m, Cmd::Mute),
+        Setting::Appearance => {
+            let mut n = s.clone();
+            n.appearance = match s.appearance.as_str() {
+                "system" => "light",
+                "light" => "dark",
+                _ => "system",
+            }
+            .into();
+            let label = match n.appearance.as_str() {
+                "system" => "Appearance follows the system".to_string(),
+                a => format!("Appearance is always {a}"),
+            };
+            m.act(label, Op::Settings(n));
+        }
+        Setting::ReadingSize => prompt(m, PromptKind::Setting(setting), "Article text size in percent (70 to 200)", &s.reading_size.to_string()),
+        Setting::ReadingWidth => prompt(m, PromptKind::Setting(setting), "Article column width in characters (40 to 140)", &s.reading_width.to_string()),
+        Setting::ThemeFile => m.edit_theme = true,
         Setting::PublicLink => match m.public_url.clone() {
             Some(u) => {
                 m.message = Some(format!("Copied {u}"));
@@ -992,6 +1009,20 @@ fn submit(m: &mut Model) {
                     Ok(n) => {
                         s.refresh_minutes = n;
                         format!("Refreshing every {n} minutes")
+                    }
+                    Err(e) => return fail(m, &e),
+                },
+                Setting::ReadingSize => match number(&value, 70, 200) {
+                    Ok(n) => {
+                        s.reading_size = n;
+                        format!("Article text at {n}%")
+                    }
+                    Err(e) => return fail(m, &e),
+                },
+                Setting::ReadingWidth => match number(&value, 40, 140) {
+                    Ok(n) => {
+                        s.reading_width = n;
+                        format!("Articles at most {n} characters wide")
                     }
                     Err(e) => return fail(m, &e),
                 },

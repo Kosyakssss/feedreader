@@ -59,7 +59,7 @@ impl LineStyle {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
     pub bg: [f32; 4],
     pub ink: [f32; 4],
@@ -88,6 +88,21 @@ pub const LIGHT: Palette = Palette {
     link: [0.13, 0.32, 0.66, 1.0],
     danger: [0.72, 0.16, 0.13, 1.0],
     warn: [0.62, 0.42, 0.05, 1.0],
+};
+
+pub const DARK: Palette = Palette {
+    bg: [0.086, 0.086, 0.094, 1.0],
+    ink: [0.902, 0.902, 0.89, 1.0],
+    muted: [0.604, 0.604, 0.62, 1.0],
+    faint: [0.424, 0.424, 0.44, 1.0],
+    rule: [0.29, 0.29, 0.306, 1.0],
+    cursor: [0.165, 0.165, 0.18, 1.0],
+    hover: [0.133, 0.133, 0.145, 1.0],
+    selection: [0.176, 0.267, 0.4, 1.0],
+    field: [0.133, 0.133, 0.145, 1.0],
+    link: [0.541, 0.706, 0.973, 1.0],
+    danger: [0.949, 0.545, 0.51, 1.0],
+    warn: [0.878, 0.706, 0.353, 1.0],
 };
 
 #[derive(Clone, Copy, Debug)]
