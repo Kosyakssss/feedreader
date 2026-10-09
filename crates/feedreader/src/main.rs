@@ -25,6 +25,10 @@ use view::{FrameStats, Hit, Scroll};
 
 const BASE_SIZE: f32 = 13.0;
 
+#[cfg(feature = "profile")]
+#[global_allocator]
+static ALLOC: tracy_client::ProfiledAllocator<std::alloc::System> = tracy_client::ProfiledAllocator::new(std::alloc::System, 0);
+
 #[derive(Debug)]
 enum Wake {
     Engine,
@@ -110,6 +114,7 @@ fn flush(model: &mut Model, engine: &engine::Handle, clipboard: &mut Option<arbo
 }
 
 impl State {
+    #[profiling::function]
     fn render(&mut self) {
         let started = Instant::now();
         self.text.begin_frame();
@@ -130,6 +135,7 @@ impl State {
         self.sync_ime(out.ime);
         let ms = |a: Instant, b: Instant| (b - a).as_secs_f32() * 1000.0;
         self.frames.push([ms(started, painted), ms(painted, presented), ms(presented, Instant::now())]);
+        profiling::finish_frame!();
         if self.frames.len() > 240 {
             self.frames.remove(0);
         }
@@ -223,6 +229,7 @@ impl State {
         }
     }
 
+    #[profiling::function]
     fn key(&mut self, event: &winit::event::KeyEvent) -> bool {
         let cmd = self.modifiers.super_key();
         let shift = self.modifiers.shift_key();
@@ -324,6 +331,7 @@ impl State {
         false
     }
 
+    #[profiling::function]
     fn press(&mut self) {
         if let Some(w) = &self.webview
             && self.web_visible
@@ -474,6 +482,7 @@ impl State {
         }
     }
 
+    #[profiling::function]
     fn wheel(&mut self, dx: f32, dy: f32) -> bool {
         let area = self.hits.iter().rev().find_map(|(r, h)| match h {
             Hit::Area(a) | Hit::Track(_, a) if r.contains(self.mouse.0, self.mouse.1) => Some(*a),
@@ -911,6 +920,9 @@ fn cli(args: &[String]) -> bool {
 }
 
 fn main() {
+    #[cfg(feature = "profile")]
+    tracy_client::Client::start();
+    profiling::register_thread!("main");
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--snapshot") {
         snapshot(&args);

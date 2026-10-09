@@ -54,6 +54,7 @@ pub struct Header {
     pub url: String,
 }
 
+#[profiling::function]
 pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
     let mt = s.m;
     let (cw, ch) = (mt.cell_w, mt.cell_h);

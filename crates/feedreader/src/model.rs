@@ -411,6 +411,7 @@ impl Model {
         v
     }
 
+    #[profiling::function]
     fn rehide(&mut self) {
         let mut folder_of: HashMap<&str, Vec<&str>> = HashMap::new();
         for f in &self.folders {
@@ -448,6 +449,7 @@ impl Model {
         self.hidden = hidden;
     }
 
+    #[profiling::function]
     fn reindex_entries(&mut self) {
         self.entries
             .sort_by(|a, b| b.published.cmp(&a.published).then_with(|| a.id.cmp(&b.id)));
@@ -458,6 +460,7 @@ impl Model {
         self.feed_index = self.feeds.iter().enumerate().map(|(i, f)| (f.id.clone(), i)).collect();
     }
 
+    #[profiling::function]
     fn recount(&mut self) {
         let mut by_feed: HashMap<FeedId, usize> = HashMap::new();
         let (mut home, mut bookmarks) = (0, 0);
@@ -528,6 +531,7 @@ impl Model {
         in_view && state_ok && text_ok
     }
 
+    #[profiling::function]
     pub fn rebuild(&mut self) {
         let row_h = self.list.row_h;
         let first = (self.list.scroll / row_h).floor() as usize;
@@ -586,6 +590,7 @@ impl Model {
         self.reset_list();
     }
 
+    #[profiling::function]
     pub fn event(&mut self, event: Event) {
         match event {
             Event::Snapshot {

@@ -77,7 +77,7 @@ create table if not exists recommendations (
   at integer not null,
   removed_at integer
 ) strict;
-create virtual table if not exists entries_fts using fts5(id unindexed, title, body);
+create virtual table if not exists entries_fts using fts5(title, body);
 ";
 
 pub struct Store {
@@ -185,13 +185,14 @@ impl Store {
             }
         }
         let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version < 2 {
+        if version < 3 {
             db.execute_batch(
-                "delete from entries_fts;
-                 insert into entries_fts (id, title, body) select id, title, coalesce(content, summary, '') from entries;",
+                "drop table if exists entries_fts;
+                 create virtual table entries_fts using fts5(title, body);
+                 insert into entries_fts (rowid, title, body) select rowid, title, coalesce(content, summary, '') from entries;",
             )?;
         }
-        db.pragma_update(None, "user_version", 2)?;
+        db.pragma_update(None, "user_version", 3)?;
         db.execute(
             "insert or ignore into feeds (id, url, title, position, hidden) values (?1, 'feedreader:saved', 'Saved links', 1000000, 1)",
             [SAVED],
@@ -221,6 +222,7 @@ impl Store {
             .unwrap_or((None, None))
     }
 
+    #[profiling::function]
     pub fn entries(&self) -> Vec<Entry> {
         let mut st = self
             .db
@@ -280,6 +282,7 @@ impl Store {
         }
     }
 
+    #[profiling::function]
     pub fn insert_entries(&mut self, feed: &str, items: Vec<NewEntry>, now: i64) -> (Vec<Entry>, Vec<(EntryId, String, i64)>) {
         let tx = self.db.transaction().unwrap();
         let mut added = Vec::new();
@@ -326,7 +329,7 @@ impl Store {
                     .unwrap_or(0);
                 if n == 1 {
                     let _ = tx.execute(
-                        "insert into entries_fts (id, title, body) values (?1, ?2, ?3)",
+                        "insert into entries_fts (rowid, title, body) select rowid, ?2, ?3 from entries where id = ?1",
                         params![id, item.title, item.content.as_deref().or(item.summary.as_deref()).unwrap_or("")],
                     );
                     added.push(Entry {
@@ -343,7 +346,10 @@ impl Store {
                     let before: Option<(String, i64)> = current.query_row([&id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
                     let _ = fill.execute(params![id, item.content, item.summary, item.author, item.title, published]);
                     if let Some(body) = item.content.as_deref().or(item.summary.as_deref()) {
-                        let _ = tx.execute("update entries_fts set body = ?2 where id = ?1 and body = ''", params![id, body]);
+                        let _ = tx.execute(
+                            "update entries_fts set body = ?2 where rowid = (select rowid from entries where id = ?1) and body = ''",
+                            params![id, body],
+                        );
                     }
                     let after: Option<(String, i64)> = current.query_row([&id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
                     if let (Some(b), Some(a)) = (before, after)
@@ -413,9 +419,15 @@ impl Store {
     }
 
     pub fn purge_removed(&self, before: i64) {
+        let _ = self.db.execute(
+            "delete from entries_fts where rowid in (select e.rowid from entries e join feeds f on f.id = e.feed_id
+             where f.removed_at is not null and f.removed_at < ?1)",
+            [before],
+        );
         let _ = self.db.execute("delete from feeds where removed_at is not null and removed_at < ?1", [before]);
     }
 
+    #[profiling::function]
     pub fn prune(&mut self, settings: &Settings, now: i64) -> Vec<EntryId> {
         let cutoff = settings.max_age_days.map(|d| now - d as i64 * 86_400_000).unwrap_or(i64::MIN);
         let mut st = self
@@ -447,10 +459,10 @@ impl Store {
         }
         let tx = self.db.transaction().unwrap();
         for id in &doomed {
+            let _ = tx.execute("delete from entries_fts where rowid = (select rowid from entries where id = ?1)", [id]);
             let _ = tx.execute("delete from entries where id = ?1", [id]);
             let _ = tx.execute("delete from states where entry_id = ?1", [id]);
             let _ = tx.execute("delete from bodies where entry_id = ?1", [id]);
-            let _ = tx.execute("delete from entries_fts where id = ?1", [id]);
         }
         tx.commit().unwrap();
         doomed
@@ -662,12 +674,13 @@ impl Store {
         .collect()
     }
 
+    #[profiling::function]
     pub fn search(&self, q: &str) -> Vec<EntryId> {
         let fq = fts_query(q);
         if fq.is_empty() {
             return Vec::new();
         }
-        let Ok(mut st) = self.db.prepare_cached("select id from entries_fts where entries_fts match ?1 limit 2000") else {
+        let Ok(mut st) = self.db.prepare_cached("select e.id from entries_fts f join entries e on e.rowid = f.rowid where entries_fts match ?1 limit 2000") else {
             return Vec::new();
         };
         st.query_map([fq], |r| r.get(0))
@@ -683,8 +696,11 @@ impl Store {
              on conflict(id) do update set content = excluded.content, title = excluded.title",
             params![id, SAVED, url, title, now, html],
         );
-        let _ = self.db.execute("delete from entries_fts where id = ?1", [&id]);
-        let _ = self.db.execute("insert into entries_fts (id, title, body) values (?1, ?2, ?3)", params![id, title, html]);
+        let _ = self.db.execute("delete from entries_fts where rowid = (select rowid from entries where id = ?1)", [&id]);
+        let _ = self.db.execute(
+            "insert into entries_fts (rowid, title, body) select rowid, ?2, ?3 from entries where id = ?1",
+            params![id, title, html],
+        );
         self.set_clean_body(&id, html, now);
         self.set_bookmarked(std::slice::from_ref(&id), true, now);
         self.set_read(std::slice::from_ref(&id), true, now);
@@ -761,7 +777,10 @@ impl Store {
                     .unwrap_or(0);
                 count += n;
                 if n == 1 {
-                    let _ = tx.execute("insert into entries_fts (id, title, body) values (?1, ?2, '')", params![id, title]);
+                    let _ = tx.execute(
+                        "insert into entries_fts (rowid, title, body) select rowid, ?2, '' from entries where id = ?1",
+                        params![id, title],
+                    );
                 }
                 if read.is_some() || starred.is_some() {
                     let _ = tx.execute(

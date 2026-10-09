@@ -177,6 +177,7 @@ impl Text {
         let fonts = &mut self.fonts;
         let cx = &mut self.layouts_cx;
         let entry = self.layouts.entry(key).or_insert_with(|| {
+            profiling::scope!("shape");
             let text: String = spans.iter().map(|(t, _)| *t).collect();
             let mut b = cx.ranged_builder(fonts, &text, 1.0, true);
             b.push_default(StyleProperty::FontFamily(FontFamily::named(FAMILY)));
@@ -247,6 +248,7 @@ impl Text {
             .collect()
     }
 
+    #[profiling::function]
     pub fn draw(
         &mut self,
         out: &mut Vec<Quad>,
@@ -279,6 +281,7 @@ impl Text {
         )
     }
 
+    #[profiling::function]
     pub fn draw_spans(
         &mut self,
         out: &mut Vec<Quad>,
@@ -408,6 +411,7 @@ impl Text {
         }
     }
 
+    #[profiling::function]
     fn rasterize(&mut self, key: GlyphKey, font: &parley::FontData, coords: &[i16]) -> Option<Slot> {
         let font_ref = swash::FontRef::from_index(font.data.data(), font.index as usize)?;
         let mut scaler = self

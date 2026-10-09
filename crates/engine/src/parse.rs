@@ -76,6 +76,7 @@ pub fn parse_date(raw: &str) -> Option<DateTime<Utc>> {
     None
 }
 
+#[profiling::function]
 pub fn parse_feed(bytes: &[u8], base: &str) -> Result<ParsedFeed, String> {
     let parser = feed_rs::parser::Builder::new()
         .base_uri(Some(base))
@@ -395,6 +396,7 @@ static IMG: std::sync::LazyLock<scraper::Selector> =
 static SOURCE: std::sync::LazyLock<scraper::Selector> =
     std::sync::LazyLock::new(|| scraper::Selector::parse("source").unwrap());
 
+#[profiling::function]
 pub fn blocks(html: &str, base: Option<&str>) -> Vec<Block> {
     let base = base.and_then(|b| Url::parse(b).ok());
     let doc = Html::parse_fragment(html);

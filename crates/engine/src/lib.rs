@@ -50,6 +50,7 @@ pub fn start(dir: PathBuf, emit: impl Fn(Event) + Send + 'static) -> Handle {
     std::thread::Builder::new()
         .name("engine".into())
         .spawn(move || {
+            profiling::register_thread!("engine");
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
                 .enable_all()
@@ -129,6 +130,7 @@ impl Engine {
         })
     }
 
+    #[profiling::function]
     fn snapshot(&self) {
         (self.emit)(Event::Snapshot {
             feeds: self.store.feeds(),
@@ -142,6 +144,7 @@ impl Engine {
         });
     }
 
+    #[profiling::function]
     fn publish(&mut self) {
         let token = self.store.token();
         let base = format!("http://127.0.0.1:{}/{token}/", self.settings.public_port);
@@ -275,6 +278,7 @@ impl Engine {
         }
     }
 
+    #[profiling::function]
     fn internal(&mut self, i: Internal) {
         match i {
             Internal::Fetched(id, result) => {
@@ -361,6 +365,7 @@ impl Engine {
         }
     }
 
+    #[profiling::function]
     fn request(&mut self, r: Request) {
         match r {
             Request::SetRead(ids, v) => self.store.set_read(&ids, v, now()),

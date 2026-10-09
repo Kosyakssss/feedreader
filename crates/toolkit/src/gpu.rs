@@ -370,6 +370,7 @@ impl Gpu {
         encoder
     }
 
+    #[profiling::function]
     pub fn render(&mut self, quads: &[Quad], clear: [f32; 4]) {
         self.prepare(quads, self.config.width, self.config.height);
         let Some(surface) = &self.surface else { return };

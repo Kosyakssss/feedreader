@@ -182,6 +182,7 @@ fn draw_parts(s: &mut Scene<Hit>, parts: &[Part], rows: &[Vec<(usize, f32)>], y0
     y
 }
 
+#[profiling::function]
 pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stats: FrameStats) -> PaintOut {
     let mt = s.m;
     let (cw, ch) = (mt.cell_w, mt.cell_h);
@@ -381,6 +382,7 @@ fn count(n: usize) -> String {
     if n > 0 { n.to_string() } else { String::new() }
 }
 
+#[profiling::function]
 fn paint_pane(m: &mut Model, s: &mut Scene<Hit>, r: Rect) {
     let (cw, ch) = (s.m.cell_w, s.m.cell_h);
     let pal = s.palette;
@@ -470,6 +472,7 @@ fn paint_strip(m: &mut Model, s: &mut Scene<Hit>, r: Rect) {
     s.pop_clip();
 }
 
+#[profiling::function]
 fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOut) {
     let mt = s.m;
     let (cw, ch) = (mt.cell_w, mt.cell_h);
@@ -588,6 +591,7 @@ fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOut)
     s.pop_clip();
 }
 
+#[profiling::function]
 fn paint_reader(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOut) {
     let mt = s.m;
     let (cw, ch) = (mt.cell_w, mt.cell_h);
@@ -641,6 +645,7 @@ fn paint_reader(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOu
     }
 }
 
+#[profiling::function]
 fn paint_feeds(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
     let mt = s.m;
     let (cw, ch) = (mt.cell_w, mt.cell_h);
@@ -819,6 +824,7 @@ fn rule_text(m: &Model, r: &engine::Rule) -> (String, String) {
     (format!("\u{201C}{}\u{201D}", r.word), format!("muted {place}"))
 }
 
+#[profiling::function]
 fn paint_settings(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
     let mt = s.m;
     let (cw, ch) = (mt.cell_w, mt.cell_h);
@@ -873,6 +879,7 @@ fn paint_settings(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
     s.pop_clip();
 }
 
+#[profiling::function]
 fn paint_help(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, main: Rect) {
     let mt = s.m;
     let (cw, ch) = (mt.cell_w, mt.cell_h);

@@ -124,6 +124,7 @@ pub async fn save(client: &reqwest::Client, url: &str) -> Result<(String, String
     .map_err(|e| e.to_string())?
 }
 
+#[profiling::function]
 pub fn read_opml(text: &str) -> Vec<(String, String)> {
     use quick_xml::events::Event;
     let mut reader = quick_xml::Reader::from_str(text);
