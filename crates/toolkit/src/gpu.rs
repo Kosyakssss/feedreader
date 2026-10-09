@@ -14,7 +14,8 @@ pub struct Quad {
     pub color: [f32; 4],
     pub clip: [f32; 4],
     pub kind: u32,
-    pub pad: [u32; 3],
+    pub image: u32,
+    pub pad: [u32; 2],
 }
 
 #[repr(C)]
@@ -29,6 +30,8 @@ struct Globals { viewport: vec2<f32>, pad: vec2<f32> };
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var atlas: texture_2d<f32>;
 @group(0) @binding(2) var atlas_sampler: sampler;
+@group(1) @binding(0) var picture: texture_2d<f32>;
+@group(1) @binding(1) var picture_sampler: sampler;
 
 struct In {
   @builtin(vertex_index) vi: u32,
@@ -65,6 +68,11 @@ struct Out {
   if (p.x < input.clip.x || p.y < input.clip.y || p.x >= input.clip.z || p.y >= input.clip.w) {
     discard;
   }
+  if (input.kind == 2u) {
+    let c = textureSampleLevel(picture, picture_sampler, input.uv, 0.0);
+    let pa = c.a * input.color.a;
+    return vec4<f32>(c.rgb * pa, pa);
+  }
   var a = input.color.a;
   if (input.kind == 1u) {
     a = a * textureSampleLevel(atlas, atlas_sampler, input.uv, 0.0).r;
@@ -85,6 +93,11 @@ pub struct Gpu {
     atlas: wgpu::Texture,
     instances: wgpu::Buffer,
     capacity: usize,
+    picture_layout: wgpu::BindGroupLayout,
+    picture_sampler: wgpu::Sampler,
+    blank: wgpu::BindGroup,
+    pictures: std::collections::HashMap<u32, (wgpu::Texture, wgpu::BindGroup)>,
+    runs: Vec<(u32, std::ops::Range<u32>)>,
 }
 
 impl Gpu {
@@ -216,9 +229,36 @@ impl Gpu {
                 },
             ],
         });
+        let picture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let picture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let blank = Self::picture_group(&device, &queue, &picture_layout, &picture_sampler, 1, 1, &[0, 0, 0, 0]).1;
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[Some(&layout)],
+            bind_group_layouts: &[Some(&layout), Some(&picture_layout)],
             immediate_size: 0,
         });
         let attributes = wgpu::vertex_attr_array![
@@ -277,6 +317,70 @@ impl Gpu {
             atlas,
             instances,
             capacity,
+            picture_layout,
+            picture_sampler,
+            blank,
+            pictures: std::collections::HashMap::new(),
+            runs: Vec::new(),
+        }
+    }
+
+    fn picture_group(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+        sampler: &wgpu::Sampler,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) -> (wgpu::Texture, wgpu::BindGroup) {
+        let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            size,
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
+            ],
+        });
+        (texture, group)
+    }
+
+    #[profiling::function]
+    pub fn add_image(&mut self, id: u32, width: u32, height: u32, rgba: &[u8]) {
+        let entry = Self::picture_group(&self.device, &self.queue, &self.picture_layout, &self.picture_sampler, width, height, rgba);
+        self.pictures.insert(id, entry);
+    }
+
+    pub fn remove_image(&mut self, id: u32) {
+        if let Some((t, _)) = self.pictures.remove(&id) {
+            t.destroy();
         }
     }
 
@@ -334,6 +438,21 @@ impl Gpu {
         );
         self.queue
             .write_buffer(&self.instances, 0, bytemuck::cast_slice(quads));
+        self.runs.clear();
+        let mut bound = 0u32;
+        let mut start = 0u32;
+        for (i, q) in quads.iter().enumerate() {
+            if q.kind == 2 && q.image != bound {
+                if i as u32 > start {
+                    self.runs.push((bound, start..i as u32));
+                }
+                bound = q.image;
+                start = i as u32;
+            }
+        }
+        if (quads.len() as u32) > start {
+            self.runs.push((bound, start..quads.len() as u32));
+        }
     }
 
     fn encode(&self, view: &wgpu::TextureView, count: usize, clear: [f32; 4]) -> wgpu::CommandEncoder {
@@ -365,7 +484,14 @@ impl Gpu {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_vertex_buffer(0, self.instances.slice(..));
-            pass.draw(0..4, 0..count as u32);
+            for (image, range) in &self.runs {
+                let group = self.pictures.get(image).map(|(_, g)| g).unwrap_or(&self.blank);
+                pass.set_bind_group(1, group, &[]);
+                let end = range.end.min(count as u32);
+                if range.start < end {
+                    pass.draw(0..4, range.start..end);
+                }
+            }
         }
         encoder
     }

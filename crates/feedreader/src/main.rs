@@ -36,6 +36,7 @@ enum Wake {
     WebClose,
     ExtractorReady,
     Extracted(String),
+    Images,
 }
 
 enum Drag {
@@ -122,6 +123,7 @@ impl State {
     fn render(&mut self) {
         let started = Instant::now();
         self.text.begin_frame();
+        self.model.images.begin_frame();
         let stats = FrameStats::from(&self.frames);
         let mut scene = Scene::new(&mut self.text, self.metrics, self.model.lines, LIGHT);
         scene.pointer = self.pointer_inside.then_some(self.mouse);
@@ -131,6 +133,15 @@ impl State {
         drop(scene);
         for u in self.text.uploads.drain(..) {
             self.gpu.upload(u.x, u.y, u.w, u.h, &u.data);
+        }
+        for (id, d) in self.model.images.take_uploads() {
+            self.gpu.add_image(id, d.width, d.height, &d.rgba);
+        }
+        for id in self.model.images.take_evicted() {
+            self.gpu.remove_image(id);
+        }
+        for r in self.model.out.drain(..) {
+            self.engine.send(r);
         }
         let painted = Instant::now();
         self.gpu.render(&quads, LIGHT.bg);
@@ -619,7 +630,12 @@ impl ApplicationHandler<Wake> for App {
             window,
             gpu,
             text,
-            model: Model::new(),
+            model: Model::new(toolkit::images::Images::new({
+                let proxy = self.proxy.clone();
+                move || {
+                    let _ = proxy.send_event(Wake::Images);
+                }
+            })),
             registry: cmds::registry(),
             engine,
             events: rx,
@@ -665,6 +681,7 @@ impl ApplicationHandler<Wake> for App {
                 }
                 return;
             }
+            Wake::Images => {}
         }
         s.after();
     }
@@ -789,7 +806,7 @@ fn headless() -> (engine::Handle, Receiver<Event>, Model) {
     let handle = engine::start(engine::data_dir(), move |e| {
         let _ = tx.send(e);
     });
-    let mut model = Model::new();
+    let mut model = Model::new(toolkit::images::Images::new(|| {}));
     wait_for(&rx, &mut model, Duration::from_secs(20), |_, e| matches!(e, Event::Snapshot { .. }));
     (handle, rx, model)
 }
@@ -811,6 +828,7 @@ fn snapshot(args: &[String]) {
     let paint = |model: &mut Model, text: &mut Text, quads: &mut Vec<toolkit::gpu::Quad>| {
         let started = Instant::now();
         text.begin_frame();
+        model.images.begin_frame();
         let mut scene = Scene::new(text, mt, model.lines, LIGHT);
         scene.pointer = pointer;
         view::paint(model, &registry, &mut scene, FrameStats::default());
@@ -823,6 +841,20 @@ fn snapshot(args: &[String]) {
         match k {
             "wait" => {
                 wait_for(&rx, &mut model, Duration::from_secs(15), |_, e| matches!(e, Event::Body(_) | Event::Discovered(..) | Event::FeedAdded(_)));
+            }
+            "images" => {
+                let deadline = Instant::now() + Duration::from_secs(20);
+                loop {
+                    while let Ok(e) = rx.try_recv() {
+                        model.event(e);
+                    }
+                    paint(&mut model, &mut text, &mut quads);
+                    flush(&mut model, &handle, &mut clipboard);
+                    if model.images.pending() == 0 || Instant::now() > deadline {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
             }
             "refreshed" => {
                 wait_for(&rx, &mut model, Duration::from_secs(60), |_, e| matches!(e, Event::Refresh(s) if !s.running));
@@ -888,6 +920,9 @@ fn snapshot(args: &[String]) {
     for u in text.uploads.drain(..) {
         gpu.upload(u.x, u.y, u.w, u.h, &u.data);
     }
+    for (id, d) in model.images.take_uploads() {
+        gpu.add_image(id, d.width, d.height, &d.rgba);
+    }
     let pixels = gpu.snapshot(&quads, LIGHT.bg);
     let file = std::fs::File::create(&out).unwrap();
     let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
@@ -950,7 +985,7 @@ impl ApplicationHandler<Wake> for Probe {
             }
             Wake::ExtractorReady => out.extend(ex.ready()),
             Wake::Extracted(body) => out.extend(extract::result(&body)),
-            Wake::WebClose => {}
+            Wake::WebClose | Wake::Images => {}
         }
         for r in out {
             handle.send(r);

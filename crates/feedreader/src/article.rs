@@ -1,6 +1,8 @@
 use std::ops::Range;
 
-use engine::{Block, Inline, Mode};
+use engine::{Block, Inline, Mode, Request};
+use toolkit::images::Images;
+use toolkit::images::Slot;
 use toolkit::text::{Face, SpanStyle};
 use toolkit::ui::{Rect, Scene};
 
@@ -45,6 +47,7 @@ enum Laid {
     },
     Code(String),
     Line(String, String),
+    Picture(String, String, Option<(u32, u32)>),
     Rule,
 }
 
@@ -60,6 +63,8 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
     let (cw, ch) = (mt.cell_w, mt.cell_h);
     let pal = s.palette;
     let mono = mt.mono();
+    let images = &mut m.images;
+    let out = &mut m.out;
     let Some(r) = m.reader.as_mut() else { return };
     let colors = [pal.ink, pal.link, pal.ink, pal.muted];
     let x0 = area.x + cw;
@@ -124,14 +129,7 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
                 }
             }
             Block::Code(c) => Laid::Code(c.clone()),
-            Block::Image(src, alt) => {
-                let name = if alt.trim().is_empty() {
-                    src.rsplit('/').next().unwrap_or(src).to_string()
-                } else {
-                    alt.clone()
-                };
-                Laid::Line(format!("[image] {name}"), src.clone())
-            }
+            Block::Image(src, alt, size) => Laid::Picture(src.clone(), alt.clone(), *size),
             Block::Media(src, kind) => {
                 let k = if kind.contains("audio") {
                     "audio"
@@ -165,6 +163,7 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
                 s.text.height(&spans, mt.size, ch, width - cw * 2.0) + ch
             }
             Laid::Line(..) => ch,
+            Laid::Picture(src, _, hint) => picture_size(picture(images, out, src), *hint, width, mt.scale, ch).1 + ch * 0.5,
             Laid::Rule => ch,
         };
         heights.push(h);
@@ -279,6 +278,27 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
                     s.hit(r, Hit::Media(src.clone()));
                 }
             }
+            Laid::Picture(src, alt, hint) => {
+                if visible {
+                    let slot = images.get(src);
+                    let (w, ph) = picture_size(slot, *hint, width, mt.scale, ch);
+                    let r = Rect::new(x0, y, w, ph);
+                    match slot {
+                        Some(Slot::Ready { id, .. }) => s.image(r, id),
+                        Some(Slot::Failed) => {
+                            let name = if alt.trim().is_empty() { src.rsplit('/').next().unwrap_or(src) } else { alt.as_str() };
+                            let text = format!("[image] {name}");
+                            let st = SpanStyle { underline: true, color: 3, ..SpanStyle::plain(Face::Mono) };
+                            s.spans(&[(text.as_str(), st)], mt.size, ch, x0, y, None, Some(width), &colors);
+                        }
+                        _ => {
+                            s.fill(r, pal.field);
+                            s.text("image", mono, x0 + cw, y, None, pal.faint);
+                        }
+                    }
+                    s.hit(r, Hit::Media(src.clone()));
+                }
+            }
             Laid::Rule => {
                 if visible {
                     s.hline(y, x0, x0 + width);
@@ -292,4 +312,28 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
     }
     s.pop_clip();
     r.geom = geom;
+}
+
+fn picture(images: &mut Images, out: &mut Vec<Request>, src: &str) -> Option<Slot> {
+    let slot = images.get(src);
+    if slot.is_none() && images.want(src) {
+        out.push(Request::Media(vec![src.to_string()]));
+    }
+    slot
+}
+
+fn picture_size(slot: Option<Slot>, hint: Option<(u32, u32)>, width: f32, scale: f32, ch: f32) -> (f32, f32) {
+    let natural = match slot {
+        Some(Slot::Ready { width, height, .. }) => Some((width, height)),
+        Some(Slot::Failed) => None,
+        _ => hint,
+    };
+    match natural {
+        Some((w, h)) if w > 0 && h > 0 => {
+            let dw = (w as f32 * scale).min(width).round();
+            (dw, (dw * h as f32 / w as f32).round())
+        }
+        _ if slot == Some(Slot::Failed) => (width, ch),
+        _ => (width, ch * 2.0),
+    }
 }

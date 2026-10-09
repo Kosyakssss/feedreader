@@ -161,7 +161,7 @@ pub enum Block {
     Quote(Vec<Inline>),
     Item(u8, Option<u32>, Vec<Inline>),
     Code(String),
-    Image(String, String),
+    Image(String, String, Option<(u32, u32)>),
     Media(String, String),
     Rule,
 }
@@ -198,6 +198,7 @@ impl Extractor {
 #[derive(Debug)]
 pub enum Request {
     UseWebExtractor,
+    Media(Vec<String>),
     Extracted(u64, Result<Extracted, String>),
     Probe(String),
     SetRead(Vec<EntryId>, bool),
@@ -256,5 +257,6 @@ pub enum Event {
     Settings(Settings),
     Message(String),
     Extract { job: u64, url: String, html: String },
+    Media(String, Result<std::path::PathBuf, String>),
     Probed(String, Result<(Extracted, Extractor), String>),
 }

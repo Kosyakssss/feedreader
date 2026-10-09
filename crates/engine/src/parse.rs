@@ -18,6 +18,26 @@ pub struct NewEntry {
     pub published: Option<i64>,
     pub summary: Option<String>,
     pub content: Option<String>,
+    pub images: Vec<String>,
+}
+
+pub fn image_urls(html: &str, base: Option<&Url>, limit: usize) -> Vec<String> {
+    if !html.contains("<img") {
+        return Vec::new();
+    }
+    let doc = Html::parse_fragment(html);
+    let mut out: Vec<String> = Vec::new();
+    for el in doc.select(&IMG) {
+        let Some(src) = el.value().attr("src").or(el.value().attr("data-src")) else { continue };
+        let u = resolve(base, src);
+        if u.starts_with("http") && !out.contains(&u) {
+            out.push(u);
+        }
+        if out.len() >= limit {
+            break;
+        }
+    }
+    out
 }
 
 pub fn parse_date(raw: &str) -> Option<DateTime<Utc>> {
@@ -135,13 +155,28 @@ pub fn parse_feed(bytes: &[u8], base: &str) -> Result<ParsedFeed, String> {
             let author = e.authors.first().and_then(|a| a.name.clone()).filter(|a| !a.is_empty());
             let published = e.published.or(e.updated).map(|d| d.timestamp_millis()).filter(|&t| t > 631_152_000_000);
             let mut media = String::new();
+            let has_image = content.as_deref().or(summary.as_deref()).is_some_and(|c| c.contains("<img"));
+            let attr = |s: &str| html_escape::encode_double_quoted_attribute(s).to_string();
+            let mut thumb = None;
             for m in &e.media {
                 for c in &m.content {
                     if let Some(u) = &c.url {
                         let kind = c.content_type.as_ref().map(|t| t.to_string()).unwrap_or_default();
-                        media.push_str(&format!("<p><a href=\"{}\" data-media=\"{}\">{}</a></p>", u, kind, u));
+                        if kind.starts_with("image/") {
+                            if !has_image {
+                                media.push_str(&format!("<p><img src=\"{}\"></p>", attr(u.as_str())));
+                            }
+                        } else {
+                            media.push_str(&format!("<p><a href=\"{0}\" data-media=\"{1}\">{0}</a></p>", attr(u.as_str()), attr(&kind)));
+                        }
                     }
                 }
+                if thumb.is_none() {
+                    thumb = m.thumbnails.first().map(|t| t.image.uri.clone());
+                }
+            }
+            if let Some(t) = thumb.filter(|_| !has_image && !media.contains("<img")) {
+                media.insert_str(0, &format!("<p><img src=\"{}\"></p>", attr(&t)));
             }
             let content = match (content, media.is_empty()) {
                 (Some(c), true) => Some(c),
@@ -149,6 +184,7 @@ pub fn parse_feed(bytes: &[u8], base: &str) -> Result<ParsedFeed, String> {
                 (None, false) => Some(media),
                 (None, true) => None,
             };
+            let images = image_urls(content.as_deref().or(summary.as_deref()).unwrap_or(""), base_url.as_ref(), 12);
             NewEntry {
                 source_id: e.id,
                 url: link,
@@ -157,6 +193,7 @@ pub fn parse_feed(bytes: &[u8], base: &str) -> Result<ParsedFeed, String> {
                 published,
                 summary,
                 content,
+                images,
             }
         })
         .collect();
@@ -321,7 +358,9 @@ impl Walker<'_> {
                     .unwrap_or_default();
                 if src.starts_with("http") {
                     self.flush();
-                    self.blocks.push(Block::Image(src, el.value().attr("alt").unwrap_or("").to_string()));
+                    let dim = |k: &str| el.value().attr(k).and_then(|v| v.trim_end_matches("px").parse::<u32>().ok()).filter(|&n| n > 0);
+                    let size = dim("width").zip(dim("height"));
+                    self.blocks.push(Block::Image(src, el.value().attr("alt").unwrap_or("").to_string(), size));
                 }
             }
             "video" | "audio" | "iframe" | "embed" | "object" => {

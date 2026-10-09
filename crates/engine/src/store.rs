@@ -78,6 +78,21 @@ create table if not exists recommendations (
   removed_at integer
 ) strict;
 create virtual table if not exists entries_fts using fts5(title, body);
+create table if not exists media (
+  url text primary key,
+  file text not null,
+  kind text not null default '',
+  bytes integer not null default 0,
+  error text,
+  fetched_at integer not null,
+  used_at integer not null
+) strict;
+create table if not exists entry_media (
+  entry_id text not null,
+  url text not null,
+  primary key (entry_id, url)
+) strict;
+create index if not exists entry_media_url on entry_media(url);
 ";
 
 pub struct Store {
@@ -283,10 +298,11 @@ impl Store {
     }
 
     #[profiling::function]
-    pub fn insert_entries(&mut self, feed: &str, items: Vec<NewEntry>, now: i64) -> (Vec<Entry>, Vec<(EntryId, String, i64)>) {
+    pub fn insert_entries(&mut self, feed: &str, items: Vec<NewEntry>, now: i64) -> Inserted {
         let tx = self.db.transaction().unwrap();
         let mut added = Vec::new();
         let mut updated = Vec::new();
+        let mut images = Vec::new();
         {
             let mut insert = tx
                 .prepare_cached(
@@ -332,6 +348,10 @@ impl Store {
                         "insert into entries_fts (rowid, title, body) select rowid, ?2, ?3 from entries where id = ?1",
                         params![id, item.title, item.content.as_deref().or(item.summary.as_deref()).unwrap_or("")],
                     );
+                    for img in &item.images {
+                        let _ = tx.execute("insert or ignore into entry_media (entry_id, url) values (?1, ?2)", params![id, img]);
+                        images.push(img.clone());
+                    }
                     added.push(Entry {
                         id,
                         feed_id: feed.to_string(),
@@ -361,7 +381,7 @@ impl Store {
             }
         }
         tx.commit().unwrap();
-        (added, updated)
+        Inserted { added, updated, images }
     }
 
     pub fn set_read(&mut self, ids: &[EntryId], read: bool, now: i64) {
@@ -463,6 +483,7 @@ impl Store {
             let _ = tx.execute("delete from entries where id = ?1", [id]);
             let _ = tx.execute("delete from states where entry_id = ?1", [id]);
             let _ = tx.execute("delete from bodies where entry_id = ?1", [id]);
+            let _ = tx.execute("delete from entry_media where entry_id = ?1", [id]);
         }
         tx.commit().unwrap();
         doomed
@@ -798,6 +819,87 @@ impl Store {
         }
         tx.commit().map_err(|e| e.to_string())?;
         Ok((feeds.len(), count))
+    }
+}
+
+pub struct Inserted {
+    pub added: Vec<Entry>,
+    pub updated: Vec<(EntryId, String, i64)>,
+    pub images: Vec<String>,
+}
+
+pub struct MediaRow {
+    pub file: String,
+    pub error: Option<String>,
+    pub fetched_at: i64,
+}
+
+impl Store {
+    pub fn media(&self, url: &str) -> Option<MediaRow> {
+        self.db
+            .query_row("select file, error, fetched_at from media where url = ?1", [url], |r| {
+                Ok(MediaRow { file: r.get(0)?, error: r.get(1)?, fetched_at: r.get(2)? })
+            })
+            .optional()
+            .ok()
+            .flatten()
+    }
+
+    pub fn touch_media(&self, url: &str, now: i64) {
+        let _ = self.db.execute("update media set used_at = ?2 where url = ?1", params![url, now]);
+    }
+
+    pub fn set_media(&self, url: &str, file: &str, kind: &str, bytes: i64, error: Option<&str>, now: i64) {
+        let _ = self.db.execute(
+            "insert into media (url, file, kind, bytes, error, fetched_at, used_at) values (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+             on conflict(url) do update set file = excluded.file, kind = excluded.kind, bytes = excluded.bytes,
+             error = excluded.error, fetched_at = excluded.fetched_at, used_at = excluded.used_at",
+            params![url, file, kind, bytes, error, now],
+        );
+    }
+
+    pub fn link_media(&mut self, links: &[(EntryId, String)]) {
+        let tx = self.db.transaction().unwrap();
+        for (entry, url) in links {
+            let _ = tx.execute("insert or ignore into entry_media (entry_id, url) values (?1, ?2)", params![entry, url]);
+        }
+        tx.commit().unwrap();
+    }
+
+    #[profiling::function]
+    pub fn prune_media(&mut self, now: i64, budget: i64) -> Vec<String> {
+        let week = now - 7 * 86_400_000;
+        let kept = "exists (select 1 from entry_media m join entries e on e.id = m.entry_id
+                     left join states s on s.entry_id = e.id
+                     where m.url = media.url and (coalesce(s.read, 0) = 0 or coalesce(s.read_at, 0) > ?1 or coalesce(s.bookmarked, 0) = 1
+                       or e.feed_id = 'saved'
+                       or exists (select 1 from recommendations r where r.entry_id = e.id and r.removed_at is null)))";
+        let mut doomed: Vec<String> = self
+            .db
+            .prepare(&format!("select file from media where used_at < ?1 and not {kept}"))
+            .and_then(|mut st| st.query_map([week], |r| r.get::<_, String>(0)).map(|rows| rows.filter_map(Result::ok).collect()))
+            .unwrap_or_default();
+        let _ = self.db.execute(&format!("delete from media where used_at < ?1 and not {kept}"), [week]);
+        let total: i64 = self.db.query_row("select coalesce(sum(bytes), 0) from media", [], |r| r.get(0)).unwrap_or(0);
+        if total > budget {
+            let rows: Vec<(String, String, i64)> = self
+                .db
+                .prepare("select url, file, bytes from media order by used_at")
+                .and_then(|mut st| st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map(|rows| rows.filter_map(Result::ok).collect()))
+                .unwrap_or_default();
+            let mut over = total - budget;
+            for (url, file, bytes) in rows {
+                if over <= 0 {
+                    break;
+                }
+                let _ = self.db.execute("delete from media where url = ?1", [&url]);
+                doomed.push(file);
+                over -= bytes;
+            }
+        }
+        let _ = self.db.execute("delete from entry_media where entry_id not in (select id from entries)", []);
+        doomed.retain(|f| !f.is_empty());
+        doomed
     }
 }
 

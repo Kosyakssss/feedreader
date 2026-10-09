@@ -147,6 +147,7 @@ pub struct Fetched {
     pub url: Url,
     pub etag: Option<String>,
     pub last_modified: Option<String>,
+    pub kind: Option<String>,
     pub body: Vec<u8>,
 }
 
@@ -178,6 +179,7 @@ pub async fn fetch(
         };
         let etag = header("etag");
         let last_modified = header("last-modified");
+        let kind = header("content-type");
         let status = resp.status().as_u16();
         let final_url = resp.url().clone();
         let mut body = Vec::new();
@@ -192,6 +194,7 @@ pub async fn fetch(
             url: final_url,
             etag,
             last_modified,
+            kind,
             body,
         })
     };

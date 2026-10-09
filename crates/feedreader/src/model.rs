@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use engine::{Block, Candidate, Entry, EntryId, Event, Feed, FeedId, Folder, Mode, Recommendation, RefreshStatus, Request, Rule, SAVED, Settings};
 use toolkit::field::Field;
+use toolkit::images::Images;
 use toolkit::text::SpanStyle;
 use toolkit::ui::LineStyle;
 
@@ -286,6 +287,7 @@ pub struct Model {
     pub bar_expanded: bool,
     pub lines: LineStyle,
     pub out: Vec<Request>,
+    pub images: Images,
     pub open: Vec<String>,
     pub copy: Option<String>,
     undo: Vec<Change>,
@@ -309,7 +311,7 @@ impl View {
 }
 
 impl Model {
-    pub fn new() -> Self {
+    pub fn new(images: Images) -> Self {
         Self {
             ready: false,
             data_dir: String::new(),
@@ -352,6 +354,7 @@ impl Model {
             bar_expanded: false,
             lines: LineStyle::Light,
             out: Vec::new(),
+            images,
             open: Vec::new(),
             copy: None,
             undo: Vec::new(),
@@ -724,6 +727,8 @@ impl Model {
             }
             Event::Message(m) => self.message = Some(m),
             Event::Extract { .. } | Event::Probed(..) => {}
+            Event::Media(url, Ok(path)) => self.images.load(url, path),
+            Event::Media(url, Err(_)) => self.images.fail(url),
         }
     }
 

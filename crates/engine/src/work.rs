@@ -107,6 +107,23 @@ pub fn readability(url: &str, html: String) -> Result<Extracted, String> {
     })
 }
 
+const MEDIA_ACCEPT: &str = "image/webp, image/png, image/jpeg, image/gif, image/*;q=0.8, */*;q=0.1";
+
+pub async fn fetch_media(client: &reqwest::Client, url: &str, dir: &std::path::Path) -> Result<(String, String, i64), String> {
+    let u = Url::parse(url).map_err(|e| e.to_string())?;
+    let f = fetch(client, &u, MEDIA_ACCEPT, None, Duration::from_secs(15), 10_000_000).await?;
+    if f.status >= 400 {
+        return Err(format!("HTTP {}", f.status));
+    }
+    let digest = <sha2::Sha256 as sha2::Digest>::digest(url.as_bytes());
+    let file: String = digest[..16].iter().map(|b| format!("{b:02x}")).collect();
+    tokio::fs::create_dir_all(dir).await.map_err(|e| e.to_string())?;
+    let tmp = dir.join(format!("{file}.part"));
+    tokio::fs::write(&tmp, &f.body).await.map_err(|e| e.to_string())?;
+    tokio::fs::rename(&tmp, dir.join(&file)).await.map_err(|e| e.to_string())?;
+    Ok((file, f.kind.unwrap_or_default(), f.body.len() as i64))
+}
+
 pub fn read_opml(text: &str) -> Vec<(String, String)> {
     use quick_xml::events::Event;
     let mut reader = quick_xml::Reader::from_str(text);

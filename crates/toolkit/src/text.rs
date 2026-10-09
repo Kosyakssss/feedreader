@@ -361,7 +361,8 @@ impl Text {
                 color: c,
                 clip: p.clip,
                 kind: 0,
-                pad: [0; 3],
+                image: 0,
+                pad: [0; 2],
             });
         }
         for (font, coords, c, glyphs) in runs {
@@ -383,7 +384,8 @@ impl Text {
                         color: c,
                         clip: p.clip,
                         kind: 1,
-                        pad: [0; 3],
+                        image: 0,
+                pad: [0; 2],
                     });
                 }
             }

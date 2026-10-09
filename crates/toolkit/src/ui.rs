@@ -195,7 +195,21 @@ impl<'a, H> Scene<'a, H> {
             color,
             clip: self.clip(),
             kind: 0,
-            pad: [0; 3],
+            image: 0,
+                pad: [0; 2],
+        });
+    }
+
+    pub fn image(&mut self, r: Rect, id: u32) {
+        self.quads.push(Quad {
+            pos: [r.x, r.y],
+            size: [r.w, r.h],
+            uv: [0.0, 0.0, 1.0, 1.0],
+            color: [1.0, 1.0, 1.0, 1.0],
+            clip: self.clip(),
+            kind: 2,
+            image: id,
+            pad: [0; 2],
         });
     }
 

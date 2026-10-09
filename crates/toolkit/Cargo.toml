@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 bytemuck = { version = "1.25.2", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 parley = "0.11.1"
 pollster = "1.0.1"
 profiling = "1"

@@ -20,6 +20,8 @@ pub use types::*;
 use parse::ParsedFeed;
 use store::Store;
 
+const MEDIA_BUDGET: i64 = 1_000_000_000;
+
 pub struct Handle {
     tx: UnboundedSender<Request>,
 }
@@ -59,7 +61,7 @@ pub fn article_text(html: &str, base: &str) -> String {
                 inline(&i)
             ),
             Block::Code(c) => format!("```\n{c}\n```"),
-            Block::Image(src, alt) => format!("[image: {}] {src}", alt),
+            Block::Image(src, alt, _) => format!("[image: {}] {src}", alt),
             Block::Media(src, kind) => format!("[{kind}] {src}"),
             Block::Rule => "---".into(),
         });
@@ -111,6 +113,7 @@ enum Job {
 
 enum Internal {
     Page(Job, Result<(String, String), String>),
+    MediaFetched(String, Result<(String, String, i64), String>),
     Read(Job, Result<Extracted, String>, Extractor),
     Fetched(FeedId, Result<Fetch, String>),
     RefreshDone(u64),
@@ -130,6 +133,9 @@ struct Engine {
     published: public::Shared,
     public_url: Option<String>,
     web_extractor: bool,
+    media_inflight: HashSet<String>,
+    media_waiting: HashSet<String>,
+    media_gate: std::sync::Arc<tokio::sync::Semaphore>,
     jobs: std::collections::HashMap<u64, (Job, String, String)>,
     next_job: u64,
 }
@@ -168,6 +174,9 @@ impl Engine {
             published: Default::default(),
             public_url: None,
             web_extractor: false,
+            media_inflight: HashSet::new(),
+            media_waiting: HashSet::new(),
+            media_gate: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
             jobs: Default::default(),
             next_job: 0,
         })
@@ -297,6 +306,9 @@ impl Engine {
         let (blocks, note) = match r {
             Ok(html) if !use_feed => {
                 self.store.set_clean_body(&id, &html, now());
+                let base = url::Url::parse(&entry.url).ok();
+                let links: Vec<(EntryId, String)> = parse::image_urls(&html, base.as_ref(), 40).into_iter().map(|u| (id.clone(), u)).collect();
+                self.store.link_media(&links);
                 (Ok(parse::blocks(&html, Some(&entry.url))), None)
             }
             Ok(_) => (
@@ -363,24 +375,57 @@ impl Engine {
 
     fn apply_fetch(&mut self, id: &str, result: Result<Fetch, String>) -> Result<Vec<Entry>, String> {
         let r = self.apply_fetch_inner(id, result);
-        r.map(|(added, updated)| {
-            if !updated.is_empty() {
-                (self.emit)(Event::EntriesUpdated(updated));
+        r.map(|ins| {
+            if !ins.updated.is_empty() {
+                (self.emit)(Event::EntriesUpdated(ins.updated));
             }
-            added
+            self.want_media(ins.images, false);
+            ins.added
         })
     }
 
-    fn apply_fetch_inner(
-        &mut self,
-        id: &str,
-        result: Result<Fetch, String>,
-    ) -> Result<(Vec<Entry>, Vec<(EntryId, String, i64)>), String> {
+    fn want_media(&mut self, urls: Vec<String>, reply: bool) {
+        let t = now();
+        for url in urls {
+            if let Some(row) = self.store.media(&url) {
+                let path = self.dir.join("media").join(&row.file);
+                if row.error.is_none() && !row.file.is_empty() && path.is_file() {
+                    self.store.touch_media(&url, t);
+                    if reply {
+                        (self.emit)(Event::Media(url, Ok(path)));
+                    }
+                    continue;
+                }
+                if let Some(e) = row.error.filter(|_| t - row.fetched_at < 86_400_000) {
+                    if reply {
+                        (self.emit)(Event::Media(url, Err(e)));
+                    }
+                    continue;
+                }
+            }
+            if reply {
+                self.media_waiting.insert(url.clone());
+            }
+            if !self.media_inflight.insert(url.clone()) {
+                continue;
+            }
+            let client = self.client.clone();
+            let dir = self.dir.join("media");
+            let gate = self.media_gate.clone();
+            self.spawn(async move {
+                let _permit = gate.acquire_owned().await;
+                let r = work::fetch_media(&client, &url, &dir).await;
+                Internal::MediaFetched(url, r)
+            });
+        }
+    }
+
+    fn apply_fetch_inner(&mut self, id: &str, result: Result<Fetch, String>) -> Result<store::Inserted, String> {
         let t = now();
         match result {
             Ok(Fetch::NotModified) => {
                 self.store.set_fetch_result(id, None, None, None, None, t);
-                Ok((Vec::new(), Vec::new()))
+                Ok(store::Inserted { added: Vec::new(), updated: Vec::new(), images: Vec::new() })
             }
             Ok(Fetch::Parsed(parsed, validators)) => {
                 let error = parsed.entries.is_empty().then_some("Feed returned no entries");
@@ -423,6 +468,9 @@ impl Engine {
                     (self.emit)(Event::EntriesRemoved(removed));
                 }
                 self.store.purge_removed(now() - 24 * 3600 * 1000);
+                for file in self.store.prune_media(now(), MEDIA_BUDGET) {
+                    let _ = std::fs::remove_file(self.dir.join("media").join(file));
+                }
                 let wait = Duration::from_secs(self.settings.refresh_minutes.max(1) as u64 * 60);
                 self.next = Instant::now() + wait;
                 self.status.running = false;
@@ -434,6 +482,23 @@ impl Engine {
             Internal::RefreshDone(_) => {}
             Internal::Discovered(q, r) => (self.emit)(Event::Discovered(q, r)),
             Internal::Page(job, r) => self.page(job, r),
+            Internal::MediaFetched(url, r) => {
+                self.media_inflight.remove(&url);
+                let t = now();
+                let reply = match r {
+                    Ok((file, kind, bytes)) => {
+                        self.store.set_media(&url, &file, &kind, bytes, None, t);
+                        Ok(self.dir.join("media").join(file))
+                    }
+                    Err(e) => {
+                        self.store.set_media(&url, "", "", 0, Some(&e), t);
+                        Err(e)
+                    }
+                };
+                if self.media_waiting.remove(&url) {
+                    (self.emit)(Event::Media(url, reply));
+                }
+            }
             Internal::Read(job, r, by) => self.read(job, r, by),
             Internal::Added(id, r) => {
                 let result = self.apply_fetch(&id, r);
@@ -638,6 +703,7 @@ impl Engine {
                 Err(e) => (self.emit)(Event::Probed(input, Err(e))),
             },
             Request::UseWebExtractor => self.web_extractor = true,
+            Request::Media(urls) => self.want_media(urls, true),
             Request::Extracted(id, r) => {
                 let Some((job, url, html)) = self.jobs.remove(&id) else { return };
                 match r {
