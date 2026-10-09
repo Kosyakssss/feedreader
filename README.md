@@ -29,6 +29,17 @@ Drop an OPML file, or the old Feedreader's `feedreader.sqlite`, on the window, o
 feedreader import ~/Downloads/subscriptions.opml
 ```
 
+## The engine keeps running
+
+Feedreader's engine refreshes feeds and serves your public "I recommend" feed in the background, and the app attaches to it. To start it at login and keep it running after you quit the app:
+
+```sh
+feedreader service install    # launchd on macOS, systemd on Linux
+feedreader service uninstall
+```
+
+"Quit completely" and "restart engine" are in Settings.
+
 ## Command line
 
 The app binary is also the command:

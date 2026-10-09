@@ -2,6 +2,7 @@ mod net;
 mod parse;
 mod public;
 pub mod rules;
+pub mod serve;
 mod store;
 mod types;
 mod work;
@@ -22,14 +23,51 @@ use store::Store;
 
 const MEDIA_BUDGET: i64 = 1_000_000_000;
 
+pub enum Link {
+    Local(UnboundedSender<Request>),
+    Socket(std::sync::mpsc::Sender<Request>),
+}
+
 pub struct Handle {
-    tx: UnboundedSender<Request>,
+    link: Link,
 }
 
 impl Handle {
     pub fn send(&self, request: Request) {
-        let _ = self.tx.send(request);
+        match &self.link {
+            Link::Local(tx) => {
+                let _ = tx.send(request);
+            }
+            Link::Socket(tx) => {
+                let _ = tx.send(request);
+            }
+        }
     }
+
+    pub fn attached(&self) -> bool {
+        matches!(self.link, Link::Socket(_))
+    }
+}
+
+pub fn log_dir() -> PathBuf {
+    if cfg!(target_os = "macos") {
+        dirs::home_dir().unwrap_or_else(std::env::temp_dir).join("Library/Logs/feedreader")
+    } else {
+        dirs::state_dir().or_else(dirs::data_local_dir).unwrap_or_else(std::env::temp_dir).join("feedreader")
+    }
+}
+
+pub fn attach(dir: PathBuf, emit: std::sync::Arc<dyn Fn(Event) + Send + Sync>, background: bool) -> Result<Handle, String> {
+    if let Some(h) = serve::connect(&dir, emit.clone()) {
+        return Ok(h);
+    }
+    if background
+        && serve::spawn_background(&dir)
+        && let Some(h) = serve::connect(&dir, emit.clone())
+    {
+        return Ok(h);
+    }
+    start(dir, move |e| emit(e))
 }
 
 pub fn data_dir() -> PathBuf {
@@ -77,7 +115,15 @@ pub fn now() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-pub fn start(dir: PathBuf, emit: impl Fn(Event) + Send + 'static) -> Handle {
+pub fn start(dir: PathBuf, emit: impl Fn(Event) + Send + 'static) -> Result<Handle, String> {
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let lock = std::fs::File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join("engine.lock"))
+        .map_err(|e| e.to_string())?;
+    lock.try_lock().map_err(|_| format!("Another Feedreader engine is using {}", dir.display()))?;
     let (tx, rx) = unbounded_channel();
     std::thread::Builder::new()
         .name("engine".into())
@@ -89,6 +135,7 @@ pub fn start(dir: PathBuf, emit: impl Fn(Event) + Send + 'static) -> Handle {
                 .build()
                 .expect("runtime");
             rt.block_on(async move {
+                let _lock = lock;
                 match Engine::new(dir, Box::new(emit)) {
                     Ok(engine) => engine.run(rx).await,
                     Err(e) => eprintln!("engine failed to start: {e}"),
@@ -96,7 +143,7 @@ pub fn start(dir: PathBuf, emit: impl Fn(Event) + Send + 'static) -> Handle {
             });
         })
         .expect("engine thread");
-    Handle { tx }
+    Ok(Handle { link: Link::Local(tx) })
 }
 
 enum Fetch {
@@ -133,7 +180,7 @@ struct Engine {
     itx: Option<UnboundedSender<Internal>>,
     published: public::Shared,
     public_url: Option<String>,
-    web_extractor: bool,
+    web_extractor: usize,
     media_inflight: HashSet<String>,
     media_waiting: HashSet<String>,
     media_gate: std::sync::Arc<tokio::sync::Semaphore>,
@@ -174,7 +221,7 @@ impl Engine {
             itx: None,
             published: Default::default(),
             public_url: None,
-            web_extractor: false,
+            web_extractor: 0,
             media_inflight: HashSet::new(),
             media_waiting: HashSet::new(),
             media_gate: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
@@ -269,7 +316,7 @@ impl Engine {
     fn page(&mut self, job: Job, r: Result<(String, String), String>) {
         match r {
             Err(e) => self.read(job, Err(e), Extractor::Readability),
-            Ok((url, html)) if self.web_extractor => {
+            Ok((url, html)) if self.web_extractor > 0 => {
                 self.next_job += 1;
                 let id = self.next_job;
                 self.jobs.insert(id, (job, url.clone(), html.clone()));
@@ -746,7 +793,19 @@ impl Engine {
                 Ok(u) => self.fetch_page(Job::Probe(u.to_string()), u.to_string()),
                 Err(e) => (self.emit)(Event::Probed(input, Err(e))),
             },
-            Request::UseWebExtractor => self.web_extractor = true,
+            Request::UseWebExtractor => self.web_extractor += 1,
+            Request::Resync => self.snapshot(),
+            Request::Detach { extractor } => {
+                if extractor {
+                    self.web_extractor = self.web_extractor.saturating_sub(1);
+                }
+                if self.web_extractor == 0 {
+                    for (_, (job, url, html)) in std::mem::take(&mut self.jobs) {
+                        self.read_locally(job, url, html);
+                    }
+                }
+            }
+            Request::Shutdown => std::process::exit(0),
             Request::SetTabs(tabs) => self.store.set_tabs(&tabs),
             Request::Media(urls) => self.want_media(urls, true),
             Request::Extracted(id, r) => {

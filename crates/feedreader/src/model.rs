@@ -195,7 +195,7 @@ pub enum Discovery {
     Failed(String, String),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Op {
     Read(Vec<(EntryId, bool)>),
     Bookmark(Vec<(EntryId, bool)>),
@@ -217,9 +217,28 @@ pub enum Op {
     Reopen,
 }
 
-struct Change {
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct Change {
     label: String,
     op: Op,
+    #[serde(default)]
+    at: i64,
+}
+
+impl Change {
+    fn new(label: String, op: Op) -> Self {
+        Self { label, op, at: engine::now() }
+    }
+
+    fn durable(&self) -> bool {
+        !matches!(self.op, Op::CloseTab(_) | Op::Reopen) && engine::now() - self.at < 86_400_000
+    }
+}
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub struct History {
+    undo: Vec<Change>,
+    redo: Vec<Change>,
 }
 
 #[derive(Default)]
@@ -310,6 +329,10 @@ pub struct Model {
     pub open: Vec<String>,
     pub copy: Option<String>,
     pub edit_theme: bool,
+    pub attached: bool,
+    pub history_dirty: bool,
+    pub quitting: bool,
+    pub restart_engine: bool,
     undo: Vec<Change>,
     redo: Vec<Change>,
 }
@@ -385,9 +408,25 @@ impl Model {
             open: Vec::new(),
             copy: None,
             edit_theme: false,
+            attached: false,
+            history_dirty: false,
+            quitting: false,
+            restart_engine: false,
             undo: Vec::new(),
             redo: Vec::new(),
         }
+    }
+
+    pub fn history(&self) -> History {
+        History {
+            undo: self.undo.iter().filter(|c| c.durable()).cloned().collect(),
+            redo: self.redo.iter().filter(|c| c.durable()).cloned().collect(),
+        }
+    }
+
+    pub fn restore_history(&mut self, h: History) {
+        self.undo = h.undo.into_iter().filter(Change::durable).collect();
+        self.redo = h.redo.into_iter().filter(Change::durable).collect();
     }
 
     pub fn can_undo(&self) -> bool {
@@ -756,7 +795,7 @@ impl Model {
                 }
             }
             Event::Message(m) => self.message = Some(m),
-            Event::Extract { .. } | Event::Probed(..) => {}
+            Event::Extract { .. } | Event::Probed(..) | Event::Disconnected => {}
             Event::Media(url, Ok(path)) => self.images.load(url, path),
             Event::FollowOffer(host, cands) => {
                 self.message = Some(match cands.as_slice() {
@@ -930,7 +969,8 @@ impl Model {
     pub fn act(&mut self, label: String, op: Op) {
         let inverse = self.perform(op);
         self.message = Some(format!("{label}."));
-        self.undo.push(Change { label, op: inverse });
+        self.undo.push(Change::new(label, inverse));
+        self.history_dirty = true;
         if self.undo.len() > 500 {
             self.undo.remove(0);
         }
@@ -941,7 +981,8 @@ impl Model {
         if let Some(c) = self.undo.pop() {
             let inverse = self.perform(c.op);
             self.message = Some(format!("Undid: {}.", c.label));
-            self.redo.push(Change { label: c.label, op: inverse });
+            self.redo.push(Change::new(c.label, inverse));
+            self.history_dirty = true;
         }
     }
 
@@ -949,7 +990,8 @@ impl Model {
         if let Some(c) = self.redo.pop() {
             let inverse = self.perform(c.op);
             self.message = Some(format!("Redid: {}.", c.label));
-            self.undo.push(Change { label: c.label, op: inverse });
+            self.undo.push(Change::new(c.label, inverse));
+            self.history_dirty = true;
         }
     }
 

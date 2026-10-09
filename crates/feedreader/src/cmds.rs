@@ -84,6 +84,8 @@ pub enum Cmd {
     PickToFolders,
     FollowOffer,
     DismissOffer,
+    QuitCompletely,
+    RestartEngine,
 }
 
 fn idle(m: &Model) -> bool {
@@ -178,6 +180,8 @@ pub fn registry() -> Registry<Cmd, Model> {
                 if n == 1 { "follow this site".into() } else { format!("see its {n} feeds") }
             }, |m| idle(m) && m.offer.is_some()),
             c(Cmd::DismissOffer, vec![], |_| "no thanks".into(), |m| idle(m) && m.offer.is_some()),
+            c(Cmd::QuitCompletely, vec![], |_| "quit completely".into(), |m| idle(m) && m.attached && m.page == Page::Settings),
+            c(Cmd::RestartEngine, vec![], |_| "restart engine".into(), |m| idle(m) && m.attached && m.page == Page::Settings),
             c(Cmd::CancelDiscovery, vec![k(Key::Escape)], |_| "cancel".into(), |m| {
                 idle(m) && m.page == Page::Feeds && m.discovery.is_some()
             }),
@@ -641,6 +645,14 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
                     m.discovery = Some(Discovery::Found(host, cands, 0));
                 }
             }
+        }
+        Cmd::QuitCompletely => {
+            m.quitting = true;
+            m.out.push(Request::Shutdown);
+        }
+        Cmd::RestartEngine => {
+            m.restart_engine = true;
+            m.message = Some("Restarting the engine\u{2026}".into());
         }
         Cmd::DismissOffer => {
             m.offer = None;

@@ -107,7 +107,7 @@ Several people per engine, each with their own subscriptions, state, folders, pi
 - Move to another machine: pair the new engine, transfer state and settings directly, make it the hub, repoint devices and the public link.
 
 ### 2.14 Command line
-The `feedreader` command is the same binary as the desktop app: `serve` (headless engine), `service install`, `pair`, `add <url>`, `import <file>`, `export <file>`, `refresh`, `extract <url>` (the Clean text of any page), `unread` (unread entries as a Markdown list, for scripts and agents) and `upgrade`. Bare `feedreader` opens the desktop app.
+The `feedreader` command is the same binary as the desktop app: `serve` (headless engine), `service install` and `uninstall`, `pair`, `add <url>`, `import <file>`, `export <file>`, `refresh`, `extract <url>` (the Clean text of any page), `unread` (unread entries as a Markdown list, for scripts and agents) and `upgrade`. Bare `feedreader` opens the desktop app.
 
 ## 3. UX
 
@@ -176,7 +176,7 @@ crates/feedreader  the binary: desktop app, headless `serve`, command line
 ```
 - **Engine:** one Rust library that owns user state, fetching, the public listener, the scheduler and sync. It runs on its own thread with a tokio runtime. Apps talk to it through one typed channel: `Request` in, `Event` out. A remote hub speaks the same types over the network, so the UI never knows whether the hub is in-process or across Tailscale.
 - **Hub:** one engine per setup, normally the Mac's background engine. It holds the authoritative user state, refreshes on its own, serves the public feed, and is what devices pair with. The first engine you set up is the hub.
-- **Background engine:** the desktop app looks for an engine on its machine (a lock file with port and pid in the data directory, then a health check) and attaches; otherwise it starts `feedreader serve` as a background process. The engine keeps running after the app quits, so refresh, sync and the public feed keep working. Turning it off makes the engine part of the app. Quit completely and Restart stop or restart both.
+- **Background engine:** the desktop app connects to the engine's Unix socket in the data directory (owner-only, so reaching it is the authorization) and attaches; otherwise it starts `feedreader serve` as a background process. A lock file guarantees one engine per library; the command line attaches the same way. The engine keeps running after the app quits, so refresh, sync and the public feed keep working. Turning it off makes the engine part of the app. Quit completely and Restart stop or restart both.
 - **Satellites:** engines on other devices paired with a hub (Android, a desktop on another computer). Connected, they sync with the hub and take fetched content from it. When the hub is unreachable they refresh feeds themselves and keep working fully; everything syncs when the hub is back.
 - **UI:** a function of state. Data flows one way: engine events → app model → view (pure paint into a scene) → layout and GPU. Input becomes commands; commands change the model and send requests. A frame is drawn only for input, new data or a resize; an idle app does no work.
 
@@ -301,8 +301,8 @@ Status: done, partial or open. Each step is committed and pushed to `main` when 
 9. **Partial.** Tabs: history, background tabs (middle-click, bulk open), peek and kept, Cmd-W, Cmd-Shift-T, Cmd-Shift-[ and ], undoable closing, persistence; links open in the tab with Add as feed and Bookmark. Open: reordering by drag, one web view per tab.
 10. **Partial.** Discovery: link tags on the page and the site root, common paths, YouTube channels, handles and playlists, Medium, Substack, GitHub, Reddit; the picker with recent titles and subscribing into folders; identity by address and by title and site; OPML folders both ways; Follow this site after saving a link. Open: JSON-LD, h-feed, sitemaps.
 11. **Done.** Light and dark palettes following the system (or fixed in Settings), `theme.toml` in the data folder with live reload and the last good colors kept on errors, article text size and column width.
-12. **Open.** Persistent 24-hour undo; commands and the change log.
-13. **Open.** Background engine (`serve`, lock file, attach), `service install`, retiring the old Bun service.
+12. **Partial.** Undo persists for 24 hours per device. Open: engine commands and the change log (with sync, step 14).
+13. **Done.** `feedreader serve` on an owner-only Unix socket, one engine per library (lock file), the app and the command line attach or start it in the background, quit completely and restart engine, `service install` and `uninstall` for launchd and systemd.
 14. **Open.** Sync: hub and satellites, pairing, Tailscale serve and funnel.
 15. **Open.** Android.
 16. **Open.** Adaptive refresh, per-host politeness, Retry-After.

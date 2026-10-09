@@ -4,6 +4,7 @@ mod extract;
 mod model;
 mod palette;
 mod tabs;
+mod service;
 mod theme;
 mod view;
 
@@ -57,6 +58,8 @@ struct State {
     model: Model,
     registry: Registry<Cmd, Model>,
     engine: engine::Handle,
+    emit: Arc<dyn Fn(Event) + Send + Sync>,
+    background: bool,
     events: Receiver<Event>,
     proxy: EventLoopProxy<Wake>,
     hits: Vec<(Rect, Hit)>,
@@ -283,11 +286,47 @@ impl State {
         self.hits.iter().rev().find(|(r, _)| r.contains(x, y)).map(|(_, h)| h.clone())
     }
 
+    fn reattach(&mut self) {
+        if self.model.quitting {
+            return;
+        }
+        match engine::attach(engine::data_dir(), self.emit.clone(), self.background) {
+            Ok(h) => {
+                self.engine = h;
+                self.engine.send(Request::UseWebExtractor);
+                self.model.attached = self.engine.attached();
+                self.model.message = Some("Reconnected to the engine.".into());
+            }
+            Err(e) => self.model.message = Some(format!("The engine stopped and couldn't restart: {e}")),
+        }
+    }
+
+    fn save_history(&mut self) {
+        if !std::mem::take(&mut self.model.history_dirty) {
+            return;
+        }
+        if let Ok(json) = serde_json::to_vec(&self.model.history()) {
+            let path = engine::data_dir().join("undo.json");
+            let tmp = path.with_extension("json.part");
+            if std::fs::write(&tmp, json).is_ok() {
+                let _ = std::fs::rename(&tmp, &path);
+            }
+        }
+    }
+
     fn after(&mut self) {
+        self.save_history();
+        if std::mem::take(&mut self.model.restart_engine) {
+            self.engine.send(Request::Shutdown);
+        }
         if std::mem::take(&mut self.model.edit_theme) {
             self.edit_theme();
         }
         flush(&mut self.model, &self.engine, &mut self.clipboard);
+        if self.model.quitting {
+            std::thread::sleep(Duration::from_millis(150));
+            std::process::exit(0);
+        }
         self.window.request_redraw();
     }
 
@@ -709,6 +748,7 @@ impl State {
                         self.engine.send(r);
                     }
                 }
+                Event::Disconnected => self.reattach(),
                 e => self.model.event(e),
             }
         }
@@ -736,10 +776,19 @@ impl ApplicationHandler<Wake> for App {
         let metrics = metrics(&mut text, window.scale_factor() as f32, size);
         let (tx, rx) = channel();
         let proxy = self.proxy.clone();
-        let engine = engine::start(engine::data_dir(), move |e| {
+        let emit: Arc<dyn Fn(Event) + Send + Sync> = Arc::new(move |e| {
             let _ = tx.send(e);
             let _ = proxy.send_event(Wake::Engine);
         });
+        let background = !std::env::args().any(|a| a == "--in-process");
+        let engine = match engine::attach(engine::data_dir(), emit.clone(), background) {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!("{e}");
+                event_loop.exit();
+                return;
+            }
+        };
         let mut state = State {
             window,
             gpu,
@@ -752,6 +801,8 @@ impl ApplicationHandler<Wake> for App {
             })),
             registry: cmds::registry(),
             engine,
+            emit,
+            background,
             events: rx,
             proxy: self.proxy.clone(),
             hits: Vec::new(),
@@ -776,7 +827,13 @@ impl ApplicationHandler<Wake> for App {
         state.system_dark = state.window.theme() == Some(winit::window::Theme::Dark);
         state.reload_theme();
         state.model.message = None;
+        if let Ok(bytes) = std::fs::read(engine::data_dir().join("undo.json"))
+            && let Ok(h) = serde_json::from_slice(&bytes)
+        {
+            state.model.restore_history(h);
+        }
         state.engine.send(Request::UseWebExtractor);
+        state.model.attached = state.engine.attached();
         state.render();
         self.state = Some(state);
     }
@@ -936,9 +993,16 @@ fn wait_for(rx: &Receiver<Event>, model: &mut Model, timeout: Duration, done: im
 
 fn headless() -> (engine::Handle, Receiver<Event>, Model) {
     let (tx, rx) = channel();
-    let handle = engine::start(engine::data_dir(), move |e| {
+    let emit: Arc<dyn Fn(Event) + Send + Sync> = Arc::new(move |e| {
         let _ = tx.send(e);
     });
+    let handle = match engine::attach(engine::data_dir(), emit, false) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
     let mut model = Model::new(toolkit::images::Images::new(|| {}));
     wait_for(&rx, &mut model, Duration::from_secs(20), |_, e| matches!(e, Event::Snapshot { .. }));
     (handle, rx, model)
@@ -1090,10 +1154,14 @@ impl ApplicationHandler<Wake> for Probe {
         let window = Arc::new(event_loop.create_window(Window::default_attributes().with_visible(false)).expect("window"));
         let (tx, rx) = channel();
         let proxy = self.proxy.clone();
-        let handle = engine::start(engine::data_dir(), move |e| {
+        let emit: Arc<dyn Fn(Event) + Send + Sync> = Arc::new(move |e| {
             let _ = tx.send(e);
             let _ = proxy.send_event(Wake::Engine);
         });
+        let Ok(handle) = engine::attach(engine::data_dir(), emit, false) else {
+            event_loop.exit();
+            return;
+        };
         if !self.local {
             handle.send(Request::UseWebExtractor);
         }
@@ -1137,6 +1205,28 @@ impl ApplicationHandler<Wake> for Probe {
 
 fn cli(args: &[String]) -> bool {
     match args.get(1).map(String::as_str) {
+        Some("service") => {
+            let r = match args.get(2).map(String::as_str) {
+                Some("install") => service::install(),
+                Some("uninstall") => service::uninstall(),
+                _ => Err("usage: feedreader service install | uninstall".into()),
+            };
+            match r {
+                Ok(m) => println!("{m}"),
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            }
+            true
+        }
+        Some("serve") => {
+            if let Err(e) = engine::serve::serve(engine::data_dir()) {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+            true
+        }
         Some("extract") => {
             let Some(url) = args.get(2).filter(|a| !a.starts_with("--")) else {
                 eprintln!("usage: feedreader extract <url> [--local]");

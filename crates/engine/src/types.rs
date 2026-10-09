@@ -1,7 +1,7 @@
 pub type FeedId = String;
 pub type EntryId = String;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Feed {
     pub id: FeedId,
     pub url: String,
@@ -18,28 +18,28 @@ pub struct Feed {
 
 pub const SAVED: &str = "saved";
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Folder {
     pub id: String,
     pub name: String,
     pub feeds: Vec<FeedId>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Scope {
     All,
     Feed(FeedId),
     Folder(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Rule {
     pub id: String,
     pub word: String,
     pub scope: Scope,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Recommendation {
     pub entry: EntryId,
     pub note: String,
@@ -56,7 +56,7 @@ impl Feed {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Entry {
     pub id: EntryId,
     pub feed_id: FeedId,
@@ -94,7 +94,7 @@ impl Mode {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Settings {
     pub max_entries: u32,
     pub max_age_days: Option<u32>,
@@ -127,7 +127,7 @@ impl Default for Settings {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct RefreshStatus {
     pub run: u64,
     pub running: bool,
@@ -140,7 +140,7 @@ pub struct RefreshStatus {
     pub next_at: Option<i64>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Candidate {
     pub url: String,
     pub title: String,
@@ -151,7 +151,7 @@ pub struct Candidate {
     pub recent: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Inline {
     Text(String),
     Bold(String),
@@ -161,7 +161,7 @@ pub enum Inline {
     Break,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Block {
     Heading(u8, Vec<Inline>),
     Paragraph(Vec<Inline>),
@@ -173,7 +173,7 @@ pub enum Block {
     Rule,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Body {
     pub entry: EntryId,
     pub mode: Mode,
@@ -205,13 +205,13 @@ pub struct TabState {
     pub kept: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Extracted {
     pub title: String,
     pub html: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Extractor {
     Defuddle,
     Readability,
@@ -226,9 +226,12 @@ impl Extractor {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum Request {
     UseWebExtractor,
+    Resync,
+    Detach { extractor: bool },
+    Shutdown,
     SetTabs(Vec<TabState>),
     Media(Vec<String>),
     Extracted(u64, Result<Extracted, String>),
@@ -261,7 +264,7 @@ pub enum Request {
     Search(String),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Event {
     Snapshot {
         feeds: Vec<Feed>,
@@ -292,5 +295,6 @@ pub enum Event {
     Extract { job: u64, url: String, html: String },
     Media(String, Result<std::path::PathBuf, String>),
     FollowOffer(String, Vec<Candidate>),
+    Disconnected,
     Probed(String, Result<(Extracted, Extractor), String>),
 }
