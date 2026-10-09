@@ -28,6 +28,7 @@ pub enum Focus {
     Main,
     Filter,
     Prompt,
+    Palette,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -284,6 +285,7 @@ pub struct Model {
     pub filter: Field,
     pub focus: Focus,
     pub reader: Option<Reader>,
+    pub palette: Option<crate::palette::Palette>,
     pub feeds_order: Vec<usize>,
     pub feeds_page: Scroller,
     pub settings_page: Scroller,
@@ -351,6 +353,7 @@ impl Model {
             filter: Field::default(),
             focus: Focus::Main,
             reader: None,
+            palette: None,
             feeds_order: Vec::new(),
             feeds_page: Scroller { row_h: 1.0, ..Default::default() },
             settings_page: Scroller { row_h: 1.0, ..Default::default() },
@@ -650,7 +653,7 @@ impl Model {
                 self.rebuild();
             }
             Event::PublicUrl(url) => self.public_url = url,
-            Event::SearchResults(..) => {}
+            Event::SearchResults(q, ids) => crate::palette::results(self, q, ids),
             Event::Feeds(feeds) => {
                 self.feeds = feeds;
                 self.reindex_feeds();

@@ -2,6 +2,7 @@ mod article;
 mod cmds;
 mod extract;
 mod model;
+mod palette;
 mod view;
 
 use std::sync::Arc;
@@ -247,12 +248,19 @@ impl State {
         match self.model.focus {
             Focus::Filter => Some(&mut self.model.filter),
             Focus::Prompt => self.model.prompt.as_mut().map(|p| &mut p.field),
+            Focus::Palette => self.model.palette.as_mut().map(|p| &mut p.field),
             Focus::Main => None,
         }
     }
 
     fn field_changed(&mut self) {
-        if self.model.focus == Focus::Filter {
+        if self.model.focus == Focus::Palette {
+            if let Some(p) = self.model.palette.as_mut() {
+                p.cursor = 0;
+                p.scroll = 0.0;
+            }
+            palette::refresh(&mut self.model);
+        } else if self.model.focus == Focus::Filter {
             self.model.reset_list();
         } else if let Some(p) = &mut self.model.prompt {
             p.error = None;
@@ -470,6 +478,11 @@ impl State {
                     }
                 }
             }
+            Some(Hit::Palette(i)) => {
+                if i != usize::MAX {
+                    palette::activate(m, i);
+                }
+            }
             Some(Hit::Play(src, kind)) => {
                 if self.modifiers.super_key() {
                     m.open.push(src);
@@ -491,6 +504,7 @@ impl State {
     fn scroll_of(&mut self, which: Scroll) -> Option<(&mut f32, f32, f32)> {
         let m = &mut self.model;
         match which {
+            Scroll::Palette => m.palette.as_mut().map(|p| (&mut p.scroll, p.items.len() as f32 * p.row_h, p.view_h)),
             Scroll::List => Some((&mut m.list.scroll, m.list.visible.len() as f32 * m.list.row_h, m.list.view_h)),
             Scroll::Feeds => Some((&mut m.feeds_page.scroll, m.feeds_order.len() as f32 * m.feeds_page.row_h, m.feeds_page.view_h)),
             Scroll::Help => Some((&mut m.help.scroll, f32::MAX, m.help.view_h)),
@@ -862,7 +876,8 @@ fn snapshot(args: &[String]) {
     for k in get("--keys").unwrap_or_default().split(' ').filter(|k| !k.is_empty()) {
         match k {
             "wait" => {
-                wait_for(&rx, &mut model, Duration::from_secs(15), |_, e| matches!(e, Event::Body(_) | Event::Discovered(..) | Event::FeedAdded(_)));
+                flush(&mut model, &handle, &mut clipboard);
+                wait_for(&rx, &mut model, Duration::from_secs(15), |_, e| matches!(e, Event::Body(_) | Event::Discovered(..) | Event::FeedAdded(_) | Event::SearchResults(..)));
             }
             "images" => {
                 let deadline = Instant::now() + Duration::from_secs(20);
@@ -900,6 +915,12 @@ fn snapshot(args: &[String]) {
                                 if let Some(p) = model.prompt.as_mut() {
                                     p.field.insert(&t);
                                 }
+                            }
+                            Focus::Palette => {
+                                if let Some(p) = model.palette.as_mut() {
+                                    p.field.insert(&t);
+                                }
+                                palette::refresh(&mut model);
                             }
                             Focus::Main => {}
                         }

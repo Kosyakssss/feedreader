@@ -9,6 +9,7 @@ use crate::model::{Confirm, Discovery, Focus, Model, Page, Row, Setting, Target,
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scroll {
+    Palette,
     List,
     Feeds,
     Settings,
@@ -35,6 +36,7 @@ pub enum Hit {
     Link(String),
     Media(String),
     Play(String, String),
+    Palette(usize),
     Prompt,
 }
 
@@ -341,6 +343,10 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
 
     if !m.ready {
         s.text("Opening the library\u{2026}", mt.prop(400.0), main.x + cw, main.y, None, pal.muted);
+        return out;
+    }
+    if m.palette.is_some() {
+        out.ime = crate::palette::paint(m, reg, s, main);
         return out;
     }
     if m.reader.is_some() {

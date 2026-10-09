@@ -297,7 +297,7 @@ Status: done, partial or open. Each step is committed and pushed to `main` when 
 5. **Done.** Defuddle in the extraction web view; headless fallback; `feedreader extract`.
 6. **Partial.** Profiling with Tracy (zones, frames, allocations). Open: GPU zones, budgets checked automatically.
 7. **Partial.** Images and the media cache with prefetch and pruning; audio, video and embeds play in the web pane. Open: caching attachments for offline (limits are Open, §7), favicons.
-8. **Open.** Command palette and search (`is:`, `in:`, `from:`), Cmd-K.
+8. **Done.** Command palette and search: every available command, views, folders, feeds, and entries by title and full text with `is:`, `in:`, `from:`; Cmd-K.
 9. **Open.** Tabs: history, background tabs, peek and kept, persistence; links opening as tabs with Add as feed and Bookmark.
 10. **Open.** Discovery ladder (platforms, YouTube, JSON-LD, h-feed, sitemaps) and the picker with preview and folder; OPML folders both ways; Follow this site.
 11. **Open.** Themes: dark mode following the system, theme files with hot reload; reading settings.

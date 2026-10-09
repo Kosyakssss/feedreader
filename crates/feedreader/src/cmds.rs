@@ -4,7 +4,7 @@ use toolkit::field::Field;
 
 use crate::model::{Confirm, Discovery, Focus, Model, Op, Page, Prompt, PromptKind, Row, Setting, Target, View};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Cmd {
     Home,
     Bookmarks,
@@ -72,6 +72,11 @@ pub enum Cmd {
     DeleteFolder,
     RemoveRule,
     Retry,
+    Palette,
+    PaletteDown,
+    PaletteUp,
+    PaletteRun,
+    PaletteBack,
 }
 
 fn idle(m: &Model) -> bool {
@@ -138,6 +143,13 @@ pub fn registry() -> Registry<Cmd, Model> {
     let ch = Chord::ch;
     Registry {
         commands: vec![
+            c(Cmd::PaletteRun, vec![k(Key::Enter)], |_| "run".into(), |m| m.focus == Focus::Palette),
+            c(Cmd::PaletteDown, vec![k(Key::Down)], |_| "down".into(), |m| m.focus == Focus::Palette),
+            c(Cmd::PaletteUp, vec![k(Key::Up)], |_| "up".into(), |m| m.focus == Focus::Palette),
+            c(Cmd::PaletteBack, vec![k(Key::Escape)], |m| {
+                if m.palette.as_ref().is_some_and(|p| !p.field.text.is_empty()) { "clear".into() } else { "close".into() }
+            }, |m| m.focus == Focus::Palette),
+            c(Cmd::Palette, vec![Chord::cmd('k')], |_| "search and commands".into(), |m| m.focus == Focus::Main && m.confirm.is_none()),
             c(Cmd::Yes, vec![ch('y')], |_| "yes".into(), |m| m.confirm.is_some()),
             c(Cmd::No, vec![ch('n'), k(Key::Escape)], |_| "no".into(), |m| m.confirm.is_some()),
             c(Cmd::PromptOk, vec![k(Key::Enter)], |m| match m.prompt.as_ref().map(|p| &p.kind) {
@@ -288,6 +300,8 @@ fn rank(cmd: Cmd) -> u8 {
         | Cmd::Recommend
         | Cmd::AddAsFeed
         | Cmd::RemoveRule
+        | Cmd::PaletteRun
+        | Cmd::PaletteBack
         | Cmd::More => 0,
         Cmd::PageDown
         | Cmd::PageUp
@@ -598,6 +612,29 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
         }
         Cmd::More => m.bar_expanded = !m.bar_expanded,
         Cmd::Recommended => m.show(View::Recommended),
+        Cmd::Palette => crate::palette::open(m),
+        Cmd::PaletteDown | Cmd::PaletteUp => {
+            if let Some(p) = m.palette.as_mut() {
+                let last = p.items.len().saturating_sub(1);
+                p.cursor = if cmd == Cmd::PaletteDown { (p.cursor + 1).min(last) } else { p.cursor.saturating_sub(1) };
+                p.reveal();
+            }
+        }
+        Cmd::PaletteRun => {
+            let i = m.palette.as_ref().map(|p| p.cursor).unwrap_or(0);
+            crate::palette::activate(m, i);
+        }
+        Cmd::PaletteBack => {
+            if let Some(p) = m.palette.as_mut()
+                && !p.field.text.is_empty()
+            {
+                p.field.clear();
+                p.cursor = 0;
+                crate::palette::refresh(m);
+            } else {
+                crate::palette::close(m);
+            }
+        }
         Cmd::Recommend => {
             let t = m.targets();
             if t.is_empty() {
