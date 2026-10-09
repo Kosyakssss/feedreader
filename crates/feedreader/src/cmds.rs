@@ -81,6 +81,9 @@ pub enum Cmd {
     ReopenTab,
     NextTab,
     PreviousTab,
+    PickToFolders,
+    FollowOffer,
+    DismissOffer,
 }
 
 fn idle(m: &Model) -> bool {
@@ -167,6 +170,14 @@ pub fn registry() -> Registry<Cmd, Model> {
                 Some(Discovery::Found(_, c, i)) if c.get(*i).is_some_and(|c| c.subscribed) => "already subscribed".into(),
                 _ => "subscribe".into(),
             }, picking),
+            c(Cmd::PickToFolders, vec![], |_| "subscribe into folders".into(), |m| {
+                picking(m) && matches!(&m.discovery, Some(Discovery::Found(_, c, i)) if c.get(*i).is_some_and(|c| !c.subscribed))
+            }),
+            c(Cmd::FollowOffer, vec![], |m| {
+                let n = m.offer.as_ref().map(|o| o.1.len()).unwrap_or(0);
+                if n == 1 { "follow this site".into() } else { format!("see its {n} feeds") }
+            }, |m| idle(m) && m.offer.is_some()),
+            c(Cmd::DismissOffer, vec![], |_| "no thanks".into(), |m| idle(m) && m.offer.is_some()),
             c(Cmd::CancelDiscovery, vec![k(Key::Escape)], |_| "cancel".into(), |m| {
                 idle(m) && m.page == Page::Feeds && m.discovery.is_some()
             }),
@@ -313,6 +324,9 @@ fn rank(cmd: Cmd) -> u8 {
         | Cmd::PaletteRun
         | Cmd::PaletteBack
         | Cmd::CloseTab
+        | Cmd::FollowOffer
+        | Cmd::DismissOffer
+        | Cmd::PickToFolders
         | Cmd::More => 0,
         Cmd::PageDown
         | Cmd::PageUp
@@ -602,13 +616,36 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
                 if cand.subscribed {
                     m.message = Some(format!("You already follow {}.", cand.title));
                 } else {
-                    m.out.push(Request::AddFeed(cand.url.clone(), cand.title.clone()));
+                    m.out.push(Request::AddFeed(cand.url.clone(), cand.title.clone(), Vec::new()));
                     m.message = Some(format!("Adding {}\u{2026}", cand.title));
                     m.discovery = None;
                 }
             }
         }
         Cmd::CancelDiscovery => m.discovery = None,
+        Cmd::PickToFolders => {
+            if let Some(Discovery::Found(_, c, i)) = &m.discovery
+                && let Some(cand) = c.get(*i).cloned()
+            {
+                prompt(m, PromptKind::PickFolders(cand.url, cand.title), "Folders for this feed, separated by commas", "");
+            }
+        }
+        Cmd::FollowOffer => {
+            if let Some((host, cands)) = m.offer.take() {
+                if cands.len() == 1 {
+                    let c = &cands[0];
+                    m.out.push(Request::AddFeed(c.url.clone(), c.title.clone(), Vec::new()));
+                    m.message = Some(format!("Adding {}\u{2026}", c.title));
+                } else {
+                    m.go(Page::Feeds);
+                    m.discovery = Some(Discovery::Found(host, cands, 0));
+                }
+            }
+        }
+        Cmd::DismissOffer => {
+            m.offer = None;
+            m.message = None;
+        }
         Cmd::Edit => edit_setting(m),
         Cmd::Yes => {
             if let Some(Confirm::OpenAll(ids)) = m.confirm.take() {
@@ -838,6 +875,12 @@ fn submit(m: &mut Model) {
             }
             m.discovery = Some(Discovery::Searching(value.clone()));
             m.out.push(Request::Discover(value));
+        }
+        PromptKind::PickFolders(url, title) => {
+            let names: Vec<String> = value.split(',').map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
+            m.out.push(Request::AddFeed(url, title.clone(), names));
+            m.message = Some(format!("Adding {title}\u{2026}"));
+            m.discovery = None;
         }
         PromptKind::SaveLink => {
             if value.is_empty() {

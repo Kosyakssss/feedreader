@@ -735,7 +735,7 @@ fn paint_feeds(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
     let pal = s.palette;
     let mono = mt.mono();
     let failing = m.failing();
-    let mut head = format!("FEEDS \u{00B7} {} SUBSCRIBED", m.feeds.len());
+    let mut head = format!("FEEDS \u{00B7} {} SUBSCRIBED", m.subscriptions().count());
     if failing > 0 {
         head.push_str(&format!(" \u{00B7} {failing} FAILING"));
     }
@@ -767,7 +767,8 @@ fn paint_feeds(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
             );
             y += ch;
             for (i, c) in cands.iter().enumerate() {
-                let r = Rect::new(main.x, y, main.w - cw, ch * 2.0);
+                let rows = 2 + c.recent.len();
+                let r = Rect::new(main.x, y, main.w - cw, ch * rows as f32);
                 if i == *cur {
                     s.fill(r, pal.cursor);
                 } else {
@@ -782,8 +783,11 @@ fn paint_feeds(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
                 }
                 s.text(&line, mt.prop(600.0), main.x + cw * 2.0, y, Some(main.w - cw * 4.0), pal.ink);
                 s.text(&c.url, mono, main.x + cw * 2.0, y + ch, Some(main.w - cw * 4.0), pal.muted);
+                for (k, t) in c.recent.iter().enumerate() {
+                    s.text(&format!("\u{2022} {t}"), mt.prop(400.0), main.x + cw * 4.0, y + ch * (2 + k) as f32, Some(main.w - cw * 6.0), pal.muted);
+                }
                 s.hit(r, Hit::Candidate(i));
-                y += ch * 2.0;
+                y += ch * rows as f32;
             }
             s.hline(y, main.x - cw * 0.5, main.right());
             y += ch;

@@ -157,6 +157,7 @@ pub fn settings_rows(m: &Model) -> Vec<Row> {
 pub enum PromptKind {
     AddFeed,
     SaveLink,
+    PickFolders(String, String),
     Rename(FeedId),
     Folders(FeedId),
     RenameFolder(String),
@@ -290,6 +291,7 @@ pub struct Model {
     pub pane_scroll: f32,
     pub armed: Option<FeedId>,
     pub discovery: Option<Discovery>,
+    pub offer: Option<(String, Vec<Candidate>)>,
     pub prompt: Option<Prompt>,
     pub confirm: Option<Confirm>,
     pub message: Option<String>,
@@ -363,6 +365,7 @@ impl Model {
             pane_scroll: 0.0,
             armed: None,
             discovery: None,
+            offer: None,
             prompt: None,
             confirm: None,
             message: None,
@@ -745,6 +748,13 @@ impl Model {
             Event::Message(m) => self.message = Some(m),
             Event::Extract { .. } | Event::Probed(..) => {}
             Event::Media(url, Ok(path)) => self.images.load(url, path),
+            Event::FollowOffer(host, cands) => {
+                self.message = Some(match cands.as_slice() {
+                    [one] => format!("{host} has a feed: {}. Follow it?", one.title),
+                    many => format!("{host} has {} feeds. Follow one?", many.len()),
+                });
+                self.offer = Some((host, cands));
+            }
             Event::Media(url, Err(_)) => self.images.fail(url),
         }
     }

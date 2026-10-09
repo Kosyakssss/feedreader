@@ -114,6 +114,7 @@ enum Job {
 enum Internal {
     Page(Job, Result<(String, String), String>),
     MediaFetched(String, Result<(String, String, i64), String>),
+    Offer(String, Result<Vec<Candidate>, String>),
     Read(Job, Result<Extracted, String>, Extractor),
     Fetched(FeedId, Result<Fetch, String>),
     RefreshDone(u64),
@@ -291,6 +292,17 @@ impl Engine {
                     let e = self.store.save_link(&url, &title, &x.html, now());
                     (self.emit)(Event::EntriesAdded(vec![e]));
                     (self.emit)(Event::Message(format!("Saved \u{201C}{title}\u{201D} to Bookmarks.")));
+                    if let Some(host) = url::Url::parse(&url).ok().and_then(|u| u.host_str().map(str::to_string))
+                        && !self.store.offered(&host)
+                    {
+                        let client = self.client.clone();
+                        let known = self.known();
+                        let root = format!("https://{host}/");
+                        self.spawn(async move {
+                            let r = work::discover(&client, &root, &known).await;
+                            Internal::Offer(host, r)
+                        });
+                    }
                 }
                 Err(e) => (self.emit)(Event::Message(format!("Couldn't save {url}: {e}"))),
             },
@@ -331,7 +343,17 @@ impl Engine {
     }
 
     fn known(&self) -> HashSet<String> {
-        self.store.feeds().into_iter().filter(|f| f.id != SAVED).map(|f| f.id).collect()
+        let mut known = HashSet::new();
+        for f in self.store.feeds().into_iter().filter(|f| f.id != SAVED) {
+            if !f.title.is_empty() {
+                known.insert(work::fingerprint(&f.title, &f.url));
+                if let Some(site) = &f.site_url {
+                    known.insert(work::fingerprint(&f.title, site));
+                }
+            }
+            known.insert(f.id);
+        }
+        known
     }
 
     fn start_refresh(&mut self) {
@@ -483,6 +505,14 @@ impl Engine {
             Internal::RefreshDone(_) => {}
             Internal::Discovered(q, r) => (self.emit)(Event::Discovered(q, r)),
             Internal::Page(job, r) => self.page(job, r),
+            Internal::Offer(host, r) => {
+                if let Ok(c) = r
+                    && !c.is_empty()
+                    && c.iter().all(|c| !c.subscribed)
+                {
+                    (self.emit)(Event::FollowOffer(host, c));
+                }
+            }
             Internal::MediaFetched(url, r) => {
                 self.media_inflight.remove(&url);
                 let t = now();
@@ -534,7 +564,11 @@ impl Engine {
                     Internal::Discovered(q, r)
                 });
             }
-            Request::AddFeed(url, title) => {
+            Request::AddFeed(url, title, folders) => {
+                if !title.is_empty() && !self.known().contains(&store::feed_id(&url)) && self.known().contains(&work::fingerprint(&title, &url)) {
+                    (self.emit)(Event::FeedAdded(Err(format!("you already follow {title} at another address"))));
+                    return;
+                }
                 let feed = match self.store.add_feed(&url, &title) {
                     Ok(f) => f,
                     Err(e) => {
@@ -542,6 +576,10 @@ impl Engine {
                         return;
                     }
                 };
+                if !folders.is_empty() {
+                    self.store.add_to_folders(&feed.id, &folders);
+                    (self.emit)(Event::Folders(self.store.folders()));
+                }
                 (self.emit)(Event::Feeds(self.store.feeds()));
                 (self.emit)(Event::EntriesAdded(self.store.removed_entries(&feed.id)));
                 let client = self.client.clone();
@@ -571,21 +609,26 @@ impl Engine {
                         return;
                     }
                 };
-                let known = self.known();
+                let mut known = self.known();
                 let mut added = 0;
                 let mut skipped = 0;
-                for (url, title) in work::read_opml(&text) {
+                for (url, title, folder) in work::read_opml(&text) {
                     match net::parse_url(&url) {
-                        Ok(u) if !known.contains(&store::feed_id(u.as_str())) => {
-                            if self.store.add_feed(u.as_str(), &title).is_ok() {
+                        Ok(u) => {
+                            let id = store::feed_id(u.as_str());
+                            if !known.contains(&id) && self.store.add_feed(u.as_str(), &title).is_ok() {
                                 added += 1;
+                                known.insert(id.clone());
+                            }
+                            if let Some(f) = folder {
+                                self.store.add_to_folders(&id, &[f]);
                             }
                         }
-                        Ok(_) => {}
                         Err(_) => skipped += 1,
                     }
                 }
                 (self.emit)(Event::Feeds(self.store.feeds()));
+                (self.emit)(Event::Folders(self.store.folders()));
                 let skipped = if skipped > 0 { format!(", skipped {skipped} unsafe links") } else { String::new() };
                 (self.emit)(Event::Message(format!("Imported {added} new feeds{skipped}")));
                 if added > 0 {
@@ -594,7 +637,7 @@ impl Engine {
             }
             Request::ExportOpml(path) => {
                 let feeds: Vec<Feed> = self.store.feeds().into_iter().filter(|f| f.id != SAVED).collect();
-                let text = work::write_opml(&feeds);
+                let text = work::write_opml(&feeds, &self.store.folders());
                 let msg = match std::fs::write(&path, text) {
                     Ok(()) => format!("Exported {} feeds to {}", feeds.len(), path.display()),
                     Err(e) => format!("Couldn't write {}: {e}", path.display()),
@@ -645,7 +688,7 @@ impl Engine {
                 }
             }
             Request::SetFeedFolders(feed, names) => {
-                self.store.set_feed_folders(&feed, &names, now());
+                self.store.set_feed_folders(&feed, &names);
                 (self.emit)(Event::Folders(self.store.folders()));
             }
             Request::RenameFolder(id, name) => {

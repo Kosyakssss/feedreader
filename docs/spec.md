@@ -107,7 +107,7 @@ Several people per engine, each with their own subscriptions, state, folders, pi
 - Move to another machine: pair the new engine, transfer state and settings directly, make it the hub, repoint devices and the public link.
 
 ### 2.14 Command line
-The `feedreader` command is the same binary as the desktop app: `serve` (headless engine), `service install`, `pair`, `add <url>`, `import <file>`, `refresh`, `extract <url>` (the Clean text of any page), `unread` (unread entries as a Markdown list, for scripts and agents) and `upgrade`. Bare `feedreader` opens the desktop app.
+The `feedreader` command is the same binary as the desktop app: `serve` (headless engine), `service install`, `pair`, `add <url>`, `import <file>`, `export <file>`, `refresh`, `extract <url>` (the Clean text of any page), `unread` (unread entries as a Markdown list, for scripts and agents) and `upgrade`. Bare `feedreader` opens the desktop app.
 
 ## 3. UX
 
@@ -299,7 +299,7 @@ Status: done, partial or open. Each step is committed and pushed to `main` when 
 7. **Partial.** Images and the media cache with prefetch and pruning; audio, video and embeds play in the web pane. Open: caching attachments for offline (limits are Open, §7), favicons.
 8. **Done.** Command palette and search: every available command, views, folders, feeds, and entries by title and full text with `is:`, `in:`, `from:`; Cmd-K.
 9. **Partial.** Tabs: history, background tabs (middle-click, bulk open), peek and kept, Cmd-W, Cmd-Shift-T, Cmd-Shift-[ and ], undoable closing, persistence; links open in the tab with Add as feed and Bookmark. Open: reordering by drag, one web view per tab.
-10. **Open.** Discovery ladder (platforms, YouTube, JSON-LD, h-feed, sitemaps) and the picker with preview and folder; OPML folders both ways; Follow this site.
+10. **Partial.** Discovery: link tags on the page and the site root, common paths, YouTube channels, handles and playlists, Medium, Substack, GitHub, Reddit; the picker with recent titles and subscribing into folders; identity by address and by title and site; OPML folders both ways; Follow this site after saving a link. Open: JSON-LD, h-feed, sitemaps.
 11. **Open.** Themes: dark mode following the system, theme files with hot reload; reading settings.
 12. **Open.** Persistent 24-hour undo; commands and the change log.
 13. **Open.** Background engine (`serve`, lock file, attach), `service install`, retiring the old Bun service.

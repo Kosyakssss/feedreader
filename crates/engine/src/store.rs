@@ -117,6 +117,12 @@ pub fn feed_id(url: &str) -> FeedId {
     digest[..8].iter().map(|b| format!("{b:02x}")).collect()
 }
 
+pub fn new_id() -> String {
+    let mut bytes = [0u8; 8];
+    getrandom::fill(&mut bytes).expect("system randomness");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 pub fn entry_id(feed: &str, source: &str) -> EntryId {
     let encoded: String = url::form_urlencoded::byte_serialize(source.as_bytes()).collect();
     format!("{feed}:{encoded}")
@@ -570,16 +576,35 @@ impl Store {
             .collect()
     }
 
-    pub fn set_feed_folders(&mut self, feed: &str, names: &[String], now: i64) {
+    pub fn add_to_folders(&mut self, feed: &str, names: &[String]) {
+        let mut all: Vec<String> = self.folders().into_iter().filter(|f| f.feeds.iter().any(|x| x == feed)).map(|f| f.name).collect();
+        for n in names {
+            if !all.iter().any(|a| a.eq_ignore_ascii_case(n.trim())) {
+                all.push(n.trim().to_string());
+            }
+        }
+        self.set_feed_folders(feed, &all);
+    }
+
+    pub fn offered(&self, host: &str) -> bool {
+        let key = format!("offered:{host}");
+        let seen = self.db.query_row("select 1 from settings where key = ?1", [&key], |_| Ok(())).is_ok();
+        if !seen {
+            let _ = self.db.execute("insert into settings (key, value) values (?1, '1')", [&key]);
+        }
+        seen
+    }
+
+    pub fn set_feed_folders(&mut self, feed: &str, names: &[String]) {
         let tx = self.db.transaction().unwrap();
         let _ = tx.execute("delete from folder_feeds where feed_id = ?1", [feed]);
-        for (i, name) in names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).enumerate() {
+        for name in names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()) {
             let existing: Option<String> = tx
                 .query_row("select id from folders where name = ?1 collate nocase", [name], |r| r.get(0))
                 .optional()
                 .unwrap_or(None);
             let id = existing.unwrap_or_else(|| {
-                let id = format!("{:x}{i}", now);
+                let id = new_id();
                 let _ = tx.execute("insert into folders (id, name) values (?1, ?2)", params![id, name]);
                 id
             });

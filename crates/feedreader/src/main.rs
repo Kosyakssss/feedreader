@@ -1109,6 +1109,22 @@ fn cli(args: &[String]) -> bool {
             println!("{}", model.message.unwrap_or_default());
             true
         }
+        Some("export") => {
+            let Some(path) = args.get(2) else {
+                eprintln!("usage: feedreader export <file.opml>");
+                return true;
+            };
+            let path = cmds::expand(path);
+            if path.exists() {
+                eprintln!("{} already exists; choose a new file name", path.display());
+                return true;
+            }
+            let (handle, rx, mut model) = headless();
+            handle.send(Request::ExportOpml(path));
+            wait_for(&rx, &mut model, Duration::from_secs(30), |_, e| matches!(e, Event::Message(_)));
+            println!("{}", model.message.unwrap_or_default());
+            true
+        }
         Some("refresh") => {
             let (handle, rx, mut model) = headless();
             handle.send(Request::Refresh);

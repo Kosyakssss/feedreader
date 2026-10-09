@@ -142,6 +142,7 @@ pub struct Candidate {
     pub entries: usize,
     pub latest: Option<i64>,
     pub subscribed: bool,
+    pub recent: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -230,7 +231,7 @@ pub enum Request {
     SetBookmarked(Vec<EntryId>, bool),
     Refresh,
     Discover(String),
-    AddFeed(String, String),
+    AddFeed(String, String, Vec<String>),
     RemoveFeed(FeedId),
     RestoreFeed(FeedId),
     RenameFeed(FeedId, Option<String>),
@@ -284,5 +285,6 @@ pub enum Event {
     Message(String),
     Extract { job: u64, url: String, html: String },
     Media(String, Result<std::path::PathBuf, String>),
+    FollowOffer(String, Vec<Candidate>),
     Probed(String, Result<(Extracted, Extractor), String>),
 }
