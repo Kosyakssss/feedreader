@@ -3,6 +3,8 @@ mod parse;
 mod public;
 pub mod rules;
 pub mod serve;
+mod hub;
+mod sat;
 mod schedule;
 mod store;
 mod types;
@@ -23,6 +25,22 @@ use parse::ParsedFeed;
 use store::Store;
 
 const MEDIA_BUDGET: i64 = 1_000_000_000;
+
+pub fn sync_port() -> u16 {
+    std::env::var("FEEDREADER_SYNC_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8790)
+}
+
+fn lan_ip() -> Option<std::net::IpAddr> {
+    let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    s.connect("192.0.2.1:9").ok()?;
+    s.local_addr().ok().map(|a| a.ip()).filter(|ip| !ip.is_loopback() && !ip.is_unspecified())
+}
+
+fn tailscale_name() -> Option<String> {
+    let out = std::process::Command::new("tailscale").args(["status", "--json"]).output().ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    v.get("Self")?.get("DNSName")?.as_str().map(|s| s.trim_end_matches('.').to_string()).filter(|s| !s.is_empty())
+}
 
 pub enum Link {
     Local(UnboundedSender<Request>),
@@ -108,6 +126,10 @@ pub fn article_text(html: &str, base: &str) -> String {
     out.join("\n\n")
 }
 
+pub fn check_pairing_link(link: &str) -> Result<(), String> {
+    sat::parse_link(link).map(|_| ())
+}
+
 pub fn check_input(input: &str) -> Result<(), String> {
     net::parse_url(input).map(|_| ())
 }
@@ -159,7 +181,13 @@ enum Job {
     Probe(String),
 }
 
-enum Internal {
+pub(crate) enum Internal {
+    Api(hub::Api),
+    Ask(sat::Ask),
+    Pulled(i64, hub::Pulled),
+    Content(hub::Content),
+    HubOnline(bool, String),
+    Paired(Result<sat::HubLink, String>),
     Page(Job, Result<(String, String), String>),
     MediaFetched(String, Result<(String, String, i64), String>),
     Offer(String, Result<Vec<Candidate>, String>),
@@ -187,6 +215,15 @@ struct Engine {
     media_gate: std::sync::Arc<tokio::sync::Semaphore>,
     jobs: std::collections::HashMap<u64, (Job, String, String)>,
     next_job: u64,
+    device: String,
+    hlc: i64,
+    batching: bool,
+    changed: tokio::sync::watch::Sender<i64>,
+    hub: Option<sat::HubLink>,
+    hub_online: bool,
+    hub_address: String,
+    hub_task: Option<tokio::task::JoinHandle<()>>,
+    listener: Option<tokio::task::JoinHandle<()>>,
 }
 
 fn wait_hint(f: &net::Fetched) -> Option<i64> {
@@ -237,6 +274,10 @@ impl Engine {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let store = Store::open(&dir.join("feedreader.sqlite")).map_err(|e| e.to_string())?;
         let settings = store.settings();
+        let device = store.device();
+        let hlc = store.max_clock();
+        let changed = tokio::sync::watch::channel(store.last_seq()).0;
+        let hub = std::fs::read(dir.join("secrets/hub.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
         Ok(Self {
             dir,
             store,
@@ -254,6 +295,15 @@ impl Engine {
             media_gate: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
             jobs: Default::default(),
             next_job: 0,
+            device,
+            hlc,
+            changed,
+            batching: false,
+            hub,
+            hub_online: false,
+            hub_address: String::new(),
+            hub_task: None,
+            listener: None,
         })
     }
 
@@ -298,6 +348,22 @@ impl Engine {
                 self.public_url = Some(format!("http://127.0.0.1:{port}/{}/", self.store.token()));
             }
             Err(_) => self.public_url = None,
+        }
+        if self.hub.is_none() && self.store.get("log_seeded").is_none() {
+            self.seed_log();
+        }
+        match self.hub.clone() {
+            Some(link) => self.start_satellite(link),
+            None => {
+                let api = self.itx.clone().expect("running");
+                let changed = self.changed.subscribe();
+                let port = sync_port();
+                self.listener = Some(tokio::spawn(async move {
+                    if let Err(e) = hub::serve(port, api, changed).await {
+                        eprintln!("sync listener on port {port}: {e}");
+                    }
+                }));
+            }
         }
         self.snapshot();
         loop {
@@ -416,6 +482,303 @@ impl Engine {
         }));
     }
 
+    fn seed_log(&mut self) {
+        for (n, command) in self.store.state_commands().into_iter().enumerate() {
+            let change = Change { id: store::new_id(), device: self.device.clone(), at: 1 + n as i64, command };
+            let seq = self.store.log_change(&change);
+            self.changed.send_replace(seq);
+        }
+        self.store.put("log_seeded", "1");
+    }
+
+    fn tick(&mut self) -> i64 {
+        self.hlc = (now() * 1000).max(self.hlc + 1);
+        self.hlc
+    }
+
+    fn local(&mut self, command: Command) {
+        let change = Change { id: store::new_id(), device: self.device.clone(), at: self.tick(), command };
+        self.commit(change);
+    }
+
+    fn commit(&mut self, change: Change) -> bool {
+        if self.store.has_change(&change.id) {
+            return false;
+        }
+        self.hlc = self.hlc.max(change.at);
+        self.apply(&change);
+        let seq = self.store.log_change(&change);
+        self.changed.send_replace(seq);
+        true
+    }
+
+    fn feeds_changed(&self) {
+        (self.emit)(Event::Feeds(self.store.feeds()));
+    }
+
+    fn folders_changed(&self) {
+        (self.emit)(Event::Folders(self.store.folders()));
+    }
+
+    #[profiling::function]
+    fn apply(&mut self, change: &Change) {
+        let (at, dev) = (change.at, change.device.as_str());
+        let t = at / 1000;
+        let fresh = |store: &Store, key: String| store.newer(&key, at, dev);
+        match &change.command {
+            Command::Read(ids, v) => {
+                let ids: Vec<EntryId> = ids.iter().filter(|id| fresh(&self.store, format!("read:{id}"))).cloned().collect();
+                self.store.set_read(&ids, *v, t);
+                if change.device != self.device && !ids.is_empty() {
+                    (self.emit)(Event::States(ids.into_iter().map(|id| (id, Some(*v), None)).collect()));
+                }
+            }
+            Command::Bookmark(ids, v) => {
+                let ids: Vec<EntryId> = ids.iter().filter(|id| fresh(&self.store, format!("bookmark:{id}"))).cloned().collect();
+                self.store.set_bookmarked(&ids, *v, t);
+                if change.device != self.device && !ids.is_empty() {
+                    (self.emit)(Event::States(ids.into_iter().map(|id| (id, None, Some(*v))).collect()));
+                }
+            }
+            Command::Subscribe(url, title, folders) => {
+                let id = store::feed_id(url);
+                if !fresh(&self.store, format!("sub:{id}")) {
+                    return;
+                }
+                let feed = match self.store.add_feed(url, title) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        (self.emit)(Event::FeedAdded(Err(e.to_string())));
+                        return;
+                    }
+                };
+                if !folders.is_empty() {
+                    self.store.add_to_folders(&feed.id, folders);
+                    self.folders_changed();
+                }
+                if self.batching {
+                    return;
+                }
+                self.feeds_changed();
+                (self.emit)(Event::EntriesAdded(self.store.removed_entries(&feed.id)));
+                if self.fetches() {
+                    let client = self.client.clone();
+                    let v = self.store.validators(&feed.id);
+                    self.spawn(async move {
+                        let (r, _) = fetch_feed(&client, &feed.url, v).await;
+                        Internal::Added(feed.id, r)
+                    });
+                }
+            }
+            Command::Unsubscribe(id) => {
+                if fresh(&self.store, format!("sub:{id}")) {
+                    self.store.remove_feed(id, t);
+                    self.feeds_changed();
+                }
+            }
+            Command::Resubscribe(id) => {
+                if fresh(&self.store, format!("sub:{id}")) {
+                    self.store.restore_feed(id);
+                    self.feeds_changed();
+                    (self.emit)(Event::EntriesAdded(self.store.removed_entries(id)));
+                }
+            }
+            Command::Rename(id, label) => {
+                if fresh(&self.store, format!("label:{id}")) {
+                    self.store.rename_feed(id, label.as_deref().filter(|l| !l.trim().is_empty()));
+                    self.feeds_changed();
+                }
+            }
+            Command::Folders(feed, names) => {
+                if fresh(&self.store, format!("folders:{feed}")) {
+                    self.store.set_feed_folders(feed, names);
+                    if !self.batching {
+                        self.folders_changed();
+                    }
+                }
+            }
+            Command::RenameFolder(id, name) => {
+                if fresh(&self.store, format!("folder:{id}")) {
+                    self.store.rename_folder(id, name);
+                    self.folders_changed();
+                }
+            }
+            Command::DeleteFolder(id) => {
+                if fresh(&self.store, format!("folder:{id}")) {
+                    self.store.delete_folder(id);
+                    self.folders_changed();
+                }
+            }
+            Command::RestoreFolder(f) => {
+                if fresh(&self.store, format!("folder:{}", f.id)) {
+                    self.store.restore_folder(f);
+                    self.folders_changed();
+                }
+            }
+            Command::Pin(id, on) => {
+                if fresh(&self.store, format!("pin:{id}")) {
+                    self.store.set_feed_flag(id, "pinned", *on);
+                    self.feeds_changed();
+                }
+            }
+            Command::Hide(id, on) => {
+                if fresh(&self.store, format!("hide:{id}")) {
+                    self.store.set_feed_flag(id, "hidden", *on);
+                    self.feeds_changed();
+                }
+            }
+            Command::FeedMode(id, mode) => {
+                if fresh(&self.store, format!("mode:{id}")) {
+                    self.store.set_feed_mode(id, *mode);
+                    self.feeds_changed();
+                }
+            }
+            Command::AddRule(rule) => {
+                if fresh(&self.store, format!("rule:{}", rule.id)) {
+                    self.store.add_rule(rule);
+                    (self.emit)(Event::Rules(self.store.rules()));
+                }
+            }
+            Command::RemoveRule(id) => {
+                if fresh(&self.store, format!("rule:{id}")) {
+                    self.store.remove_rule(id);
+                    (self.emit)(Event::Rules(self.store.rules()));
+                }
+            }
+            Command::Recommend(id, note) => {
+                if fresh(&self.store, format!("rec:{id}")) {
+                    if self.store.recommend(id, note, t) {
+                        self.publish();
+                    }
+                    (self.emit)(Event::Recommendations(self.store.recommendations()));
+                }
+            }
+            Command::Unrecommend(id) => {
+                if fresh(&self.store, format!("rec:{id}")) {
+                    self.store.unrecommend(id, t);
+                    self.publish();
+                    (self.emit)(Event::Recommendations(self.store.recommendations()));
+                }
+            }
+            Command::SaveLink(url) => {
+                if self.fetches() || change.device == self.device {
+                    self.fetch_page(Job::Save(url.clone()), url.clone());
+                }
+            }
+            Command::Tabs(tabs) => {
+                if fresh(&self.store, "tabs".into()) {
+                    self.store.set_tabs(tabs);
+                    if change.device != self.device {
+                        (self.emit)(Event::Tabs(tabs.clone()));
+                    }
+                }
+            }
+            Command::Settings(st) => {
+                if !fresh(&self.store, "settings".into()) {
+                    return;
+                }
+                let st = st.clone();
+                let interval_changed = st.refresh_minutes != self.settings.refresh_minutes;
+                let retention_changed = st.max_entries != self.settings.max_entries || st.max_age_days != self.settings.max_age_days;
+                self.store.save_settings(&st);
+                self.settings = st;
+                if interval_changed && !self.status.running {
+                    let wait = Duration::from_secs(self.settings.refresh_minutes.max(1) as u64 * 60);
+                    self.next = Instant::now() + wait;
+                    self.status.next_at = Some(now() + wait.as_millis() as i64);
+                    (self.emit)(Event::Refresh(self.status.clone()));
+                }
+                if retention_changed {
+                    let removed = self.store.prune(&self.settings, now());
+                    if !removed.is_empty() {
+                        (self.emit)(Event::EntriesRemoved(removed));
+                    }
+                }
+                (self.emit)(Event::Settings(self.settings.clone()));
+            }
+        }
+    }
+
+    fn fetches(&self) -> bool {
+        self.hub.is_none() || !self.hub_online
+    }
+
+    fn start_satellite(&mut self, link: sat::HubLink) {
+        if let Some(t) = self.hub_task.take() {
+            t.abort();
+        }
+        let tx = self.itx.clone().expect("running");
+        let changed = self.changed.subscribe();
+        self.hub_task = Some(tokio::spawn(sat::run(link, tx, changed)));
+    }
+
+    fn sync_status(&self) {
+        let status = match &self.hub {
+            Some(link) => SyncStatus::Satellite {
+                online: self.hub_online,
+                address: if self.hub_address.is_empty() { link.addresses.first().cloned().unwrap_or_default() } else { self.hub_address.clone() },
+            },
+            None => SyncStatus::Hub { devices: self.store.devices().into_iter().map(|(_, name, seen)| (name, seen)).collect() },
+        };
+        (self.emit)(Event::Sync(status));
+    }
+
+    fn pairing_link(&self, code: &str) -> String {
+        let port = sync_port();
+        let mut hubs = Vec::new();
+        if let Some(name) = tailscale_name() {
+            hubs.push(format!("http://{name}:{port}"));
+        }
+        if let Some(ip) = lan_ip() {
+            hubs.push(format!("http://{ip}:{port}"));
+        }
+        hubs.push(format!("http://127.0.0.1:{port}"));
+        format!("feedreader://pair?code={code}&hub={}", hubs.join(","))
+    }
+
+    fn api(&mut self, call: hub::Api) {
+        let t = now();
+        match call {
+            hub::Api::Pair { code, device, name, reply } => {
+                let token = self.store.redeem_code(&code, &device, &name, t);
+                if token.is_some() {
+                    (self.emit)(Event::Message(format!("Paired {name}.")));
+                    self.sync_status();
+                }
+                let _ = reply.send(token);
+            }
+            hub::Api::Auth { token, reply } => {
+                let _ = reply.send(self.store.device_for(&token, t));
+            }
+            hub::Api::Sync { device, since, changes, reply } => {
+                for c in changes {
+                    self.commit(c);
+                }
+                let list = self.store.changes_since(since, &device, 500);
+                let more = list.len() == 500;
+                let seq = if more { list.last().map(|(s, _)| *s).unwrap_or(since) } else { self.store.last_seq() };
+                let _ = reply.send(hub::Pulled { seq, changes: list, more });
+            }
+            hub::Api::Content { since, reply } => {
+                let (feeds, entries, next) = self.store.content_since(since, 300);
+                let more = entries.len() == 300;
+                let _ = reply.send(hub::Content { feeds, entries, next, more });
+            }
+            hub::Api::Media { url, reply } => {
+                let path = self
+                    .store
+                    .media(&url)
+                    .filter(|m| m.error.is_none() && !m.file.is_empty())
+                    .map(|m| self.dir.join("media").join(m.file))
+                    .filter(|p| p.is_file());
+                if path.is_none() {
+                    self.want_media(vec![url], false);
+                }
+                let _ = reply.send(path);
+            }
+        }
+    }
+
     fn known(&self) -> HashSet<String> {
         let mut known = HashSet::new();
         for f in self.store.feeds().into_iter().filter(|f| f.id != SAVED) {
@@ -524,8 +887,14 @@ impl Engine {
             let client = self.client.clone();
             let dir = self.dir.join("media");
             let gate = self.media_gate.clone();
+            let hub = self.hub.clone().filter(|_| self.hub_online);
             self.spawn(async move {
                 let _permit = gate.acquire_owned().await;
+                if let Some(link) = hub
+                    && let Some(bytes) = sat::fetch_media(&sat::client(), &link, &url).await
+                {
+                    return Internal::MediaFetched(url.clone(), work::store_media(&dir, &url, &bytes, "").await);
+                }
                 let r = work::fetch_media(&client, &url, &dir).await;
                 Internal::MediaFetched(url, r)
             });
@@ -598,6 +967,62 @@ impl Engine {
             Internal::RefreshDone(_) => {}
             Internal::Discovered(q, r) => (self.emit)(Event::Discovered(q, r)),
             Internal::Page(job, r) => self.page(job, r),
+            Internal::Api(call) => self.api(call),
+            Internal::Ask(sat::Ask::Outbox { reply }) => {
+                let pushed: i64 = self.store.get("sync_pushed").and_then(|v| v.parse().ok()).unwrap_or(0);
+                let pulled: i64 = self.store.get("sync_pulled").and_then(|v| v.parse().ok()).unwrap_or(0);
+                let cursor: i64 = self.store.get("content_cursor").and_then(|v| v.parse().ok()).unwrap_or(0);
+                let list = self.store.outbox(&self.device, pushed, 500);
+                let top = list.last().map(|(s, _)| *s).unwrap_or(pushed);
+                let _ = reply.send((list.into_iter().map(|(_, c)| c).collect(), top, pulled, cursor));
+            }
+            Internal::Pulled(top, p) => {
+                self.store.put("sync_pushed", &top.to_string());
+                for (_, c) in p.changes {
+                    self.commit(c);
+                }
+                self.store.put("sync_pulled", &p.seq.to_string());
+            }
+            Internal::Content(c) => {
+                let added = self.store.take_content(&c.feeds, &c.entries);
+                self.store.put("content_cursor", &c.next.to_string());
+                if !c.feeds.is_empty() {
+                    self.feeds_changed();
+                }
+                if !added.is_empty() {
+                    (self.emit)(Event::EntriesAdded(added));
+                }
+            }
+            Internal::HubOnline(online, address) => {
+                if online != self.hub_online || (online && self.hub_address != address) {
+                    self.hub_online = online;
+                    self.hub_address = address;
+                    self.sync_status();
+                }
+            }
+            Internal::Paired(r) => match r {
+                Ok(link) => {
+                    let secrets = self.dir.join("secrets");
+                    let _ = std::fs::create_dir_all(&secrets);
+                    let _ = std::fs::set_permissions(&secrets, std::os::unix::fs::PermissionsExt::from_mode(0o700));
+                    let path = secrets.join("hub.json");
+                    if let Ok(bytes) = serde_json::to_vec(&link) {
+                        let _ = std::fs::write(&path, bytes);
+                        let _ = std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
+                    }
+                    self.hub = Some(link.clone());
+                    if let Some(l) = self.listener.take() {
+                        l.abort();
+                    }
+                    self.store.put("sync_pushed", "0");
+                    self.store.put("sync_pulled", "0");
+                    self.store.put("content_cursor", "0");
+                    self.start_satellite(link);
+                    (self.emit)(Event::Message("Paired with the hub. Syncing\u{2026}".into()));
+                    self.sync_status();
+                }
+                Err(e) => (self.emit)(Event::Message(format!("Couldn't pair: {e}"))),
+            },
             Internal::Offer(host, r) => {
                 if let Ok(c) = r
                     && !c.is_empty()
@@ -646,8 +1071,8 @@ impl Engine {
     #[profiling::function]
     fn request(&mut self, r: Request) {
         match r {
-            Request::SetRead(ids, v) => self.store.set_read(&ids, v, now()),
-            Request::SetBookmarked(ids, v) => self.store.set_bookmarked(&ids, v, now()),
+            Request::SetRead(ids, v) => self.local(Command::Read(ids, v)),
+            Request::SetBookmarked(ids, v) => self.local(Command::Bookmark(ids, v)),
             Request::Refresh => self.start_refresh(true),
             Request::Discover(q) => {
                 let client = self.client.clone();
@@ -662,38 +1087,11 @@ impl Engine {
                     (self.emit)(Event::FeedAdded(Err(format!("you already follow {title} at another address"))));
                     return;
                 }
-                let feed = match self.store.add_feed(&url, &title) {
-                    Ok(f) => f,
-                    Err(e) => {
-                        (self.emit)(Event::FeedAdded(Err(e.to_string())));
-                        return;
-                    }
-                };
-                if !folders.is_empty() {
-                    self.store.add_to_folders(&feed.id, &folders);
-                    (self.emit)(Event::Folders(self.store.folders()));
-                }
-                (self.emit)(Event::Feeds(self.store.feeds()));
-                (self.emit)(Event::EntriesAdded(self.store.removed_entries(&feed.id)));
-                let client = self.client.clone();
-                let v = self.store.validators(&feed.id);
-                self.spawn(async move {
-                    let (r, _) = fetch_feed(&client, &feed.url, v).await;
-                    Internal::Added(feed.id, r)
-                });
+                self.local(Command::Subscribe(url, title, folders));
             }
-            Request::RemoveFeed(id) => {
-                self.store.remove_feed(&id, now());
-                (self.emit)(Event::Feeds(self.store.feeds()));
-            }
-            Request::RestoreFeed(id) => {
-                self.store.restore_feed(&id);
-                (self.emit)(Event::Feeds(self.store.feeds()));
-            }
-            Request::RenameFeed(id, label) => {
-                self.store.rename_feed(&id, label.as_deref().filter(|l| !l.trim().is_empty()));
-                (self.emit)(Event::Feeds(self.store.feeds()));
-            }
+            Request::RemoveFeed(id) => self.local(Command::Unsubscribe(id)),
+            Request::RestoreFeed(id) => self.local(Command::Resubscribe(id)),
+            Request::RenameFeed(id, label) => self.local(Command::Rename(id, label)),
             Request::ImportOpml(path) => {
                 let text = match std::fs::read_to_string(&path) {
                     Ok(t) => t,
@@ -705,21 +1103,28 @@ impl Engine {
                 let mut known = self.known();
                 let mut added = 0;
                 let mut skipped = 0;
+                self.batching = true;
                 for (url, title, folder) in work::read_opml(&text) {
                     match net::parse_url(&url) {
                         Ok(u) => {
                             let id = store::feed_id(u.as_str());
-                            if !known.contains(&id) && self.store.add_feed(u.as_str(), &title).is_ok() {
+                            if !known.contains(&id) {
+                                self.local(Command::Subscribe(u.to_string(), title, Vec::new()));
                                 added += 1;
                                 known.insert(id.clone());
                             }
                             if let Some(f) = folder {
-                                self.store.add_to_folders(&id, &[f]);
+                                let mut names: Vec<String> = self.store.folders().into_iter().filter(|x| x.feeds.contains(&id)).map(|x| x.name).collect();
+                                if !names.iter().any(|n| n.eq_ignore_ascii_case(&f)) {
+                                    names.push(f);
+                                    self.local(Command::Folders(id, names));
+                                }
                             }
                         }
                         Err(_) => skipped += 1,
                     }
                 }
+                self.batching = false;
                 (self.emit)(Event::Feeds(self.store.feeds()));
                 (self.emit)(Event::Folders(self.store.folders()));
                 let skipped = if skipped > 0 { format!(", skipped {skipped} unsafe links") } else { String::new() };
@@ -739,7 +1144,10 @@ impl Engine {
             }
             Request::ImportLegacy(path) => {
                 let msg = match self.store.import_legacy(&path) {
-                    Ok((f, e)) => format!("Imported {f} feeds and {e} entries from {}", path.display()),
+                    Ok((f, e)) => {
+                        self.seed_log();
+                        format!("Imported {f} feeds and {e} entries from {}", path.display())
+                    }
                     Err(e) => format!("Import failed: {e}"),
                 };
                 self.snapshot();
@@ -780,59 +1188,23 @@ impl Engine {
                     }
                 }
             }
-            Request::SetFeedFolders(feed, names) => {
-                self.store.set_feed_folders(&feed, &names);
-                (self.emit)(Event::Folders(self.store.folders()));
-            }
-            Request::RenameFolder(id, name) => {
-                self.store.rename_folder(&id, &name);
-                (self.emit)(Event::Folders(self.store.folders()));
-            }
-            Request::DeleteFolder(id) => {
-                self.store.delete_folder(&id);
-                (self.emit)(Event::Folders(self.store.folders()));
-            }
-            Request::RestoreFolder(f) => {
-                self.store.restore_folder(&f);
-                (self.emit)(Event::Folders(self.store.folders()));
-            }
-            Request::SetPinned(id, on) => {
-                self.store.set_feed_flag(&id, "pinned", on);
-                (self.emit)(Event::Feeds(self.store.feeds()));
-            }
-            Request::SetHidden(id, on) => {
-                self.store.set_feed_flag(&id, "hidden", on);
-                (self.emit)(Event::Feeds(self.store.feeds()));
-            }
-            Request::SetFeedMode(id, mode) => {
-                self.store.set_feed_mode(&id, mode);
-                (self.emit)(Event::Feeds(self.store.feeds()));
-            }
-            Request::AddRule(rule) => {
-                self.store.add_rule(&rule);
-                (self.emit)(Event::Rules(self.store.rules()));
-            }
-            Request::RemoveRule(id) => {
-                self.store.remove_rule(&id);
-                (self.emit)(Event::Rules(self.store.rules()));
-            }
-            Request::Recommend(id, note) => {
-                if self.store.recommend(&id, &note, now()) {
-                    self.publish();
-                }
-                (self.emit)(Event::Recommendations(self.store.recommendations()));
-            }
-            Request::Unrecommend(id) => {
-                self.store.unrecommend(&id, now());
-                self.publish();
-                (self.emit)(Event::Recommendations(self.store.recommendations()));
-            }
+            Request::SetFeedFolders(feed, names) => self.local(Command::Folders(feed, names)),
+            Request::RenameFolder(id, name) => self.local(Command::RenameFolder(id, name)),
+            Request::DeleteFolder(id) => self.local(Command::DeleteFolder(id)),
+            Request::RestoreFolder(f) => self.local(Command::RestoreFolder(f)),
+            Request::SetPinned(id, on) => self.local(Command::Pin(id, on)),
+            Request::SetHidden(id, on) => self.local(Command::Hide(id, on)),
+            Request::SetFeedMode(id, mode) => self.local(Command::FeedMode(id, mode)),
+            Request::AddRule(rule) => self.local(Command::AddRule(rule)),
+            Request::RemoveRule(id) => self.local(Command::RemoveRule(id)),
+            Request::Recommend(id, note) => self.local(Command::Recommend(id, note)),
+            Request::Unrecommend(id) => self.local(Command::Unrecommend(id)),
             Request::Search(q) => {
                 let ids = self.store.search(&q);
                 (self.emit)(Event::SearchResults(q, ids));
             }
             Request::SaveLink(input) => match net::parse_url(&input) {
-                Ok(u) => self.fetch_page(Job::Save(u.to_string()), u.to_string()),
+                Ok(u) => self.local(Command::SaveLink(u.to_string())),
                 Err(e) => (self.emit)(Event::Message(format!("Couldn't save {input}: {e}"))),
             },
             Request::Probe(input) => match net::parse_url(&input) {
@@ -840,7 +1212,41 @@ impl Engine {
                 Err(e) => (self.emit)(Event::Probed(input, Err(e))),
             },
             Request::UseWebExtractor => self.web_extractor += 1,
-            Request::Resync => self.snapshot(),
+            Request::PairCode => {
+                if self.hub.is_some() {
+                    (self.emit)(Event::Message("This device syncs with a hub; pair new devices on the hub.".into()));
+                    return;
+                }
+                let code = self.store.issue_code(now());
+                (self.emit)(Event::Pairing(self.pairing_link(&code)));
+            }
+            Request::Pair(link, name) => {
+                let device = self.device.clone();
+                self.spawn(async move {
+                    let client = sat::client();
+                    Internal::Paired(sat::pair(&client, &link, &device, &name).await)
+                });
+            }
+            Request::Unpair => {
+                if let Some(t) = self.hub_task.take() {
+                    t.abort();
+                }
+                let _ = std::fs::remove_file(self.dir.join("secrets/hub.json"));
+                self.hub = None;
+                self.hub_online = false;
+                (self.emit)(Event::Message("This device no longer syncs with a hub. Restart the engine to make it a hub.".into()));
+                self.sync_status();
+            }
+            Request::ForgetDevice(name) => {
+                if let Some((d, _, _)) = self.store.devices().into_iter().find(|(_, n, _)| *n == name) {
+                    self.store.forget_device(&d);
+                }
+                self.sync_status();
+            }
+            Request::Resync => {
+                self.snapshot();
+                self.sync_status();
+            }
             Request::Detach { extractor } => {
                 if extractor {
                     self.web_extractor = self.web_extractor.saturating_sub(1);
@@ -852,7 +1258,7 @@ impl Engine {
                 }
             }
             Request::Shutdown => std::process::exit(0),
-            Request::SetTabs(tabs) => self.store.set_tabs(&tabs),
+            Request::SetTabs(tabs) => self.local(Command::Tabs(tabs)),
             Request::Media(urls) => self.want_media(urls, true),
             Request::Extracted(id, r) => {
                 let Some((job, url, html)) = self.jobs.remove(&id) else { return };
@@ -861,25 +1267,7 @@ impl Engine {
                     _ => self.read_locally(job, url, html),
                 }
             }
-            Request::SetSettings(s) => {
-                let interval_changed = s.refresh_minutes != self.settings.refresh_minutes;
-                let retention_changed = s.max_entries != self.settings.max_entries || s.max_age_days != self.settings.max_age_days;
-                self.store.save_settings(&s);
-                self.settings = s;
-                if interval_changed && !self.status.running {
-                    let wait = Duration::from_secs(self.settings.refresh_minutes.max(1) as u64 * 60);
-                    self.next = Instant::now() + wait;
-                    self.status.next_at = Some(now() + wait.as_millis() as i64);
-                    (self.emit)(Event::Refresh(self.status.clone()));
-                }
-                if retention_changed {
-                    let removed = self.store.prune(&self.settings, now());
-                    if !removed.is_empty() {
-                        (self.emit)(Event::EntriesRemoved(removed));
-                    }
-                }
-                (self.emit)(Event::Settings(self.settings.clone()));
-            }
+            Request::SetSettings(st) => self.local(Command::Settings(st)),
         }
     }
 }

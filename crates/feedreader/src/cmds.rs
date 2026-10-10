@@ -86,6 +86,7 @@ pub enum Cmd {
     DismissOffer,
     QuitCompletely,
     RestartEngine,
+    ForgetDevice,
 }
 
 fn idle(m: &Model) -> bool {
@@ -180,6 +181,10 @@ pub fn registry() -> Registry<Cmd, Model> {
                 if n == 1 { "follow this site".into() } else { format!("see its {n} feeds") }
             }, |m| idle(m) && m.offer.is_some()),
             c(Cmd::DismissOffer, vec![], |_| "no thanks".into(), |m| idle(m) && m.offer.is_some()),
+            c(Cmd::ForgetDevice, vec![], |_| "forget device".into(), |m| {
+                idle(m) && m.page == Page::Settings && m.reader.is_none()
+                    && matches!(crate::model::settings_rows(m).get(m.settings_page.cursor), Some(Row::Device(_)))
+            }),
             c(Cmd::QuitCompletely, vec![], |_| "quit completely".into(), |m| idle(m) && m.attached && m.page == Page::Settings),
             c(Cmd::RestartEngine, vec![], |_| "restart engine".into(), |m| idle(m) && m.attached && m.page == Page::Settings),
             c(Cmd::CancelDiscovery, vec![k(Key::Escape)], |_| "cancel".into(), |m| {
@@ -250,8 +255,12 @@ pub fn registry() -> Registry<Cmd, Model> {
             c(Cmd::Open, vec![ch('o'), k(Key::Enter)], |_| "show entries".into(), |m| feeds_page(m) && !m.feeds.is_empty()),
             c(Cmd::Edit, vec![k(Key::Enter), ch('o')], |m| match crate::model::settings_rows(m).get(m.settings_page.cursor) {
                 Some(crate::model::Row::Setting(Setting::ReadingMode | Setting::Lines | Setting::MergeDuplicates | Setting::Appearance)) => "change".into(),
+                Some(crate::model::Row::Setting(Setting::PairDevice)) => "show a pairing code".into(),
+                Some(crate::model::Row::Setting(Setting::ConnectHub)) => "paste a link".into(),
+                Some(crate::model::Row::Setting(Setting::Unpair)) => "unpair".into(),
                 _ => "edit".into(),
-            }, |m| idle(m) && m.page == Page::Settings && !rule_row(m)),
+            }, |m| idle(m) && m.page == Page::Settings && !rule_row(m)
+                && !matches!(crate::model::settings_rows(m).get(m.settings_page.cursor), Some(Row::Device(_)))),
             c(Cmd::Refresh, vec![ch('r')], |m| if m.refresh.running { "refreshing".into() } else { "refresh".into() }, |m| idle(m) && m.reader.is_none()),
             c(Cmd::Copy, vec![Chord::cmd('c')], |_| "copy".into(), |m| {
                 m.reader.as_ref().is_some_and(|r| r.ordered().is_some())
@@ -325,6 +334,7 @@ fn rank(cmd: Cmd) -> u8 {
         | Cmd::Recommend
         | Cmd::AddAsFeed
         | Cmd::RemoveRule
+        | Cmd::ForgetDevice
         | Cmd::PaletteRun
         | Cmd::PaletteBack
         | Cmd::CloseTab
@@ -646,6 +656,15 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
                 }
             }
         }
+        Cmd::ForgetDevice => {
+            if let Some(Row::Device(i)) = crate::model::settings_rows(m).get(m.settings_page.cursor).cloned()
+                && let Some(engine::SyncStatus::Hub { devices }) = &m.sync
+                && let Some((name, _)) = devices.get(i)
+            {
+                m.message = Some(format!("Forgot {name}; it can't sync until it pairs again."));
+                m.out.push(Request::ForgetDevice(name.clone()));
+            }
+        }
         Cmd::QuitCompletely => {
             m.quitting = true;
             m.out.push(Request::Shutdown);
@@ -846,6 +865,9 @@ fn edit_setting(m: &mut Model) {
         Setting::ReadingSize => prompt(m, PromptKind::Setting(setting), "Article text size in percent (70 to 200)", &s.reading_size.to_string()),
         Setting::ReadingWidth => prompt(m, PromptKind::Setting(setting), "Article column width in characters (40 to 140)", &s.reading_width.to_string()),
         Setting::ThemeFile => m.edit_theme = true,
+        Setting::PairDevice => m.out.push(Request::PairCode),
+        Setting::ConnectHub => prompt(m, PromptKind::ConnectHub, "Pairing link from the hub (feedreader://pair?\u{2026})", ""),
+        Setting::Unpair => m.out.push(Request::Unpair),
         Setting::PublicLink => match m.public_url.clone() {
             Some(u) => {
                 m.message = Some(format!("Copied {u}"));
@@ -910,6 +932,13 @@ fn submit(m: &mut Model) {
             m.out.push(Request::AddFeed(url, title.clone(), names));
             m.message = Some(format!("Adding {title}\u{2026}"));
             m.discovery = None;
+        }
+        PromptKind::ConnectHub => {
+            if let Err(e) = engine::check_pairing_link(&value) {
+                return fail(m, &e);
+            }
+            m.out.push(Request::Pair(value, crate::host_name()));
+            m.message = Some("Pairing\u{2026}".into());
         }
         PromptKind::SaveLink => {
             if value.is_empty() {

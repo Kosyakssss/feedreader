@@ -228,6 +228,14 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
         Part::info(format!("{} unread", m.unread_home), pal.ink),
         Part::info(refresh, pal.muted),
     ];
+    match &m.sync {
+        Some(engine::SyncStatus::Satellite { online: true, .. }) => parts.push(Part::info("hub connected".into(), pal.muted)),
+        Some(engine::SyncStatus::Satellite { online: false, .. }) => parts.push(Part::info("hub unreachable, working on its own".into(), pal.warn)),
+        Some(engine::SyncStatus::Hub { devices }) if !devices.is_empty() => {
+            parts.push(Part::info(format!("hub for {} {}", devices.len(), if devices.len() == 1 { "device" } else { "devices" }), pal.muted))
+        }
+        _ => {}
+    }
     let failing = m.failing();
     if failing > 0 {
         parts.push(Part::button(
@@ -907,6 +915,17 @@ fn setting_row(m: &Model, s: Setting) -> (&'static str, String) {
         Setting::ReadingSize => ("Article text size", format!("{}%", st.reading_size)),
         Setting::ReadingWidth => ("Article column width", format!("{} characters", st.reading_width)),
         Setting::ThemeFile => ("Theme colors", "edit theme.toml".into()),
+        Setting::PairDevice => ("Sync another device with this one", "show a pairing code".into()),
+        Setting::ConnectHub => ("Sync this device with a hub", "paste a pairing link".into()),
+        Setting::Unpair => (
+            "Syncing with",
+            match &m.sync {
+                Some(engine::SyncStatus::Satellite { online, address }) => {
+                    format!("{address} ({})", if *online { "connected" } else { "unreachable; working on its own" })
+                }
+                _ => String::new(),
+            },
+        ),
     }
 }
 
@@ -929,6 +948,7 @@ fn paint_settings(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
     let area = Rect::new(main.x, main.y + ch, main.w, main.h - ch);
     let rows = settings_rows(m);
     let first_rule = rows.iter().position(|r| matches!(r, Row::Rule(_)));
+    let first_device = rows.iter().position(|r| matches!(r, Row::Device(_)));
     let extra = if first_rule.is_some() { 2 } else { 0 };
     m.settings_page.row_h = ch;
     m.settings_page.view_h = area.h - ch * 4.0;
@@ -940,6 +960,11 @@ fn paint_settings(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
         if Some(i) == first_rule {
             y += ch;
             s.text("MUTED", mono, main.x + cw, y, None, pal.faint);
+            y += ch;
+        }
+        if Some(i) == first_device {
+            y += ch;
+            s.text("PAIRED DEVICES", mono, main.x + cw, y, None, pal.faint);
             y += ch;
         }
         let r = Rect::new(main.x, y, main.w - cw, ch);
@@ -954,11 +979,40 @@ fn paint_settings(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
                 (l.to_string(), v)
             }
             Row::Rule(k) => rule_text(m, &m.rules[*k]),
+            Row::Device(k) => match &m.sync {
+                Some(engine::SyncStatus::Hub { devices }) => {
+                    let (name, seen) = &devices[*k];
+                    (name.clone(), format!("paired device, seen {}", ago(*seen)))
+                }
+                _ => (String::new(), String::new()),
+            },
         };
         s.text(&label, mt.prop(400.0), main.x + cw, y, Some(cw * 36.0), pal.ink);
         s.text(&value, mono, main.x + cw * 40.0, y, Some(main.w - cw * 42.0), pal.muted);
         s.hit(r, Hit::Setting(i));
         y += ch;
+    }
+    if let Some(link) = m.pairing.clone()
+        && let Ok(code) = qrcode::QrCode::new(link.as_bytes())
+    {
+        y += ch;
+        s.text("PAIRING", mono, main.x + cw, y, None, pal.faint);
+        y += ch;
+        s.text(&link, mono, main.x + cw, y, Some(main.w - cw * 2.0), pal.ink);
+        y += ch * 1.5;
+        let n = code.width();
+        let cell = (s.m.scale * 4.0).round().max(3.0);
+        let quiet = cell * 4.0;
+        let side = n as f32 * cell + quiet * 2.0;
+        let x0 = main.x + cw;
+        s.fill(Rect::new(x0, y, side, side), [1.0, 1.0, 1.0, 1.0]);
+        for (i, c) in code.to_colors().into_iter().enumerate() {
+            if c == qrcode::Color::Dark {
+                let (cx, cy) = ((i % n) as f32, (i / n) as f32);
+                s.fill(Rect::new(x0 + quiet + cx * cell, y + quiet + cy * cell, cell, cell), [0.0, 0.0, 0.0, 1.0]);
+            }
+        }
+        y += side;
     }
     y += ch;
     s.text(&format!("Data folder   {}", m.data_dir), mono, main.x + cw, y, Some(main.w - cw * 2.0), pal.faint);

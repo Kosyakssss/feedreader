@@ -226,9 +226,51 @@ impl Extractor {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum Command {
+    Read(Vec<EntryId>, bool),
+    Bookmark(Vec<EntryId>, bool),
+    Subscribe(String, String, Vec<String>),
+    Unsubscribe(FeedId),
+    Resubscribe(FeedId),
+    Rename(FeedId, Option<String>),
+    Folders(FeedId, Vec<String>),
+    RenameFolder(String, String),
+    DeleteFolder(String),
+    RestoreFolder(Folder),
+    Pin(FeedId, bool),
+    Hide(FeedId, bool),
+    FeedMode(FeedId, Option<Mode>),
+    AddRule(Rule),
+    RemoveRule(String),
+    Recommend(EntryId, String),
+    Unrecommend(EntryId),
+    SaveLink(String),
+    Settings(Settings),
+    Tabs(Vec<TabState>),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum SyncStatus {
+    Hub { devices: Vec<(String, Option<i64>)> },
+    Satellite { online: bool, address: String },
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Change {
+    pub id: String,
+    pub device: String,
+    pub at: i64,
+    pub command: Command,
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum Request {
     UseWebExtractor,
+    PairCode,
+    Pair(String, String),
+    Unpair,
+    ForgetDevice(String),
     Resync,
     Detach { extractor: bool },
     Shutdown,
@@ -296,5 +338,9 @@ pub enum Event {
     Media(String, Result<std::path::PathBuf, String>),
     FollowOffer(String, Vec<Candidate>),
     Disconnected,
+    States(Vec<(EntryId, Option<bool>, Option<bool>)>),
+    Pairing(String),
+    Sync(SyncStatus),
+    Tabs(Vec<TabState>),
     Probed(String, Result<(Extracted, Extractor), String>),
 }

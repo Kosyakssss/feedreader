@@ -128,6 +128,9 @@ pub enum Setting {
     ReadingSize,
     ReadingWidth,
     ThemeFile,
+    PairDevice,
+    ConnectHub,
+    Unpair,
 }
 
 pub const SETTINGS: &[Setting] = &[
@@ -147,16 +150,27 @@ pub const SETTINGS: &[Setting] = &[
     Setting::Mute,
 ];
 
+const HUB_SETTINGS: &[Setting] = &[Setting::PairDevice, Setting::ConnectHub];
+const SATELLITE_SETTINGS: &[Setting] = &[Setting::Unpair];
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Row {
     Setting(Setting),
     Rule(usize),
+    Device(usize),
 }
 
 pub fn settings_rows(m: &Model) -> Vec<Row> {
+    let (sync, devices): (&[Setting], usize) = match &m.sync {
+        Some(engine::SyncStatus::Satellite { .. }) => (SATELLITE_SETTINGS, 0),
+        Some(engine::SyncStatus::Hub { devices }) => (HUB_SETTINGS, devices.len()),
+        None => (&[], 0),
+    };
     SETTINGS
         .iter()
+        .chain(sync)
         .map(|&s| Row::Setting(s))
+        .chain((0..devices).map(Row::Device))
         .chain((0..m.rules.len()).map(Row::Rule))
         .collect()
 }
@@ -165,6 +179,7 @@ pub fn settings_rows(m: &Model) -> Vec<Row> {
 pub enum PromptKind {
     AddFeed,
     SaveLink,
+    ConnectHub,
     PickFolders(String, String),
     Rename(FeedId),
     Folders(FeedId),
@@ -319,6 +334,8 @@ pub struct Model {
     pub armed: Option<FeedId>,
     pub discovery: Option<Discovery>,
     pub offer: Option<(String, Vec<Candidate>)>,
+    pub sync: Option<engine::SyncStatus>,
+    pub pairing: Option<String>,
     pub prompt: Option<Prompt>,
     pub confirm: Option<Confirm>,
     pub message: Option<String>,
@@ -398,6 +415,8 @@ impl Model {
             armed: None,
             discovery: None,
             offer: None,
+            sync: None,
+            pairing: None,
             prompt: None,
             confirm: None,
             message: None,
@@ -796,6 +815,30 @@ impl Model {
             }
             Event::Message(m) => self.message = Some(m),
             Event::Extract { .. } | Event::Probed(..) | Event::Disconnected => {}
+            Event::States(list) => {
+                for (id, read, bookmarked) in list {
+                    if let Some(&i) = self.entry_index.get(&id) {
+                        if let Some(r) = read {
+                            self.entries[i].read = r;
+                        }
+                        if let Some(b) = bookmarked {
+                            self.entries[i].bookmarked = b;
+                        }
+                    }
+                }
+                self.refold();
+            }
+            Event::Sync(st) => self.sync = Some(st),
+            Event::Pairing(link) => {
+                self.message = Some("Pairing link copied. Open it on the other device within 15 minutes, or scan the code in Settings.".into());
+                self.copy = Some(link.clone());
+                self.pairing = Some(link);
+            }
+            Event::Tabs(tabs) => {
+                if self.active == 0 {
+                    self.restore_tabs(tabs);
+                }
+            }
             Event::Media(url, Ok(path)) => self.images.load(url, path),
             Event::FollowOffer(host, cands) => {
                 self.message = Some(match cands.as_slice() {

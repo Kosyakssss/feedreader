@@ -114,6 +114,40 @@ fn player(src: &str, kind: &str) -> String {
     )
 }
 
+pub fn host_name() -> String {
+    std::process::Command::new("scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .or_else(|| std::process::Command::new("hostname").output().ok())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "this device".into())
+}
+
+fn qr_text(text: &str) -> String {
+    let Ok(code) = qrcode::QrCode::new(text.as_bytes()) else { return String::new() };
+    let n = code.width();
+    let colors = code.to_colors();
+    let dark = |x: isize, y: isize| x >= 0 && y >= 0 && (x as usize) < n && (y as usize) < n && colors[y as usize * n + x as usize] == qrcode::Color::Dark;
+    let mut out = String::new();
+    let mut y = -2isize;
+    while y < n as isize + 2 {
+        for x in -2..n as isize + 2 {
+            out.push(match (dark(x, y), dark(x, y + 1)) {
+                (true, true) => ' ',
+                (true, false) => '\u{2584}',
+                (false, true) => '\u{2580}',
+                (false, false) => '\u{2588}',
+            });
+        }
+        out.push('\n');
+        y += 2;
+    }
+    out
+}
+
 fn open_external(url: &str) {
     #[cfg(target_os = "macos")]
     let opener = "open";
@@ -1216,6 +1250,25 @@ fn cli(args: &[String]) -> bool {
                 Err(e) => {
                     eprintln!("{e}");
                     std::process::exit(1);
+                }
+            }
+            true
+        }
+        Some("pair") => {
+            let (handle, rx, mut model) = headless();
+            match args.get(2) {
+                Some(link) => {
+                    handle.send(Request::Pair(link.clone(), host_name()));
+                    wait_for(&rx, &mut model, Duration::from_secs(30), |_, e| matches!(e, Event::Message(_)));
+                    println!("{}", model.message.unwrap_or_default());
+                }
+                None => {
+                    handle.send(Request::PairCode);
+                    wait_for(&rx, &mut model, Duration::from_secs(10), |_, e| matches!(e, Event::Pairing(_) | Event::Message(_)));
+                    match model.pairing {
+                        Some(link) => println!("Open this on the other device within 15 minutes, or run feedreader pair '<link>' there:\n\n{link}\n\n{}", qr_text(&link)),
+                        None => println!("{}", model.message.unwrap_or_default()),
+                    }
                 }
             }
             true

@@ -107,7 +107,7 @@ Several people per engine, each with their own subscriptions, state, folders, pi
 - Move to another machine: pair the new engine, transfer state and settings directly, make it the hub, repoint devices and the public link.
 
 ### 2.14 Command line
-The `feedreader` command is the same binary as the desktop app: `serve` (headless engine), `service install` and `uninstall`, `pair`, `add <url>`, `import <file>`, `export <file>`, `refresh`, `extract <url>` (the Clean text of any page), `unread` (unread entries as a Markdown list, for scripts and agents) and `upgrade`. Bare `feedreader` opens the desktop app.
+The `feedreader` command is the same binary as the desktop app: `serve` (headless engine), `service install` and `uninstall`, `pair` (show a pairing link and QR code, or pair with one), `pair`, `add <url>`, `import <file>`, `export <file>`, `refresh`, `extract <url>` (the Clean text of any page), `unread` (unread entries as a Markdown list, for scripts and agents) and `upgrade`. Bare `feedreader` opens the desktop app.
 
 ## 3. UX
 
@@ -195,13 +195,14 @@ crates/feedreader  the binary: desktop app, headless `serve`, command line
 - Catch-up: a persistent, monotonically increasing revision; reconnecting devices request changes since N, with a full snapshot if N is too old.
 
 ### 5.3 Transport
-- `Request`, `Event` and `Command` are serde types in the engine crate; that is the contract. One WebSocket per satellite carries commands, catch-up and pushes. Keepalives, resume from the last sequence.
-- Plain HTTP for media, the public listener, OPML and bundle uploads, and health.
-- Version handshake on connect; mismatches show "Update the engine" or "Update the app".
+- `Request`, `Event`, `Command` and `Change` are serde types in the engine crate; that is the contract.
+- App to engine: JSON lines over the engine's Unix socket (or an in-process channel).
+- Satellite to hub: HTTP with bearer tokens. `/v1/sync` pushes a device's changes and long-polls everyone else's since a cursor; `/v1/content` pages fetched entries; `/v1/media` serves cached images; `/v1/pair` exchanges a code for a token. Details and the reasons are in `docs/internals/sync.md`.
+- Version handshake (Open): mismatches should show "Update the engine" or "Update the app".
 
 ### 5.4 Connectivity and pairing
-- The desktop app on the engine's own machine is trusted through the data directory. Every other device pairs once with a one-time link or QR code (Settings, or `feedreader pair`), over localhost, the same network or Tailscale, http or https. Pairing becomes a long-lived, revocable token per device.
-- Routes: same network and Tailscale. The hub can run `tailscale serve` for the private API (tailnet only) and `tailscale funnel` for the public listener. Funnel is the only public route in 1.0.
+- The desktop app on the engine's own machine is trusted through the data directory. Every other device pairs once with a one-time link or QR code (Settings, or `feedreader pair`), over the same network or Tailscale. Pairing becomes a long-lived token per device; the hub can forget a device.
+- Routes: the pairing link carries the hub's Tailscale name, LAN address and loopback; Tailscale reaches the hub's port directly. The public listener goes through Tailscale Funnel on its own port so nothing else the machine serves becomes public. Funnel is the only public route in 1.0.
 - Satellites remember every address the hub was reached on and try them in turn. Routes recover after sleep without re-pairing.
 - Private API: exact Host allowlist; bodies capped; tokens never in URLs.
 - Public listener: a separate port on the hub; serves only the I recommend feed, its page and snapshot images. No auth, read-only, its own path prefix.
@@ -301,9 +302,9 @@ Status: done, partial or open. Each step is committed and pushed to `main` when 
 9. **Partial.** Tabs: history, background tabs (middle-click, bulk open), peek and kept, Cmd-W, Cmd-Shift-T, Cmd-Shift-[ and ], undoable closing, persistence; links open in the tab with Add as feed and Bookmark. Open: reordering by drag, one web view per tab.
 10. **Partial.** Discovery: link tags on the page and the site root, common paths, YouTube channels, handles and playlists, Medium, Substack, GitHub, Reddit; the picker with recent titles and subscribing into folders; identity by address and by title and site; OPML folders both ways; Follow this site after saving a link. Open: JSON-LD, h-feed, sitemaps.
 11. **Done.** Light and dark palettes following the system (or fixed in Settings), `theme.toml` in the data folder with live reload and the last good colors kept on errors, article text size and column width.
-12. **Partial.** Undo persists for 24 hours per device. Open: engine commands and the change log (with sync, step 14).
+12. **Done.** Undo persists for 24 hours per device; every change is an engine command in the change log.
 13. **Done.** `feedreader serve` on an owner-only Unix socket, one engine per library (lock file), the app and the command line attach or start it in the background, quit completely and restart engine, `service install` and `uninstall` for launchd and systemd.
-14. **Open.** Sync: hub and satellites, pairing, Tailscale serve and funnel.
+14. **Partial.** Sync: commands with hybrid clocks and last-writer-wins per field, the change log (seeded from existing state), the hub's HTTP API, satellites with an outbox, long-poll and content paging, working on their own while the hub is away, pairing by link or QR code, paired devices in Settings. Open: Funnel for the public link, the version handshake, households.
 15. **Open.** Android.
 16. **Done.** Adaptive refresh per feed, Retry-After and Cache-Control, at most 2 fetches per host.
 17. **Open.** Export bundle, move to another machine, households.

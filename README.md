@@ -40,6 +40,16 @@ feedreader service uninstall
 
 "Quit completely" and "restart engine" are in Settings.
 
+## Use it on more than one device
+
+The first Feedreader you set up is the hub. To sync another device with it, choose "Sync another device with this one" in the hub's Settings (or run `feedreader pair` there) and open the link, or scan the code, on the other device: "Sync this device with a hub" in its Settings, or `feedreader pair '<link>'`. Devices reach the hub on the same network or over Tailscale, keep working on their own while they can't, and catch up when they can.
+
+If the macOS firewall is on, allow the hub to accept connections, or only the same Mac can reach it:
+
+```sh
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add ~/.local/bin/feedreader --unblockapp ~/.local/bin/feedreader
+```
+
 ## Command line
 
 The app binary is also the command:
@@ -50,6 +60,7 @@ feedreader unread --limit 20  # unread entries as a Markdown list
 feedreader import <file>      # OPML or the old app's database
 feedreader export <file>      # OPML with folders
 feedreader extract <url>      # the clean article text of any page
+feedreader pair [link]        # show a pairing link, or pair with one
 ```
 
 ## Profile it

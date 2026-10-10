@@ -203,13 +203,17 @@ pub async fn fetch_media(client: &reqwest::Client, url: &str, dir: &std::path::P
     if f.status >= 400 {
         return Err(format!("HTTP {}", f.status));
     }
+    store_media(dir, url, &f.body, &f.kind.unwrap_or_default()).await
+}
+
+pub async fn store_media(dir: &std::path::Path, url: &str, body: &[u8], kind: &str) -> Result<(String, String, i64), String> {
     let digest = <sha2::Sha256 as sha2::Digest>::digest(url.as_bytes());
     let file: String = digest[..16].iter().map(|b| format!("{b:02x}")).collect();
     tokio::fs::create_dir_all(dir).await.map_err(|e| e.to_string())?;
     let tmp = dir.join(format!("{file}.part"));
-    tokio::fs::write(&tmp, &f.body).await.map_err(|e| e.to_string())?;
+    tokio::fs::write(&tmp, body).await.map_err(|e| e.to_string())?;
     tokio::fs::rename(&tmp, dir.join(&file)).await.map_err(|e| e.to_string())?;
-    Ok((file, f.kind.unwrap_or_default(), f.body.len() as i64))
+    Ok((file, kind.to_string(), body.len() as i64))
 }
 
 pub fn read_opml(text: &str) -> Vec<(String, String, Option<String>)> {

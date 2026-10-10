@@ -78,6 +78,29 @@ create table if not exists recommendations (
   removed_at integer
 ) strict;
 create virtual table if not exists entries_fts using fts5(title, body);
+create table if not exists devices (
+  token_hash text primary key,
+  device text not null,
+  name text not null,
+  created integer not null,
+  seen integer
+) strict;
+create table if not exists pair_codes (
+  code_hash text primary key,
+  expires integer not null
+) strict;
+create table if not exists clock (
+  key text primary key,
+  at integer not null,
+  device text not null
+) strict;
+create table if not exists changes (
+  seq integer primary key autoincrement,
+  id text not null unique,
+  device text not null,
+  at integer not null,
+  command text not null
+) strict;
 create table if not exists media (
   url text primary key,
   file text not null,
@@ -213,6 +236,15 @@ impl Store {
             }
         }
         let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        let ecols: Vec<String> = db
+            .prepare("select name from pragma_table_info('entries')")?
+            .query_map([], |r| r.get(0))?
+            .filter_map(Result::ok)
+            .collect();
+        if !ecols.iter().any(|c| c == "cseq") {
+            db.execute_batch("alter table entries add column cseq integer not null default 0; update entries set cseq = rowid;")?;
+        }
+        db.execute_batch("create index if not exists entries_cseq on entries(cseq)")?;
         if version < 3 {
             db.execute_batch(
                 "drop table if exists entries_fts;
@@ -319,8 +351,8 @@ impl Store {
         {
             let mut insert = tx
                 .prepare_cached(
-                    "insert or ignore into entries (id, feed_id, source_id, url, title, author, published, first_seen, summary, content)
-                     values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    "insert or ignore into entries (id, feed_id, source_id, url, title, author, published, first_seen, summary, content, cseq)
+                     values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, (select coalesce(max(cseq), 0) + 1 from entries))",
                 )
                 .unwrap();
             let mut current = tx.prepare_cached("select title, published from entries where id = ?1").unwrap();
@@ -328,7 +360,10 @@ impl Store {
                 .prepare_cached(
                     "update entries set content = coalesce(content, ?2), summary = coalesce(summary, ?3), author = coalesce(author, ?4),
                      title = case when title in ('', 'Untitled', 'untitled') then ?5 else title end,
-                     published = case when published < 631152000000 then ?6 else published end where id = ?1",
+                     published = case when published < 631152000000 then ?6 else published end,
+                     cseq = case when content is null and ?2 is not null or title in ('', 'Untitled', 'untitled') or published < 631152000000
+                       then (select coalesce(max(cseq), 0) + 1 from entries) else cseq end
+                     where id = ?1",
                 )
                 .unwrap();
             for (i, item) in items.into_iter().enumerate() {
@@ -750,9 +785,9 @@ impl Store {
     pub fn save_link(&mut self, url: &str, title: &str, html: &str, now: i64) -> Entry {
         let id = entry_id(SAVED, url);
         let _ = self.db.execute(
-            "insert into entries (id, feed_id, source_id, url, title, published, first_seen, content)
-             values (?1, ?2, ?3, ?3, ?4, ?5, ?5, ?6)
-             on conflict(id) do update set content = excluded.content, title = excluded.title",
+            "insert into entries (id, feed_id, source_id, url, title, published, first_seen, content, cseq)
+             values (?1, ?2, ?3, ?3, ?4, ?5, ?5, ?6, (select coalesce(max(cseq), 0) + 1 from entries))
+             on conflict(id) do update set content = excluded.content, title = excluded.title, cseq = excluded.cseq",
             params![id, SAVED, url, title, now, html],
         );
         let _ = self.db.execute("delete from entries_fts where rowid = (select rowid from entries where id = ?1)", [&id]);
@@ -860,6 +895,199 @@ impl Store {
     }
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct WireEntry {
+    pub id: String,
+    pub feed_id: String,
+    pub source_id: String,
+    pub url: String,
+    pub title: String,
+    pub author: Option<String>,
+    pub published: i64,
+    pub first_seen: i64,
+    pub summary: Option<String>,
+    pub content: Option<String>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct WireFeed {
+    pub id: String,
+    pub url: String,
+    pub title: String,
+    pub site_url: Option<String>,
+    pub last_fetched: Option<i64>,
+    pub error: Option<String>,
+}
+
+impl Store {
+    pub fn content_since(&self, cursor: i64, limit: usize) -> (Vec<WireFeed>, Vec<WireEntry>, i64) {
+        let feeds = self
+            .db
+            .prepare_cached("select id, url, title, site_url, last_fetched, error from feeds where removed_at is null")
+            .and_then(|mut st| {
+                st.query_map([], |r| {
+                    Ok(WireFeed { id: r.get(0)?, url: r.get(1)?, title: r.get(2)?, site_url: r.get(3)?, last_fetched: r.get(4)?, error: r.get(5)? })
+                })
+                .map(|rows| rows.filter_map(Result::ok).collect())
+            })
+            .unwrap_or_default();
+        let mut next = cursor;
+        let entries = self
+            .db
+            .prepare_cached(
+                "select id, feed_id, source_id, url, title, author, published, first_seen, summary, content, cseq
+                 from entries where cseq > ?1 order by cseq limit ?2",
+            )
+            .and_then(|mut st| {
+                st.query_map(params![cursor, limit as i64], |r| {
+                    Ok((
+                        WireEntry {
+                            id: r.get(0)?,
+                            feed_id: r.get(1)?,
+                            source_id: r.get(2)?,
+                            url: r.get(3)?,
+                            title: r.get(4)?,
+                            author: r.get(5)?,
+                            published: r.get(6)?,
+                            first_seen: r.get(7)?,
+                            summary: r.get(8)?,
+                            content: r.get(9)?,
+                        },
+                        r.get::<_, i64>(10)?,
+                    ))
+                })
+                .map(|rows| rows.filter_map(Result::ok).collect::<Vec<_>>())
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(e, c)| {
+                next = next.max(c);
+                e
+            })
+            .collect();
+        (feeds, entries, next)
+    }
+
+    pub fn take_content(&mut self, feeds: &[WireFeed], entries: &[WireEntry]) -> Vec<Entry> {
+        let tx = self.db.transaction().unwrap();
+        for f in feeds {
+            let _ = tx.execute(
+                "insert into feeds (id, url, title, site_url, position, last_fetched, error)
+                 values (?1, ?2, ?3, ?4, 0, ?5, ?6)
+                 on conflict(id) do update set title = excluded.title, site_url = excluded.site_url,
+                 last_fetched = excluded.last_fetched, error = excluded.error",
+                params![f.id, f.url, f.title, f.site_url, f.last_fetched, f.error],
+            );
+        }
+        let mut added = Vec::new();
+        for e in entries {
+            let n = tx
+                .execute(
+                    "insert into entries (id, feed_id, source_id, url, title, author, published, first_seen, summary, content, cseq)
+                     values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, (select coalesce(max(cseq), 0) + 1 from entries))
+                     on conflict(id) do update set title = excluded.title, published = excluded.published,
+                     summary = coalesce(excluded.summary, entries.summary), content = coalesce(excluded.content, entries.content)",
+                    params![e.id, e.feed_id, e.source_id, e.url, e.title, e.author, e.published, e.first_seen, e.summary, e.content],
+                )
+                .unwrap_or(0);
+            if n > 0 {
+                let _ = tx.execute("delete from entries_fts where rowid = (select rowid from entries where id = ?1)", [&e.id]);
+                let _ = tx.execute(
+                    "insert into entries_fts (rowid, title, body) select rowid, ?2, ?3 from entries where id = ?1",
+                    params![e.id, e.title, e.content.as_deref().or(e.summary.as_deref()).unwrap_or("")],
+                );
+            }
+        }
+        tx.commit().unwrap();
+        for e in entries {
+            if let Some((entry, _, _)) = self.entry(&e.id) {
+                added.push(entry);
+            }
+        }
+        added
+    }
+
+    pub fn issue_code(&self, now: i64) -> String {
+        let mut bytes = [0u8; 5];
+        getrandom::fill(&mut bytes).expect("system randomness");
+        const ALPHA: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        let mut n = u64::from_be_bytes([0, 0, 0, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]]);
+        let mut code = String::new();
+        for _ in 0..8 {
+            code.push(ALPHA[(n % 32) as usize] as char);
+            n /= 32;
+        }
+        let _ = self.db.execute("delete from pair_codes where expires < ?1", [now]);
+        let _ = self.db.execute("insert into pair_codes (code_hash, expires) values (?1, ?2)", params![hash(&code), now + 15 * 60_000]);
+        code
+    }
+
+    pub fn redeem_code(&self, code: &str, device: &str, name: &str, now: i64) -> Option<String> {
+        let n = self
+            .db
+            .execute("delete from pair_codes where code_hash = ?1 and expires >= ?2", params![hash(&code.trim().to_uppercase()), now])
+            .unwrap_or(0);
+        if n == 0 {
+            return None;
+        }
+        let mut bytes = [0u8; 32];
+        getrandom::fill(&mut bytes).expect("system randomness");
+        let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        let _ = self.db.execute(
+            "insert into devices (token_hash, device, name, created) values (?1, ?2, ?3, ?4)",
+            params![hash(&token), device, name, now],
+        );
+        Some(token)
+    }
+
+    pub fn device_for(&self, token: &str, now: i64) -> Option<String> {
+        let h = hash(token);
+        let d = self.db.query_row("select device from devices where token_hash = ?1", [&h], |r| r.get::<_, String>(0)).ok()?;
+        let _ = self.db.execute("update devices set seen = ?2 where token_hash = ?1", params![h, now]);
+        Some(d)
+    }
+
+    pub fn devices(&self) -> Vec<(String, String, Option<i64>)> {
+        self.db
+            .prepare("select device, name, seen from devices order by created")
+            .and_then(|mut st| st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map(|rows| rows.filter_map(Result::ok).collect()))
+            .unwrap_or_default()
+    }
+
+    pub fn forget_device(&self, device: &str) {
+        let _ = self.db.execute("delete from devices where device = ?1", [device]);
+    }
+
+    pub fn get(&self, key: &str) -> Option<String> {
+        self.db.query_row("select value from settings where key = ?1", [key], |r| r.get(0)).ok()
+    }
+
+    pub fn put(&self, key: &str, value: &str) {
+        let _ = self.db.execute(
+            "insert into settings (key, value) values (?1, ?2) on conflict(key) do update set value = excluded.value",
+            params![key, value],
+        );
+    }
+
+    pub fn outbox(&self, device: &str, after: i64, limit: usize) -> Vec<(i64, crate::types::Change)> {
+        let mut st = self
+            .db
+            .prepare_cached("select seq, id, device, at, command from changes where seq > ?1 and device = ?2 order by seq limit ?3")
+            .unwrap();
+        st.query_map(params![after, device, limit as i64], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, String>(4)?))
+        })
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter_map(|(seq, id, device, at, cmd)| serde_json::from_str(&cmd).ok().map(|command| (seq, crate::types::Change { id, device, at, command })))
+        .collect()
+    }
+}
+
+fn hash(s: &str) -> String {
+    Sha256::digest(s.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+}
+
 pub struct Inserted {
     pub added: Vec<Entry>,
     pub updated: Vec<(EntryId, String, i64)>,
@@ -873,6 +1101,131 @@ pub struct MediaRow {
 }
 
 impl Store {
+    pub fn device(&self) -> String {
+        if let Ok(d) = self.db.query_row("select value from settings where key = 'device_id'", [], |r| r.get::<_, String>(0)) {
+            return d;
+        }
+        let d = new_id();
+        let _ = self.db.execute("insert into settings (key, value) values ('device_id', ?1)", [&d]);
+        d
+    }
+
+    pub fn state_commands(&self) -> Vec<crate::types::Command> {
+        use crate::types::Command;
+        let mut out = Vec::new();
+        let feeds: Vec<(String, String, String, Option<String>, bool, bool, Option<String>)> = self
+            .db
+            .prepare("select id, url, title, label, pinned, hidden, mode from feeds where removed_at is null and id <> 'saved'")
+            .and_then(|mut st| {
+                st.query_map([], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, i64>(4)? == 1, r.get::<_, i64>(5)? == 1, r.get(6)?))
+                })
+                .map(|rows| rows.filter_map(Result::ok).collect())
+            })
+            .unwrap_or_default();
+        let folders = self.folders();
+        for (id, url, title, label, pinned, hidden, mode) in feeds {
+            out.push(Command::Subscribe(url, title, Vec::new()));
+            let names: Vec<String> = folders.iter().filter(|f| f.feeds.contains(&id)).map(|f| f.name.clone()).collect();
+            if !names.is_empty() {
+                out.push(Command::Folders(id.clone(), names));
+            }
+            if label.is_some() {
+                out.push(Command::Rename(id.clone(), label));
+            }
+            if pinned {
+                out.push(Command::Pin(id.clone(), true));
+            }
+            if hidden {
+                out.push(Command::Hide(id.clone(), true));
+            }
+            if let Some(m) = mode.and_then(|m| crate::types::Mode::parse(&m)) {
+                out.push(Command::FeedMode(id, Some(m)));
+            }
+        }
+        for r in self.rules() {
+            out.push(Command::AddRule(r));
+        }
+        for r in self.recommendations() {
+            out.push(Command::Recommend(r.entry, r.note));
+        }
+        let ids = |sql: &str| -> Vec<String> {
+            self.db
+                .prepare(sql)
+                .and_then(|mut st| st.query_map([], |r| r.get(0)).map(|rows| rows.filter_map(Result::ok).collect()))
+                .unwrap_or_default()
+        };
+        for chunk in ids("select entry_id from states where read = 1").chunks(500) {
+            out.push(Command::Read(chunk.to_vec(), true));
+        }
+        for chunk in ids("select entry_id from states where bookmarked = 1").chunks(500) {
+            out.push(Command::Bookmark(chunk.to_vec(), true));
+        }
+        out.push(Command::Settings(self.settings()));
+        let tabs = self.tabs();
+        if !tabs.is_empty() {
+            out.push(Command::Tabs(tabs));
+        }
+        out
+    }
+
+    pub fn has_change(&self, id: &str) -> bool {
+        self.db.query_row("select 1 from changes where id = ?1", [id], |_| Ok(())).is_ok()
+    }
+
+    pub fn log_change(&self, c: &crate::types::Change) -> i64 {
+        let cmd = serde_json::to_string(&c.command).unwrap_or_default();
+        let _ = self.db.execute(
+            "insert or ignore into changes (id, device, at, command) values (?1, ?2, ?3, ?4)",
+            params![c.id, c.device, c.at, cmd],
+        );
+        self.db.last_insert_rowid()
+    }
+
+    pub fn last_seq(&self) -> i64 {
+        self.db.query_row("select coalesce(max(seq), 0) from changes", [], |r| r.get(0)).unwrap_or(0)
+    }
+
+    pub fn max_clock(&self) -> i64 {
+        self.db.query_row("select coalesce(max(at), 0) from changes", [], |r| r.get(0)).unwrap_or(0)
+    }
+
+    pub fn changes_since(&self, seq: i64, skip_device: &str, limit: usize) -> Vec<(i64, crate::types::Change)> {
+        let mut st = self
+            .db
+            .prepare_cached("select seq, id, device, at, command from changes where seq > ?1 and device <> ?2 order by seq limit ?3")
+            .unwrap();
+        st.query_map(params![seq, skip_device, limit as i64], |r| {
+            let cmd: String = r.get(4)?;
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, cmd))
+        })
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter_map(|(seq, id, device, at, cmd)| {
+            serde_json::from_str(&cmd).ok().map(|command| (seq, crate::types::Change { id, device, at, command }))
+        })
+        .collect()
+    }
+
+    pub fn newer(&self, key: &str, at: i64, device: &str) -> bool {
+        let current: Option<(i64, String)> = self
+            .db
+            .query_row("select at, device from clock where key = ?1", [key], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()
+            .unwrap_or(None);
+        let win = match current {
+            None => true,
+            Some((a, d)) => at > a || (at == a && device > d.as_str()),
+        };
+        if win {
+            let _ = self.db.execute(
+                "insert into clock (key, at, device) values (?1, ?2, ?3) on conflict(key) do update set at = excluded.at, device = excluded.device",
+                params![key, at, device],
+            );
+        }
+        win
+    }
+
     pub fn due(&self, now: i64) -> std::collections::HashSet<String> {
         self.db
             .prepare("select id from feeds where removed_at is null and (next_at is null or next_at <= ?1)")
