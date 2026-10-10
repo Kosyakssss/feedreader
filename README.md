@@ -14,8 +14,10 @@ The plan and the decisions behind it are in [`docs/spec.md`](docs/spec.md).
 Install [Rust](https://rustup.rs), then from the repository:
 
 ```sh
-cargo run --release
+scripts/bundle.sh             # builds Feedreader.app into ~/Applications and links ~/.local/bin/feedreader
 ```
+
+or, without installing anything, `cargo run --release`.
 
 Data lives in `~/Library/Application Support/Feedreader` on macOS and `$XDG_DATA_HOME/Feedreader` on Linux. Set `FEEDREADER_HOME` to use another folder.
 

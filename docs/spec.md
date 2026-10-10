@@ -309,7 +309,7 @@ Status: done, partial or open. Each step is committed and pushed to `main` when 
 16. **Done.** Adaptive refresh per feed, Retry-After and Cache-Control, at most 2 fetches per host.
 17. **Open.** Export bundle, move to another machine, households.
 18. **Open.** Accessibility with AccessKit.
-19. **Open.** Packaging, install script, Homebrew tap, updates.
+19. **Partial.** `scripts/bundle.sh` builds and installs Feedreader.app and links the command. Open: the icon, a `feedreader://` handler for pairing and "Open in Feedreader" links, release builds, the install script, the Homebrew tap, updates.
 20. **Later.** LLM recipes; ad and tracker blocking in Original.
 
 ## 9. References
