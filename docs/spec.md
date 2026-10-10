@@ -209,8 +209,8 @@ crates/feedreader  the binary: desktop app, headless `serve`, command line
 ### 5.5 Refresh
 - The hub refreshes every 5 minutes (configurable) whenever it runs, apps attached or not, and pushes results. Manual refresh fetches every feed now.
 - Satellites don't fetch while connected. When the hub is unreachable they refresh on the same schedule. Nothing they fetched is uploaded later: the hub fetches its own copy and ids match.
-- Per-feed adaptive cadence (Open): slow down for rarely changing feeds; honor `Cache-Control`, `Retry-After`, 429/503; back off exponentially on errors, capped. Conditional requests with `ETag`/`Last-Modified`.
-- 8 parallel fetches globally plus per-host politeness.
+- Per-feed adaptive cadence (Proposed): a feed that brought new entries is checked every cycle; each quiet check stretches its interval by half, up to 6 hours; errors back off exponentially from the cycle, up to 12 hours. `Retry-After` (also on 429 and 503) is honored up to a day; `Cache-Control: max-age` up to an hour, since static hosts often send days for feeds that post daily. Conditional requests with `ETag`/`Last-Modified`. Manual refresh fetches every feed.
+- 8 parallel fetches globally, at most 2 per host.
 
 ### 5.6 Retention and the media cache
 - Entries: max count (default 3000, range 100–100000) and optional max age in days (1–36500). Pruning never removes bookmarked entries, saved links or entries in your I recommend feed. Saved links keep their extracted body.
@@ -280,7 +280,7 @@ Hard-won behavior to keep:
 
 ## 7. Open questions
 1. Android timing (1.0 or right after) and its background mechanism (periodic task or foreground service with a permanent notification).
-2. Adaptive refresh algorithm.
+2. Adaptive refresh: confirm the proposal in §5.5.
 3. Media cache limits: per-item cap and total budget for images and attachments; whether phones prefetch large attachments on metered networks.
 4. I recommend image snapshots.
 5. The combined limit for folders and pinned feeds.
@@ -305,7 +305,7 @@ Status: done, partial or open. Each step is committed and pushed to `main` when 
 13. **Done.** `feedreader serve` on an owner-only Unix socket, one engine per library (lock file), the app and the command line attach or start it in the background, quit completely and restart engine, `service install` and `uninstall` for launchd and systemd.
 14. **Open.** Sync: hub and satellites, pairing, Tailscale serve and funnel.
 15. **Open.** Android.
-16. **Open.** Adaptive refresh, per-host politeness, Retry-After.
+16. **Done.** Adaptive refresh per feed, Retry-After and Cache-Control, at most 2 fetches per host.
 17. **Open.** Export bundle, move to another machine, households.
 18. **Open.** Accessibility with AccessKit.
 19. **Open.** Packaging, install script, Homebrew tap, updates.

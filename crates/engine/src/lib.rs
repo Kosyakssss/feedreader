@@ -3,6 +3,7 @@ mod parse;
 mod public;
 pub mod rules;
 pub mod serve;
+mod schedule;
 mod store;
 mod types;
 mod work;
@@ -163,7 +164,7 @@ enum Internal {
     MediaFetched(String, Result<(String, String, i64), String>),
     Offer(String, Result<Vec<Candidate>, String>),
     Read(Job, Result<Extracted, String>, Extractor),
-    Fetched(FeedId, Result<Fetch, String>),
+    Fetched(FeedId, Result<Fetch, String>, Option<i64>),
     RefreshDone(u64),
     Discovered(String, Result<Vec<Candidate>, String>),
     Added(FeedId, Result<Fetch, String>),
@@ -188,9 +189,35 @@ struct Engine {
     next_job: u64,
 }
 
-async fn fetch_feed(client: &reqwest::Client, url: &str, validators: (Option<String>, Option<String>)) -> Result<Fetch, String> {
-    let u = Url::parse(url).map_err(|e| e.to_string())?;
-    let f = net::fetch(client, &u, work::FEED_ACCEPT, Some(validators), Duration::from_secs(8), 10_000_000).await?;
+fn wait_hint(f: &net::Fetched) -> Option<i64> {
+    let retry = f.retry_after.as_deref().and_then(|v| {
+        v.trim().parse::<i64>().ok().map(|s| s * 1000).or_else(|| {
+            chrono::DateTime::parse_from_rfc2822(v.trim()).ok().map(|d| d.timestamp_millis() - now())
+        })
+    });
+    let max_age = f.cache_control.as_deref().and_then(|v| {
+        v.split(',')
+            .filter_map(|p| p.trim().strip_prefix("max-age="))
+            .find_map(|n| n.trim().parse::<i64>().ok())
+            .map(|s| (s * 1000).min(3_600_000))
+    });
+    retry.map(|ms| ms.min(24 * 3_600_000)).or(max_age).filter(|&ms| ms > 0)
+}
+
+async fn fetch_feed(client: &reqwest::Client, url: &str, validators: (Option<String>, Option<String>)) -> (Result<Fetch, String>, Option<i64>) {
+    let u = match Url::parse(url) {
+        Ok(u) => u,
+        Err(e) => return (Err(e.to_string()), None),
+    };
+    let f = match net::fetch(client, &u, work::FEED_ACCEPT, Some(validators), Duration::from_secs(8), 10_000_000).await {
+        Ok(f) => f,
+        Err(e) => return (Err(e), None),
+    };
+    let hint = wait_hint(&f);
+    (parse_fetched(f).await, hint)
+}
+
+async fn parse_fetched(f: net::Fetched) -> Result<Fetch, String> {
     if f.status == 304 {
         return Ok(Fetch::NotModified);
     }
@@ -280,7 +307,7 @@ impl Engine {
                     None => break,
                 },
                 Some(i) = irx.recv() => self.internal(i),
-                _ = tokio::time::sleep_until(self.next) => self.start_refresh(),
+                _ = tokio::time::sleep_until(self.next) => self.start_refresh(false),
             }
         }
     }
@@ -403,11 +430,19 @@ impl Engine {
         known
     }
 
-    fn start_refresh(&mut self) {
+    fn start_refresh(&mut self, all: bool) {
         if self.status.running {
             return;
         }
-        let feeds: Vec<Feed> = self.store.feeds().into_iter().filter(|f| f.id != SAVED).collect();
+        let due = self.store.due(now());
+        let feeds: Vec<Feed> = self.store.feeds().into_iter().filter(|f| f.id != SAVED && (all || due.contains(&f.id))).collect();
+        if feeds.is_empty() {
+            let wait = Duration::from_secs(self.settings.refresh_minutes.max(1) as u64 * 60);
+            self.next = Instant::now() + wait;
+            self.status.next_at = Some(now() + wait.as_millis() as i64);
+            (self.emit)(Event::Refresh(self.status.clone()));
+            return;
+        }
         self.status = RefreshStatus {
             run: self.status.run + 1,
             running: true,
@@ -428,14 +463,21 @@ impl Engine {
         let tx = self.itx.clone().expect("running");
         let run = self.status.run;
         tokio::spawn(async move {
+            let hosts: std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Semaphore>>> = Default::default();
             futures::stream::iter(list)
                 .map(|(id, url, v)| {
                     let c = client.clone();
-                    async move { (id, fetch_feed(&c, &url, v).await) }
+                    let host = Url::parse(&url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
+                    let gate = hosts.lock().unwrap().entry(host).or_insert_with(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2))).clone();
+                    async move {
+                        let _permit = gate.acquire_owned().await;
+                        let (r, hint) = fetch_feed(&c, &url, v).await;
+                        (id, r, hint)
+                    }
                 })
                 .buffer_unordered(8)
-                .for_each(|(id, r)| {
-                    let _ = tx.send(Internal::Fetched(id, r));
+                .for_each(|(id, r, hint)| {
+                    let _ = tx.send(Internal::Fetched(id, r, hint));
                     async {}
                 })
                 .await;
@@ -519,9 +561,13 @@ impl Engine {
     #[profiling::function]
     fn internal(&mut self, i: Internal) {
         match i {
-            Internal::Fetched(id, result) => {
+            Internal::Fetched(id, result, hint) => {
                 self.status.completed += 1;
-                match self.apply_fetch(&id, result) {
+                let ok = result.is_ok();
+                let r = self.apply_fetch(&id, result);
+                let fresh = r.as_ref().map(|a| !a.is_empty()).unwrap_or(false);
+                self.store.reschedule(&id, ok, fresh, hint, self.settings.refresh_minutes.max(1) as i64 * 60_000, now());
+                match r {
                     Ok(added) => {
                         self.status.added += added.len();
                         if !added.is_empty() {
@@ -602,7 +648,7 @@ impl Engine {
         match r {
             Request::SetRead(ids, v) => self.store.set_read(&ids, v, now()),
             Request::SetBookmarked(ids, v) => self.store.set_bookmarked(&ids, v, now()),
-            Request::Refresh => self.start_refresh(),
+            Request::Refresh => self.start_refresh(true),
             Request::Discover(q) => {
                 let client = self.client.clone();
                 let known = self.known();
@@ -632,7 +678,7 @@ impl Engine {
                 let client = self.client.clone();
                 let v = self.store.validators(&feed.id);
                 self.spawn(async move {
-                    let r = fetch_feed(&client, &feed.url, v).await;
+                    let (r, _) = fetch_feed(&client, &feed.url, v).await;
                     Internal::Added(feed.id, r)
                 });
             }
@@ -679,7 +725,7 @@ impl Engine {
                 let skipped = if skipped > 0 { format!(", skipped {skipped} unsafe links") } else { String::new() };
                 (self.emit)(Event::Message(format!("Imported {added} new feeds{skipped}")));
                 if added > 0 {
-                    self.start_refresh();
+                    self.start_refresh(false);
                 }
             }
             Request::ExportOpml(path) => {

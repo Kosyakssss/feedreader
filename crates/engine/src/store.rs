@@ -200,7 +200,14 @@ impl Store {
             .query_map([], |r| r.get(0))?
             .filter_map(Result::ok)
             .collect();
-        for (col, def) in [("pinned", "integer not null default 0"), ("hidden", "integer not null default 0"), ("mode", "text")] {
+        for (col, def) in [
+            ("pinned", "integer not null default 0"),
+            ("hidden", "integer not null default 0"),
+            ("mode", "text"),
+            ("next_at", "integer"),
+            ("fails", "integer not null default 0"),
+            ("interval", "integer not null default 0"),
+        ] {
             if !cols.iter().any(|c| c == col) {
                 db.execute_batch(&format!("alter table feeds add column {col} {def}"))?;
             }
@@ -866,6 +873,27 @@ pub struct MediaRow {
 }
 
 impl Store {
+    pub fn due(&self, now: i64) -> std::collections::HashSet<String> {
+        self.db
+            .prepare("select id from feeds where removed_at is null and (next_at is null or next_at <= ?1)")
+            .and_then(|mut st| st.query_map([now + 30_000], |r| r.get::<_, String>(0)).map(|rows| rows.filter_map(Result::ok).collect()))
+            .unwrap_or_default()
+    }
+
+    pub fn reschedule(&self, id: &str, ok: bool, fresh: bool, hint: Option<i64>, base: i64, now: i64) {
+        let (fails, interval): (i64, i64) = self
+            .db
+            .query_row("select fails, interval from feeds where id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap_or((0, 0));
+        let (fails, interval) = crate::schedule::next(ok, fresh, fails, interval, base);
+        let wait = if ok { interval } else { crate::schedule::backoff(fails, base) };
+        let next = now + wait.max(hint.unwrap_or(0));
+        let _ = self.db.execute(
+            "update feeds set next_at = ?2, fails = ?3, interval = ?4 where id = ?1",
+            params![id, next, fails, interval],
+        );
+    }
+
     pub fn tabs(&self) -> Vec<crate::types::TabState> {
         self.db
             .query_row("select value from settings where key = 'tabs'", [], |r| r.get::<_, String>(0))
