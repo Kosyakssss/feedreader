@@ -1,8 +1,8 @@
 # Feedreader
 
-Feedreader is a calm, finite reader for everything that publishes a feed, built to get off social media without losing the people and sites you follow. RSS, Atom and JSON Feed in any form, every feed treated the same, recommendations from friends instead of algorithms. It is one Rust codebase: a small UI toolkit of our own, the engine, and a desktop app and Android app that each carry the engine.
+Feedreader is a calm, finite reader for everything that publishes a feed, built to get off social media without losing the people and sites you follow. RSS, Atom and JSON Feed in any form, every feed treated the same, recommendations from friends instead of algorithms. It is one Rust codebase: Graticule, our own framework for native apps that Feedreader proves; the engine, which owns feeds, state and sync; and the apps that carry the engine.
 
-[`docs/spec.md`](docs/spec.md) is the source of truth for what to build, and its §8 is the build plan with status; this file is how to work on it.
+[`docs/spec.md`](docs/spec.md) is the source of truth for what to build, and its §10 is the build plan with status; this file is how to work on it.
 
 ## What we never compromise on
 
@@ -32,25 +32,25 @@ Public repository, no cloud service run by us, no accounts required, no app stor
 
 ## A note on simplicity
 
-Prefer the smallest model that makes the correct behavior unsurprising. Do not keep complexity because it exists, and do not add machinery because it looks architectural. The toolkit gains a primitive only when Feedreader needs it. When the spec and the simplest design disagree, say so instead of quietly following either.
+Prefer the smallest model that makes the correct behavior unsurprising. Do not keep complexity because it exists, and do not add machinery because it looks architectural. When the spec and the simplest design disagree, say so instead of quietly following either.
 
 ## Glossary
 
 - **owner** means kote, who decides what Feedreader is. Product decisions come from the spec or from them.
-- **toolkit** means `crates/toolkit`: windows, drawing, text, the command registry and the scene. It knows nothing about feeds.
+- **Graticule** (model DK-01) means `crates/graticule`: the framework (spec §6). The shell, the grid, styles, components, pictures, the canvas, text, the command registry and the gallery. It knows nothing about feeds.
 - **engine** means `crates/engine`: the library that owns user state, fetching, the public listener and sync. Every app carries one.
 - **hub** means the one engine per setup that holds the authoritative state, serves the public feed, and is what devices pair with. Normally the Mac's background engine.
 - **satellite** means an engine on another device that syncs with the hub and fetches feeds on its own only while the hub is unreachable.
 - **command** (UI) means an entry in the registry: name, label, keys, availability. **command** (engine) means a request to change user state; **change log** means the ordered record of accepted ones.
 - **entry** means one item from a feed. **saved link** means a page bookmarked without subscribing.
-- **view** means a list (Home, Bookmarks, I recommend, a folder, a feed). **tab** means an opened entry or page.
+- **place** means where a list lives: Home, Bookmarks, I recommend, a folder, a pinned feed, Feeds, Settings. Places are always visible. **tab** means a document you opened: an entry, a page, a player or an empty new tab. Tabs can be many and scroll.
 - **web pane** means the system web view placed over the reading area for Original pages, embeds and media.
 
 ## Hit every surface
 
 The most common defect is a change that works on the path you tried and is missing everywhere else. Before calling work done, check which of these apply and say so:
 
-- **Apps.** Desktop (macOS, Linux) and Android, wide and narrow layouts, the headless `serve` engine and the command line.
+- **Apps.** Desktop (macOS, Linux), wide and narrow layouts, the headless `serve` engine and the command line. Android is paused (spec §1.3); don't extend it.
 - **Engine roles.** Hub and satellite, online and offline, a satellite reconnecting after days away.
 - **Entry points.** An action belongs in the registry, so it shows in the bar, the help page and the palette, and works by mouse. Bulk versions work on the selection. Add a CLI command when scripts need it.
 - **Contracts.** `Request`, `Event` and `Command` in the engine crate are the wire format. Change them and every app follows.
@@ -63,7 +63,7 @@ The most common defect is a change that works on the path you tried and is missi
 - Complexity belongs at the edges. Engine decisions are pure functions over state; the view is a pure function of the model.
 - Engine features are methods on the engine; transports stay thin. A request handler, HTTP route or CLI command decodes input, calls one engine method and maps errors.
 - State is enums, not flags that can contradict each other.
-- Inferred types over annotations. No `unsafe` outside the toolkit's GPU code.
+- Inferred types over annotations. No `unsafe` anywhere; the workspace forbids it. When a platform API needs it, use a crate that wraps it safely. The only approved exception is the native context menu on macOS (spec §6.8); any other one needs the owner's sign-off first, with proof that no safe route exists.
 - No code comments, of any kind (owner's rule). Names and types carry the meaning; reasons that cross components go in `docs/internals/`.
 - Do not invent keyboard shortcuts. Only the ones in the spec are fixed; new commands are clickable labels until the owner assigns keys.
 - If a rule here fights the task in front of you, say so plainly and get the owner's sign-off before breaking it.
@@ -84,6 +84,6 @@ The most common defect is a change that works on the path you tried and is missi
 
 ## Documentation
 
-- `docs/spec.md` holds product, UX and architecture decisions until 1.0 ships. When a decision changes, rewrite the affected text; do not append a second account or keep the old one. Keep §8 current.
+- `docs/spec.md` holds product, UX and architecture decisions until 1.0 ships. When a decision changes, rewrite the affected text; do not append a second account or keep the old one. Keep §10 current.
 - `docs/internals/` is for decisions and their reasons, constraints across components and traps that are hard to see from the source. If reading the code answers the question, leave it out.
 - `README.md` says what Feedreader is and how to run, import and profile it.
