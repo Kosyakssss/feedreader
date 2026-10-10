@@ -1,7 +1,11 @@
 use std::sync::{Arc, RwLock};
 
+use axum::Router;
+use axum::extract::{Path, State};
+use axum::http::{HeaderName, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
 use chrono::{DateTime, Utc};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use crate::store::PublicItem;
@@ -101,39 +105,39 @@ pub fn page(base: &str, items: &[PublicItem]) -> String {
     s
 }
 
-fn response(status: &str, kind: &str, body: &str) -> Vec<u8> {
-    format!(
-        "HTTP/1.1 {status}\r\ncontent-type: {kind}\r\ncontent-length: {}\r\nx-robots-tag: noindex\r\ncache-control: no-cache\r\nconnection: close\r\n\r\n{body}",
-        body.len()
-    )
-    .into_bytes()
+fn reply(kind: &'static str, body: String) -> Response {
+    let headers = [
+        (header::CONTENT_TYPE, kind),
+        (HeaderName::from_static("x-robots-tag"), "noindex"),
+        (header::CACHE_CONTROL, "no-cache"),
+    ];
+    (headers, body).into_response()
 }
 
-pub async fn serve(port: u16, shared: Shared) -> std::io::Result<()> {
-    let listener = TcpListener::bind(("127.0.0.1", port)).await?;
-    loop {
-        let (mut sock, _) = listener.accept().await?;
-        let shared = shared.clone();
-        tokio::spawn(async move {
-            let mut buf = vec![0u8; 4096];
-            let n = match tokio::time::timeout(std::time::Duration::from_secs(5), sock.read(&mut buf)).await {
-                Ok(Ok(n)) => n,
-                _ => return,
-            };
-            let req = String::from_utf8_lossy(&buf[..n]);
-            let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
-            let reply = {
-                let p = shared.read().unwrap();
-                let root = format!("/{}/", p.token);
-                if path == format!("{root}feed.xml") {
-                    response("200 OK", "application/atom+xml; charset=utf-8", &p.atom)
-                } else if path == root || path == format!("/{}", p.token) {
-                    response("200 OK", "text/html; charset=utf-8", &p.html)
-                } else {
-                    response("404 Not Found", "text/plain", "Not found")
-                }
-            };
-            let _ = sock.write_all(&reply).await;
-        });
+fn current(shared: &Shared, token: &str, pick: fn(&Published) -> (&'static str, String)) -> Response {
+    let p = shared.read().unwrap_or_else(|e| e.into_inner());
+    if token != p.token {
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
     }
+    let (kind, body) = pick(&p);
+    reply(kind, body)
+}
+
+async fn serve_page(State(shared): State<Shared>, Path(token): Path<String>) -> Response {
+    current(&shared, &token, |p| ("text/html; charset=utf-8", p.html.clone()))
+}
+
+async fn serve_feed(State(shared): State<Shared>, Path(token): Path<String>) -> Response {
+    current(&shared, &token, |p| ("application/atom+xml; charset=utf-8", p.atom.clone()))
+}
+
+pub async fn serve(listener: std::net::TcpListener, shared: Shared) -> std::io::Result<()> {
+    listener.set_nonblocking(true)?;
+    let listener = TcpListener::from_std(listener)?;
+    let app = Router::new()
+        .route("/{token}", get(serve_page))
+        .route("/{token}/", get(serve_page))
+        .route("/{token}/feed.xml", get(serve_feed))
+        .with_state(shared);
+    axum::serve(listener, app).await
 }

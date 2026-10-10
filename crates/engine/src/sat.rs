@@ -158,18 +158,12 @@ pub async fn run(link: HubLink, engine: UnboundedSender<crate::Internal>, mut ch
                 let more = p.more;
                 let _ = engine.send(crate::Internal::Pulled(top, p));
                 let mut since = cursor;
-                loop {
-                    match get_content(&client, &base, &link.token, since).await {
-                        Ok(c) => {
-                            let next = c.next;
-                            let again = c.more;
-                            let _ = engine.send(crate::Internal::Content(c));
-                            since = next;
-                            if !again {
-                                break;
-                            }
-                        }
-                        Err(_) => break,
+                while let Ok(c) = get_content(&client, &base, &link.token, since).await {
+                    since = c.next;
+                    let again = c.more;
+                    let _ = engine.send(crate::Internal::Content(c));
+                    if !again {
+                        break;
                     }
                 }
                 let _ = engine.send(crate::Internal::HubOnline(true, base.clone()));
@@ -180,7 +174,7 @@ pub async fn run(link: HubLink, engine: UnboundedSender<crate::Internal>, mut ch
             Err(e) => {
                 eprintln!("sync: {base}: {e}");
                 addr += 1;
-                if addr % link.addresses.len() == 0 {
+                if addr.is_multiple_of(link.addresses.len()) {
                     let _ = engine.send(crate::Internal::HubOnline(false, base.clone()));
                     let mut jitter = [0u8; 1];
                     let _ = getrandom::fill(&mut jitter);

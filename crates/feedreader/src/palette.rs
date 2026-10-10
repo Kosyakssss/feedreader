@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use engine::{EntryId, FeedId, Request};
-use toolkit::commands::Registry;
-use toolkit::field::Field;
-use toolkit::ui::{Rect, Scene};
+use graticule::commands::Registry;
+use graticule::field::Field;
+use graticule::ui::{Rect, Scene};
 
 use crate::cmds::{self, Cmd};
 use crate::model::{Focus, Model, View};
@@ -231,7 +231,7 @@ fn describe(m: &Model, reg: &Registry<Cmd, Model>, item: &Item) -> (String, Stri
         Item::Command(c) => {
             let cmd = reg.commands.iter().find(|x| x.id == *c);
             let label = cmd.map(|x| (x.label)(m)).unwrap_or_default();
-            let keys = cmd.map(|x| toolkit::commands::keys_label(&x.keys)).unwrap_or_default();
+            let keys = cmd.map(|x| graticule::commands::keys_label(&x.keys)).unwrap_or_default();
             (label, keys, "command")
         }
         Item::View(v) => {
@@ -282,20 +282,20 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, main
     p.scroll = p.scroll.clamp(0.0, max);
     let scroll = p.scroll.round();
     let cursor = p.cursor;
-    let items = p.items.clone();
     let track = Rect::new(main.right() - cw * 2.5, list.y, cw * 2.0, list.h);
     s.hit(list, Hit::Area(Scroll::Palette));
-    s.scrollbar(track, scroll, items.len() as f32 * ch);
+    s.scrollbar(track, scroll, p.items.len() as f32 * ch);
     s.hit(track, Hit::Track(track, Scroll::Palette));
-    if items.is_empty() {
+    if p.items.is_empty() {
         let msg = if text.trim().is_empty() { "Nothing to show." } else { "Nothing matches." };
         s.text(msg, mt.prop(400.0), main.x + cw, list.y, None, pal.muted);
         return caret;
     }
     s.push_clip(Rect::new(list.x, list.y, list.w - cw * 2.5, list.h));
     let first = (scroll / ch).floor() as usize;
-    let last = (((scroll + list.h) / ch).ceil() as usize).min(items.len());
-    for row in first..last {
+    let last = (((scroll + list.h) / ch).ceil() as usize).min(p.items.len());
+    let rows: Vec<(usize, Item)> = p.items.iter().cloned().enumerate().take(last).skip(first).collect();
+    for (row, item) in rows {
         let y = list.y + row as f32 * ch - scroll;
         let r = Rect::new(list.x, y, list.w - cw * 2.5, ch);
         if row == cursor {
@@ -303,11 +303,12 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, main
         } else {
             s.hover(r);
         }
-        let (name, meta, kind) = describe(m, reg, &items[row]);
+        let (name, meta, kind) = describe(m, reg, &item);
         s.text(kind, mono, main.x + cw, y, None, pal.faint);
         let nx = main.x + cw * 10.0;
         let mw = if meta.is_empty() { 0.0 } else { s.measure(&meta, mono).min(main.w * 0.35) };
-        let style = if kind == "entry" && m.entry(match &items[row] { Item::Entry(id) => id, _ => "" }).is_some_and(|e| !e.read) { mt.prop(600.0) } else { mt.prop(400.0) };
+        let unread = matches!(&item, Item::Entry(id) if m.entry(id).is_some_and(|e| !e.read));
+        let style = mt.prop(if unread { 600.0 } else { 400.0 });
         s.text(&name, style, nx, y, Some(r.right() - nx - mw - cw * 3.0), pal.ink);
         if !meta.is_empty() {
             s.text(&meta, mono, r.right() - cw - mw, y, Some(mw), pal.muted);

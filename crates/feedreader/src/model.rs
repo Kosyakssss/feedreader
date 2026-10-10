@@ -3,10 +3,10 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use engine::{Block, Candidate, Entry, EntryId, Event, Feed, FeedId, Folder, Mode, Recommendation, RefreshStatus, Request, Rule, SAVED, Settings, TabState};
 
 pub use engine::Target;
-use toolkit::field::Field;
-use toolkit::images::Images;
-use toolkit::text::SpanStyle;
-use toolkit::ui::LineStyle;
+use graticule::field::Field;
+use graticule::images::Images;
+use graticule::text::SpanStyle;
+use graticule::ui::LineStyle;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum View {
@@ -313,6 +313,7 @@ pub struct Model {
     pub recommended: HashMap<EntryId, String>,
     pub public_url: Option<String>,
     pub hidden: HashSet<EntryId>,
+    link_keys: HashMap<EntryId, String>,
     pub unread_by_folder: HashMap<String, usize>,
     pub refresh: RefreshStatus,
     pub page: Page,
@@ -342,7 +343,6 @@ pub struct Model {
     pub confirm: Option<Confirm>,
     pub message: Option<String>,
     pub bar_expanded: bool,
-    pub lines: LineStyle,
     pub out: Vec<Request>,
     pub images: Images,
     pub open: Vec<String>,
@@ -356,13 +356,15 @@ pub struct Model {
     redo: Vec<Change>,
 }
 
-pub fn lines_from(name: &str) -> LineStyle {
-    match name {
-        "ascii" => LineStyle::Ascii,
-        "heavy" => LineStyle::Heavy,
-        "double" => LineStyle::Double,
-        "dotted" => LineStyle::Dotted,
-        _ => LineStyle::Light,
+impl Model {
+    pub fn line_style(&self) -> LineStyle {
+        match self.settings.lines {
+            engine::Lines::Ascii => LineStyle::Ascii,
+            engine::Lines::Light => LineStyle::Light,
+            engine::Lines::Heavy => LineStyle::Heavy,
+            engine::Lines::Double => LineStyle::Double,
+            engine::Lines::Dotted => LineStyle::Dotted,
+        }
     }
 }
 
@@ -391,6 +393,7 @@ impl Model {
             recommended: HashMap::new(),
             public_url: None,
             hidden: HashSet::new(),
+            link_keys: HashMap::new(),
             unread_by_folder: HashMap::new(),
             refresh: RefreshStatus::default(),
             page: Page::List,
@@ -423,7 +426,6 @@ impl Model {
             confirm: None,
             message: None,
             bar_expanded: false,
-            lines: LineStyle::Light,
             out: Vec::new(),
             images,
             open: Vec::new(),
@@ -520,13 +522,19 @@ impl Model {
             }
         }
         if self.settings.merge_duplicates {
-            let mut seen: HashMap<String, &str> = HashMap::new();
+            for e in &self.entries {
+                if !e.url.is_empty() && !self.link_keys.contains_key(&e.id) {
+                    self.link_keys.insert(e.id.clone(), engine::rules::link_key(&e.url));
+                }
+            }
+            let mut seen: HashMap<&str, &str> = HashMap::new();
             for e in self.entries.iter().rev() {
-                if e.url.is_empty() || e.feed_id == SAVED {
+                if e.feed_id == SAVED {
                     continue;
                 }
-                let key = engine::rules::link_key(&e.url);
-                match seen.get(&key) {
+                let Some(key) = self.link_keys.get(&e.id) else { continue };
+                let key = key.as_str();
+                match seen.get(key) {
                     Some(first) if *first != e.feed_id => {
                         hidden.insert(e.id.clone());
                     }
@@ -695,12 +703,13 @@ impl Model {
                 public_url,
                 tabs,
             } => {
-                self.restore_tabs(tabs);
+                if !self.ready {
+                    self.restore_tabs(tabs);
+                }
                 self.ready = true;
                 self.data_dir = data_dir;
                 self.feeds = feeds;
                 self.entries = entries;
-                self.lines = lines_from(&settings.lines);
                 self.settings = settings;
                 self.folders = folders;
                 self.rules = rules;
@@ -769,6 +778,7 @@ impl Model {
             Event::EntriesRemoved(ids) => {
                 let gone: HashSet<EntryId> = ids.into_iter().collect();
                 self.entries.retain(|e| !gone.contains(&e.id));
+                self.link_keys.retain(|id, _| !gone.contains(id));
                 self.reindex_entries();
                 self.refold();
             }
@@ -809,7 +819,6 @@ impl Model {
             }
             Event::Settings(s) => {
                 let merge = s.merge_duplicates != self.settings.merge_duplicates;
-                self.lines = lines_from(&s.lines);
                 self.settings = s;
                 if merge {
                     self.refold();
@@ -912,7 +921,6 @@ impl Model {
             Op::Settings(s) => {
                 let old = self.settings.clone();
                 let merge = s.merge_duplicates != old.merge_duplicates;
-                self.lines = lines_from(&s.lines);
                 self.settings = s.clone();
                 self.out.push(Request::SetSettings(s));
                 if merge {

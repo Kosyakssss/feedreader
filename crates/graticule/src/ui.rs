@@ -37,28 +37,6 @@ pub enum LineStyle {
     Dotted,
 }
 
-impl LineStyle {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Ascii => Self::Light,
-            Self::Light => Self::Heavy,
-            Self::Heavy => Self::Double,
-            Self::Double => Self::Dotted,
-            Self::Dotted => Self::Ascii,
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Ascii => "ascii",
-            Self::Light => "light",
-            Self::Heavy => "heavy",
-            Self::Double => "double",
-            Self::Dotted => "dotted",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
     pub bg: [f32; 4],

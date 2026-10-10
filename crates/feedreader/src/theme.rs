@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use toolkit::ui::{DARK, LIGHT, Palette};
+use graticule::ui::{DARK, LIGHT, Palette};
 
 const NAMES: &[&str] = &["bg", "ink", "muted", "faint", "rule", "cursor", "hover", "selection", "field", "link", "danger", "warn"];
 

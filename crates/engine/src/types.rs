@@ -18,6 +18,14 @@ pub struct Feed {
 
 pub const SAVED: &str = "saved";
 
+pub type Client = u64;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Audience {
+    All,
+    Client(Client),
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Folder {
     pub id: String,
@@ -94,6 +102,70 @@ impl Mode {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Lines {
+    Ascii,
+    #[default]
+    Light,
+    Heavy,
+    Double,
+    Dotted,
+}
+
+impl Lines {
+    pub const ALL: [Self; 5] = [Self::Ascii, Self::Light, Self::Heavy, Self::Double, Self::Dotted];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Ascii => "ascii",
+            Self::Light => "light",
+            Self::Heavy => "heavy",
+            Self::Double => "double",
+            Self::Dotted => "dotted",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|l| l.name() == s)
+    }
+
+    pub fn next(self) -> Self {
+        let i = Self::ALL.iter().position(|&l| l == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Appearance {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl Appearance {
+    pub const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|a| a.name() == s)
+    }
+
+    pub fn next(self) -> Self {
+        let i = Self::ALL.iter().position(|&a| a == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Settings {
     pub max_entries: u32,
@@ -101,10 +173,9 @@ pub struct Settings {
     pub refresh_minutes: u32,
     pub confirm_open_over: u32,
     pub reading_mode: Mode,
-    pub lines: String,
+    pub lines: Lines,
     pub merge_duplicates: bool,
-    pub public_port: u16,
-    pub appearance: String,
+    pub appearance: Appearance,
     pub reading_size: u32,
     pub reading_width: u32,
     #[serde(default)]
@@ -119,10 +190,9 @@ impl Default for Settings {
             refresh_minutes: 5,
             confirm_open_over: 20,
             reading_mode: Mode::Clean,
-            lines: "light".into(),
+            lines: Lines::Light,
             merge_duplicates: true,
-            public_port: 8791,
-            appearance: "system".into(),
+            appearance: Appearance::System,
             reading_size: 100,
             reading_width: 78,
             publish: false,
@@ -275,7 +345,7 @@ pub enum Request {
     Unpair,
     ForgetDevice(String),
     Resync,
-    Detach { extractor: bool },
+    Detach,
     Shutdown,
     SetTabs(Vec<TabState>),
     Media(Vec<String>),

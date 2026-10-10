@@ -1,9 +1,12 @@
+use std::net::IpAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{Query, State};
+use axum::extract::{Query, Request, State};
+use axum::middleware::{Next, from_fn_with_state};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -146,14 +149,36 @@ async fn health() -> Response {
     Json(serde_json::json!({ "app": "feedreader", "version": env!("CARGO_PKG_VERSION"), "pid": std::process::id() })).into_response()
 }
 
+fn allowed(host: &str, names: &[String]) -> bool {
+    let name = host.rsplit_once(':').filter(|(_, p)| p.chars().all(|c| c.is_ascii_digit())).map(|(h, _)| h).unwrap_or(host);
+    let name = name.trim_start_matches('[').trim_end_matches(']');
+    name.parse::<IpAddr>().is_ok() || name.eq_ignore_ascii_case("localhost") || names.iter().any(|n| n.eq_ignore_ascii_case(name))
+}
+
+async fn host(State(names): State<Arc<Vec<String>>>, req: Request, next: Next) -> Response {
+    let ok = req.headers().get(header::HOST).and_then(|h| h.to_str().ok()).is_some_and(|h| allowed(h, &names));
+    if !ok {
+        return (StatusCode::MISDIRECTED_REQUEST, "Unknown host").into_response();
+    }
+    next.run(req).await
+}
+
 pub async fn serve(port: u16, api: UnboundedSender<crate::Internal>, changed: watch::Receiver<i64>) -> std::io::Result<()> {
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
+    let names: Vec<String> = match crate::tailscale::name().await {
+        Some(full) => {
+            let short = full.split('.').next().unwrap_or_default().to_string();
+            vec![full, short]
+        }
+        None => Vec::new(),
+    };
     let app = Router::new()
         .route("/v1/health", get(health))
         .route("/v1/pair", post(pair))
         .route("/v1/sync", post(sync))
         .route("/v1/content", get(content))
         .route("/v1/media", get(media))
-        .with_state(Hub { api, changed });
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
+        .with_state(Hub { api, changed })
+        .layer(from_fn_with_state(Arc::new(names), host));
     axum::serve(listener, app).await
 }

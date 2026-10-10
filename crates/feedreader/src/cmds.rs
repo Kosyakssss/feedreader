@@ -1,6 +1,6 @@
 use engine::{Mode, Request, Rule};
-use toolkit::commands::{Chord, Command, Key, Registry};
-use toolkit::field::Field;
+use graticule::commands::{Chord, Command, Key, Registry};
+use graticule::field::Field;
 
 use crate::model::{Confirm, Discovery, Focus, Model, Op, Page, Prompt, PromptKind, Row, Setting, Target, View};
 
@@ -53,12 +53,10 @@ pub enum Cmd {
     No,
     PromptOk,
     PromptCancel,
-    Lines,
     ExtendDown,
     ExtendUp,
     Copy,
     More,
-    Recommended,
     Recommend,
     CopyPublicLink,
     Mute,
@@ -145,7 +143,12 @@ fn plural(n: usize) -> String {
     if n == 1 { "1 entry".into() } else { format!("{n} entries") }
 }
 
-pub fn registry() -> Registry<Cmd, Model> {
+pub fn registry() -> &'static Registry<Cmd, Model> {
+    static REGISTRY: std::sync::OnceLock<Registry<Cmd, Model>> = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(build)
+}
+
+fn build() -> Registry<Cmd, Model> {
     fn c(id: Cmd, keys: Vec<Chord>, label: fn(&Model) -> String, available: fn(&Model) -> bool) -> Command<Cmd, Model> {
         Command { id, keys, label, available, rank: rank(id) }
     }
@@ -294,7 +297,6 @@ pub fn registry() -> Registry<Cmd, Model> {
             c(Cmd::RenameFolder, vec![], |_| "rename folder".into(), folder_view),
             c(Cmd::DeleteFolder, vec![], |_| "delete folder".into(), folder_view),
             c(Cmd::RemoveRule, vec![ch('d')], |_| "remove rule".into(), rule_row),
-            c(Cmd::Recommended, vec![], |_| "i recommend".into(), |_| false),
             c(Cmd::Home, vec![ch('1')], |_| "home".into(), idle),
             c(Cmd::Bookmarks, vec![ch('2')], |_| "bookmarks".into(), idle),
             c(Cmd::Feeds, vec![ch('3')], |_| "feeds".into(), idle),
@@ -302,7 +304,6 @@ pub fn registry() -> Registry<Cmd, Model> {
             c(Cmd::Help, vec![ch('?')], |m| if m.page == Page::Help && m.reader.is_none() { "close help".into() } else { "help".into() }, idle),
             c(Cmd::Undo, vec![Chord::cmd('z')], |_| "undo".into(), |m| m.can_undo() && m.focus == Focus::Main),
             c(Cmd::Redo, vec![Chord::cmd_shift('z')], |_| "redo".into(), |m| m.can_redo() && m.focus == Focus::Main),
-            c(Cmd::Lines, vec![], |m| format!("lines: {}", m.lines.name()), |_| false),
             c(Cmd::More, vec![], |m| if m.bar_expanded { "less".into() } else { "more".into() }, |m| m.focus == Focus::Main && m.confirm.is_none()),
         ],
     }
@@ -352,7 +353,6 @@ fn rank(cmd: Cmd) -> u8 {
         | Cmd::Bookmarks
         | Cmd::Feeds
         | Cmd::Settings
-        | Cmd::Lines
         | Cmd::ExtendDown
         | Cmd::ExtendUp
         | Cmd::Down
@@ -698,7 +698,6 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
             }
         }
         Cmd::More => m.bar_expanded = !m.bar_expanded,
-        Cmd::Recommended => m.show(View::Recommended),
         Cmd::Palette => crate::palette::open(m),
         Cmd::PaletteDown | Cmd::PaletteUp => {
             if let Some(p) = m.palette.as_mut() {
@@ -815,12 +814,6 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
                 m.act(format!("Unmuted \u{201C}{}\u{201D}", r.word), Op::RemoveRule(r));
             }
         }
-        Cmd::Lines => {
-            let mut s = m.settings.clone();
-            s.lines = m.lines.next().name().to_string();
-            let label = format!("Changed lines to {}", s.lines);
-            m.act(label, Op::Settings(s));
-        }
     }
 }
 
@@ -856,15 +849,10 @@ fn edit_setting(m: &mut Model) {
         }
         Setting::Appearance => {
             let mut n = s.clone();
-            n.appearance = match s.appearance.as_str() {
-                "system" => "light",
-                "light" => "dark",
-                _ => "system",
-            }
-            .into();
-            let label = match n.appearance.as_str() {
-                "system" => "Appearance follows the system".to_string(),
-                a => format!("Appearance is always {a}"),
+            n.appearance = s.appearance.next();
+            let label = match n.appearance {
+                engine::Appearance::System => "Appearance follows the system".to_string(),
+                a => format!("Appearance is always {}", a.name()),
             };
             m.act(label, Op::Settings(n));
         }
@@ -891,7 +879,12 @@ fn edit_setting(m: &mut Model) {
             let label = format!("Entries open in {} mode", n.reading_mode.name());
             m.act(label, Op::Settings(n));
         }
-        Setting::Lines => exec(m, Cmd::Lines),
+        Setting::Lines => {
+            let mut n = s.clone();
+            n.lines = s.lines.next();
+            let label = format!("Changed lines to {}", n.lines.name());
+            m.act(label, Op::Settings(n));
+        }
         Setting::MaxEntries => prompt(m, PromptKind::Setting(setting), "Keep at most this many entries", &s.max_entries.to_string()),
         Setting::MaxAge => prompt(
             m,
@@ -976,7 +969,7 @@ fn submit(m: &mut Model) {
             let folders: Vec<(String, String)> = m.folders.iter().map(|f| (f.id.clone(), f.name.clone())).collect();
             match engine::rules::parse_rule(&value, &feeds, &folders) {
                 Ok((word, scope)) => {
-                    let id = format!("{:x}", engine::now());
+                    let id = engine::new_id();
                     let place = match &scope {
                         engine::Scope::All => String::new(),
                         engine::Scope::Feed(f) => format!(" in {}", m.feed_name(f)),

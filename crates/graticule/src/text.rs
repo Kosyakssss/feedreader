@@ -59,6 +59,8 @@ struct GlyphKey {
     sub: u8,
 }
 
+type Run = (parley::FontData, Vec<i16>, [f32; 4], Vec<(GlyphKey, f32, f32)>);
+
 #[derive(Clone, Copy)]
 struct Slot {
     x: u32,
@@ -299,7 +301,7 @@ impl Text {
             None => 0.0,
         };
         let color = |i: u8| p.colors.get(i as usize).copied().unwrap_or(p.colors[0]);
-        let mut runs: Vec<(parley::FontData, Vec<i16>, [f32; 4], Vec<(GlyphKey, f32, f32)>)> = Vec::new();
+        let mut runs: Vec<Run> = Vec::new();
         let mut underlines = Vec::new();
         let mut rules: Vec<([f32; 4], [f32; 4])> = Vec::new();
         let layout = self.layout(spans, size, line, wrap);

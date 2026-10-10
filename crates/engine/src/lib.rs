@@ -7,6 +7,7 @@ mod hub;
 mod sat;
 mod schedule;
 mod store;
+mod tailscale;
 mod types;
 mod work;
 
@@ -32,21 +33,19 @@ pub fn sync_port() -> u16 {
     std::env::var("FEEDREADER_SYNC_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8790)
 }
 
+pub fn public_port() -> u16 {
+    std::env::var("FEEDREADER_PUBLIC_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8791)
+}
+
 fn lan_ip() -> Option<std::net::IpAddr> {
     let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     s.connect("192.0.2.1:9").ok()?;
     s.local_addr().ok().map(|a| a.ip()).filter(|ip| !ip.is_loopback() && !ip.is_unspecified())
 }
 
-fn tailscale_name() -> Option<String> {
-    let out = std::process::Command::new("tailscale").args(["status", "--json"]).output().ok()?;
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
-    v.get("Self")?.get("DNSName")?.as_str().map(|s| s.trim_end_matches('.').to_string()).filter(|s| !s.is_empty())
-}
-
-pub enum Link {
-    Local(UnboundedSender<Request>),
-    Socket(std::sync::mpsc::Sender<Request>),
+enum Link {
+    Local(UnboundedSender<(Client, Request)>),
+    Socket(std::sync::mpsc::Sender<Request>, std::thread::JoinHandle<()>),
 }
 
 pub struct Handle {
@@ -55,18 +54,29 @@ pub struct Handle {
 
 impl Handle {
     pub fn send(&self, request: Request) {
+        self.send_as(0, request);
+    }
+
+    fn send_as(&self, client: Client, request: Request) {
         match &self.link {
             Link::Local(tx) => {
-                let _ = tx.send(request);
+                let _ = tx.send((client, request));
             }
-            Link::Socket(tx) => {
+            Link::Socket(tx, _) => {
                 let _ = tx.send(request);
             }
         }
     }
 
     pub fn attached(&self) -> bool {
-        matches!(self.link, Link::Socket(_))
+        matches!(self.link, Link::Socket(..))
+    }
+
+    pub fn close(self) {
+        if let Link::Socket(tx, writer) = self.link {
+            drop(tx);
+            let _ = writer.join();
+        }
     }
 }
 
@@ -88,7 +98,7 @@ pub fn attach(dir: PathBuf, emit: std::sync::Arc<dyn Fn(Event) + Send + Sync>, b
     {
         return Ok(h);
     }
-    start(dir, move |e| emit(e))
+    start(dir, move |e, _| emit(e))
 }
 
 pub fn data_dir() -> PathBuf {
@@ -136,11 +146,21 @@ pub fn check_input(input: &str) -> Result<(), String> {
     net::parse_url(input).map(|_| ())
 }
 
+pub fn new_id() -> String {
+    store::new_id()
+}
+
 pub fn now() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-pub fn start(dir: PathBuf, emit: impl Fn(Event) + Send + 'static) -> Result<Handle, String> {
+pub fn start(dir: PathBuf, emit: impl Fn(Event, Audience) + Send + 'static) -> Result<Handle, String> {
+    launch(dir, emit).map(|(handle, _, _)| handle)
+}
+
+type Launched = (Handle, tokio::runtime::Handle, tokio::sync::oneshot::Receiver<()>);
+
+fn launch(dir: PathBuf, emit: impl Fn(Event, Audience) + Send + 'static) -> Result<Launched, String> {
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let lock = std::fs::File::options()
         .create(true)
@@ -150,15 +170,13 @@ pub fn start(dir: PathBuf, emit: impl Fn(Event) + Send + 'static) -> Result<Hand
         .map_err(|e| e.to_string())?;
     lock.try_lock().map_err(|_| format!("Another Feedreader engine is using {}", dir.display()))?;
     let (tx, rx) = unbounded_channel();
+    let (stopped, on_stop) = tokio::sync::oneshot::channel();
+    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().map_err(|e| e.to_string())?;
+    let runtime = rt.handle().clone();
     std::thread::Builder::new()
         .name("engine".into())
         .spawn(move || {
             profiling::register_thread!("engine");
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .enable_all()
-                .build()
-                .expect("runtime");
             rt.block_on(async move {
                 let _lock = lock;
                 match Engine::new(dir, Box::new(emit)) {
@@ -166,9 +184,10 @@ pub fn start(dir: PathBuf, emit: impl Fn(Event) + Send + 'static) -> Result<Hand
                     Err(e) => eprintln!("engine failed to start: {e}"),
                 }
             });
+            let _ = stopped.send(());
         })
-        .expect("engine thread");
-    Ok(Handle { link: Link::Local(tx) })
+        .map_err(|e| e.to_string())?;
+    Ok((Handle { link: Link::Local(tx) }, runtime, on_stop))
 }
 
 enum Fetch {
@@ -180,7 +199,7 @@ enum Fetch {
 enum Job {
     Entry(EntryId),
     Save(String),
-    Probe(String),
+    Probe(String, Client),
 }
 
 pub(crate) enum Internal {
@@ -190,6 +209,7 @@ pub(crate) enum Internal {
     Content(hub::Content),
     HubOnline(bool, String),
     Paired(Result<sat::HubLink, String>),
+    Pairing(Client, String),
     Funnel(bool, Result<Option<String>, String>),
     Page(Job, Result<(String, String), String>),
     MediaFetched(String, Result<(String, String, i64), String>),
@@ -197,7 +217,7 @@ pub(crate) enum Internal {
     Read(Job, Result<Extracted, String>, Extractor),
     Fetched(FeedId, Result<Fetch, String>, Option<i64>),
     RefreshDone(u64),
-    Discovered(String, Result<Vec<Candidate>, String>),
+    Discovered(Client, String, Result<Vec<Candidate>, String>),
     Added(FeedId, Result<Fetch, String>),
 }
 
@@ -205,18 +225,18 @@ struct Engine {
     dir: PathBuf,
     store: Store,
     client: reqwest::Client,
-    emit: Box<dyn Fn(Event) + Send>,
+    out: Box<dyn Fn(Event, Audience) + Send>,
     settings: Settings,
     status: RefreshStatus,
     next: Instant,
     itx: Option<UnboundedSender<Internal>>,
     published: public::Shared,
     public_url: Option<String>,
-    web_extractor: usize,
+    extractors: Vec<Client>,
     media_inflight: HashSet<String>,
     media_waiting: HashSet<String>,
     media_gate: std::sync::Arc<tokio::sync::Semaphore>,
-    jobs: std::collections::HashMap<u64, (Job, String, String)>,
+    jobs: std::collections::HashMap<u64, (Job, String, String, Client)>,
     next_job: u64,
     device: String,
     hlc: i64,
@@ -273,7 +293,7 @@ async fn parse_fetched(f: net::Fetched) -> Result<Fetch, String> {
 }
 
 impl Engine {
-    fn new(dir: PathBuf, emit: Box<dyn Fn(Event) + Send>) -> Result<Self, String> {
+    fn new(dir: PathBuf, out: Box<dyn Fn(Event, Audience) + Send>) -> Result<Self, String> {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let store = Store::open(&dir.join("feedreader.sqlite")).map_err(|e| e.to_string())?;
         let settings = store.settings();
@@ -285,14 +305,14 @@ impl Engine {
             dir,
             store,
             client: net::client(),
-            emit,
+            out,
             settings,
             status: RefreshStatus::default(),
             next: Instant::now() + Duration::from_millis(800),
             itx: None,
             published: Default::default(),
             public_url: None,
-            web_extractor: 0,
+            extractors: Vec::new(),
             media_inflight: HashSet::new(),
             media_waiting: HashSet::new(),
             media_gate: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
@@ -310,9 +330,17 @@ impl Engine {
         })
     }
 
+    fn emit(&self, event: Event) {
+        (self.out)(event, Audience::All);
+    }
+
+    fn reply(&self, client: Client, event: Event) {
+        (self.out)(event, Audience::Client(client));
+    }
+
     #[profiling::function]
-    fn snapshot(&self) {
-        (self.emit)(Event::Snapshot {
+    fn snapshot(&self, to: Audience) {
+        (self.out)(Event::Snapshot {
             feeds: self.store.feeds(),
             entries: self.store.entries(),
             settings: self.settings.clone(),
@@ -322,13 +350,13 @@ impl Engine {
             recommendations: self.store.recommendations(),
             public_url: self.public_url.clone(),
             tabs: self.store.tabs(),
-        });
+        }, to);
     }
 
     #[profiling::function]
     fn publish(&mut self) {
         let token = self.store.token();
-        let base = self.public_url.clone().unwrap_or_else(|| format!("http://127.0.0.1:{}/{token}/", self.settings.public_port));
+        let base = self.public_url.clone().unwrap_or_else(|| format!("http://127.0.0.1:{}/{token}/", public_port()));
         let items = self.store.public_items();
         let mut p = self.published.write().unwrap();
         p.atom = public::atom(&token, &base, &items);
@@ -336,21 +364,32 @@ impl Engine {
         p.token = token;
     }
 
-    async fn run(mut self, mut rx: UnboundedReceiver<Request>) {
+    fn within(&mut self, work: impl FnOnce(&mut Self)) {
+        self.store.begin();
+        work(self);
+        self.store.commit();
+    }
+
+    async fn run(mut self, mut rx: UnboundedReceiver<(Client, Request)>) {
         let (itx, mut irx) = unbounded_channel();
         self.itx = Some(itx);
+        self.store.begin();
         self.publish();
-        let port = self.settings.public_port;
+        let port = public_port();
         match std::net::TcpListener::bind(("127.0.0.1", port)) {
-            Ok(probe) => {
-                drop(probe);
+            Ok(listener) => {
                 let shared = self.published.clone();
                 tokio::spawn(async move {
-                    let _ = public::serve(port, shared).await;
+                    if let Err(e) = public::serve(listener, shared).await {
+                        eprintln!("public listener on port {port}: {e}");
+                    }
                 });
                 self.public_url = Some(format!("http://127.0.0.1:{port}/{}/", self.store.token()));
             }
-            Err(_) => self.public_url = None,
+            Err(e) => {
+                eprintln!("public listener on port {port}: {e}");
+                self.public_url = None;
+            }
         }
         if self.settings.publish && self.hub.is_none() {
             self.funnel(true);
@@ -371,15 +410,16 @@ impl Engine {
                 }));
             }
         }
-        self.snapshot();
+        self.snapshot(Audience::All);
+        self.store.commit();
         loop {
             tokio::select! {
                 r = rx.recv() => match r {
-                    Some(r) => self.request(r),
-                    None => break,
+                    Some((_, Request::Shutdown)) | None => break,
+                    Some((from, r)) => self.within(|e| e.request(from, r)),
                 },
-                Some(i) = irx.recv() => self.internal(i),
-                _ = tokio::time::sleep_until(self.next) => self.start_refresh(false),
+                Some(i) = irx.recv() => self.within(|e| e.internal(i)),
+                _ = tokio::time::sleep_until(self.next) => self.within(|e| e.start_refresh(false)),
             }
         }
     }
@@ -415,13 +455,15 @@ impl Engine {
     fn page(&mut self, job: Job, r: Result<(String, String), String>) {
         match r {
             Err(e) => self.read(job, Err(e), Extractor::Readability),
-            Ok((url, html)) if self.web_extractor > 0 => {
-                self.next_job += 1;
-                let id = self.next_job;
-                self.jobs.insert(id, (job, url.clone(), html.clone()));
-                (self.emit)(Event::Extract { job: id, url, html });
-            }
-            Ok((url, html)) => self.read_locally(job, url, html),
+            Ok((url, html)) => match self.extractors.first().copied() {
+                Some(client) => {
+                    self.next_job += 1;
+                    let id = self.next_job;
+                    self.jobs.insert(id, (job, url.clone(), html.clone(), client));
+                    self.reply(client, Event::Extract { job: id, url, html });
+                }
+                None => self.read_locally(job, url, html),
+            },
         }
     }
 
@@ -436,8 +478,8 @@ impl Engine {
                         x.title
                     };
                     let e = self.store.save_link(&url, &title, &x.html, now());
-                    (self.emit)(Event::EntriesAdded(vec![e]));
-                    (self.emit)(Event::Message(format!("Saved \u{201C}{title}\u{201D} to Bookmarks.")));
+                    self.emit(Event::EntriesAdded(vec![e]));
+                    self.emit(Event::Message(format!("Saved \u{201C}{title}\u{201D} to Bookmarks.")));
                     if let Some(host) = url::Url::parse(&url).ok().and_then(|u| u.host_str().map(str::to_string))
                         && !self.store.offered(&host)
                     {
@@ -450,9 +492,9 @@ impl Engine {
                         });
                     }
                 }
-                Err(e) => (self.emit)(Event::Message(format!("Couldn't save {url}: {e}"))),
+                Err(e) => self.emit(Event::Message(format!("Couldn't save {url}: {e}"))),
             },
-            Job::Probe(url) => (self.emit)(Event::Probed(url, r.map(|x| (x, by)))),
+            Job::Probe(url, to) => self.reply(to, Event::Probed(url, r.map(|x| (x, by)))),
         }
     }
 
@@ -480,7 +522,7 @@ impl Engine {
             ),
             Err(e) => (Err(e), None),
         };
-        (self.emit)(Event::Body(Body {
+        self.emit(Event::Body(Body {
             entry: id,
             mode: Mode::Clean,
             blocks,
@@ -519,11 +561,11 @@ impl Engine {
     }
 
     fn feeds_changed(&self) {
-        (self.emit)(Event::Feeds(self.store.feeds()));
+        self.emit(Event::Feeds(self.store.feeds()));
     }
 
     fn folders_changed(&self) {
-        (self.emit)(Event::Folders(self.store.folders()));
+        self.emit(Event::Folders(self.store.folders()));
     }
 
     #[profiling::function]
@@ -536,14 +578,14 @@ impl Engine {
                 let ids: Vec<EntryId> = ids.iter().filter(|id| fresh(&self.store, format!("read:{id}"))).cloned().collect();
                 self.store.set_read(&ids, *v, t);
                 if change.device != self.device && !ids.is_empty() {
-                    (self.emit)(Event::States(ids.into_iter().map(|id| (id, Some(*v), None)).collect()));
+                    self.emit(Event::States(ids.into_iter().map(|id| (id, Some(*v), None)).collect()));
                 }
             }
             Command::Bookmark(ids, v) => {
                 let ids: Vec<EntryId> = ids.iter().filter(|id| fresh(&self.store, format!("bookmark:{id}"))).cloned().collect();
                 self.store.set_bookmarked(&ids, *v, t);
                 if change.device != self.device && !ids.is_empty() {
-                    (self.emit)(Event::States(ids.into_iter().map(|id| (id, None, Some(*v))).collect()));
+                    self.emit(Event::States(ids.into_iter().map(|id| (id, None, Some(*v))).collect()));
                 }
             }
             Command::Subscribe(url, title, folders) => {
@@ -554,7 +596,7 @@ impl Engine {
                 let feed = match self.store.add_feed(url, title) {
                     Ok(f) => f,
                     Err(e) => {
-                        (self.emit)(Event::FeedAdded(Err(e.to_string())));
+                        self.emit(Event::FeedAdded(Err(e.to_string())));
                         return;
                     }
                 };
@@ -566,7 +608,7 @@ impl Engine {
                     return;
                 }
                 self.feeds_changed();
-                (self.emit)(Event::EntriesAdded(self.store.removed_entries(&feed.id)));
+                self.emit(Event::EntriesAdded(self.store.removed_entries(&feed.id)));
                 if self.fetches() {
                     let client = self.client.clone();
                     let v = self.store.validators(&feed.id);
@@ -586,7 +628,7 @@ impl Engine {
                 if fresh(&self.store, format!("sub:{id}")) {
                     self.store.restore_feed(id);
                     self.feeds_changed();
-                    (self.emit)(Event::EntriesAdded(self.store.removed_entries(id)));
+                    self.emit(Event::EntriesAdded(self.store.removed_entries(id)));
                 }
             }
             Command::Rename(id, label) => {
@@ -642,13 +684,13 @@ impl Engine {
             Command::AddRule(rule) => {
                 if fresh(&self.store, format!("rule:{}", rule.id)) {
                     self.store.add_rule(rule);
-                    (self.emit)(Event::Rules(self.store.rules()));
+                    self.emit(Event::Rules(self.store.rules()));
                 }
             }
             Command::RemoveRule(id) => {
                 if fresh(&self.store, format!("rule:{id}")) {
                     self.store.remove_rule(id);
-                    (self.emit)(Event::Rules(self.store.rules()));
+                    self.emit(Event::Rules(self.store.rules()));
                 }
             }
             Command::Recommend(id, note) => {
@@ -656,14 +698,14 @@ impl Engine {
                     if self.store.recommend(id, note, t) {
                         self.publish();
                     }
-                    (self.emit)(Event::Recommendations(self.store.recommendations()));
+                    self.emit(Event::Recommendations(self.store.recommendations()));
                 }
             }
             Command::Unrecommend(id) => {
                 if fresh(&self.store, format!("rec:{id}")) {
                     self.store.unrecommend(id, t);
                     self.publish();
-                    (self.emit)(Event::Recommendations(self.store.recommendations()));
+                    self.emit(Event::Recommendations(self.store.recommendations()));
                 }
             }
             Command::SaveLink(url) => {
@@ -675,7 +717,7 @@ impl Engine {
                 if fresh(&self.store, "tabs".into()) {
                     self.store.set_tabs(tabs);
                     if change.device != self.device {
-                        (self.emit)(Event::Tabs(tabs.clone()));
+                        self.emit(Event::Tabs(tabs.clone()));
                     }
                 }
             }
@@ -695,42 +737,28 @@ impl Engine {
                     let wait = Duration::from_secs(self.settings.refresh_minutes.max(1) as u64 * 60);
                     self.next = Instant::now() + wait;
                     self.status.next_at = Some(now() + wait.as_millis() as i64);
-                    (self.emit)(Event::Refresh(self.status.clone()));
+                    self.emit(Event::Refresh(self.status.clone()));
                 }
                 if retention_changed {
                     let removed = self.store.prune(&self.settings, now());
                     if !removed.is_empty() {
-                        (self.emit)(Event::EntriesRemoved(removed));
+                        self.emit(Event::EntriesRemoved(removed));
                     }
                 }
-                (self.emit)(Event::Settings(self.settings.clone()));
+                self.emit(Event::Settings(self.settings.clone()));
             }
         }
     }
 
     fn funnel(&mut self, on: bool) {
-        let port = self.settings.public_port;
+        let port = public_port();
         let token = self.store.token();
         self.spawn(async move {
-            let r = tokio::task::spawn_blocking(move || {
-                let args: Vec<String> = if on {
-                    vec!["funnel".into(), "--bg".into(), format!("--https={FUNNEL_PORT}"), format!("http://127.0.0.1:{port}")]
-                } else {
-                    vec!["funnel".into(), format!("--https={FUNNEL_PORT}"), "off".into()]
-                };
-                let out = std::process::Command::new("tailscale").args(&args).output().map_err(|e| format!("tailscale isn't available: {e}"))?;
-                if !out.status.success() {
-                    return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-                }
-                if !on {
-                    return Ok(None);
-                }
-                let name = tailscale_name().ok_or("tailscale has no name for this machine")?;
-                Ok(Some(format!("https://{name}:{FUNNEL_PORT}/{token}/")))
-            })
-            .await
-            .map_err(|e| e.to_string())
-            .and_then(|r| r);
+            let r = if on {
+                tailscale::publish(FUNNEL_PORT, port).await.map(|name| Some(format!("https://{name}:{FUNNEL_PORT}/{token}/")))
+            } else {
+                tailscale::unpublish(FUNNEL_PORT).await.map(|_| None)
+            };
             Internal::Funnel(on, r)
         });
     }
@@ -756,20 +784,22 @@ impl Engine {
             },
             None => SyncStatus::Hub { devices: self.store.devices().into_iter().map(|(_, name, seen)| (name, seen)).collect() },
         };
-        (self.emit)(Event::Sync(status));
+        self.emit(Event::Sync(status));
     }
 
-    fn pairing_link(&self, code: &str) -> String {
-        let port = sync_port();
-        let mut hubs = Vec::new();
-        if let Some(name) = tailscale_name() {
-            hubs.push(format!("http://{name}:{port}"));
-        }
-        if let Some(ip) = lan_ip() {
-            hubs.push(format!("http://{ip}:{port}"));
-        }
-        hubs.push(format!("http://127.0.0.1:{port}"));
-        format!("feedreader://pair?code={code}&hub={}", hubs.join(","))
+    fn pairing_link(&self, to: Client, code: String) {
+        self.spawn(async move {
+            let port = sync_port();
+            let mut hubs = Vec::new();
+            if let Some(name) = tailscale::name().await {
+                hubs.push(format!("http://{name}:{port}"));
+            }
+            if let Some(ip) = lan_ip() {
+                hubs.push(format!("http://{ip}:{port}"));
+            }
+            hubs.push(format!("http://127.0.0.1:{port}"));
+            Internal::Pairing(to, format!("feedreader://pair?code={code}&hub={}", hubs.join(",")))
+        });
     }
 
     fn api(&mut self, call: hub::Api) {
@@ -778,7 +808,7 @@ impl Engine {
             hub::Api::Pair { code, device, name, reply } => {
                 let token = self.store.redeem_code(&code, &device, &name, t);
                 if token.is_some() {
-                    (self.emit)(Event::Message(format!("Paired {name}.")));
+                    self.emit(Event::Message(format!("Paired {name}.")));
                     self.sync_status();
                 }
                 let _ = reply.send(token);
@@ -839,7 +869,7 @@ impl Engine {
             let wait = Duration::from_secs(self.settings.refresh_minutes.max(1) as u64 * 60);
             self.next = Instant::now() + wait;
             self.status.next_at = Some(now() + wait.as_millis() as i64);
-            (self.emit)(Event::Refresh(self.status.clone()));
+            self.emit(Event::Refresh(self.status.clone()));
             return;
         }
         self.status = RefreshStatus {
@@ -850,7 +880,7 @@ impl Engine {
             ..Default::default()
         };
         self.next = Instant::now() + Duration::from_secs(24 * 3600);
-        (self.emit)(Event::Refresh(self.status.clone()));
+        self.emit(Event::Refresh(self.status.clone()));
         let list: Vec<_> = feeds
             .into_iter()
             .map(|f| {
@@ -888,7 +918,7 @@ impl Engine {
         let r = self.apply_fetch_inner(id, result);
         r.map(|ins| {
             if !ins.updated.is_empty() {
-                (self.emit)(Event::EntriesUpdated(ins.updated));
+                self.emit(Event::EntriesUpdated(ins.updated));
             }
             self.want_media(ins.images, false);
             ins.added
@@ -903,13 +933,13 @@ impl Engine {
                 if row.error.is_none() && !row.file.is_empty() && path.is_file() {
                     self.store.touch_media(&url, t);
                     if reply {
-                        (self.emit)(Event::Media(url, Ok(path)));
+                        self.emit(Event::Media(url, Ok(path)));
                     }
                     continue;
                 }
                 if let Some(e) = row.error.filter(|_| t - row.fetched_at < 86_400_000) {
                     if reply {
-                        (self.emit)(Event::Media(url, Err(e)));
+                        self.emit(Event::Media(url, Err(e)));
                     }
                     continue;
                 }
@@ -976,17 +1006,17 @@ impl Engine {
                     Ok(added) => {
                         self.status.added += added.len();
                         if !added.is_empty() {
-                            (self.emit)(Event::EntriesAdded(added));
+                            self.emit(Event::EntriesAdded(added));
                         }
                     }
                     Err(_) => self.status.failed += 1,
                 }
-                (self.emit)(Event::Refresh(self.status.clone()));
+                self.emit(Event::Refresh(self.status.clone()));
             }
             Internal::RefreshDone(run) if run == self.status.run => {
                 let removed = self.store.prune(&self.settings, now());
                 if !removed.is_empty() {
-                    (self.emit)(Event::EntriesRemoved(removed));
+                    self.emit(Event::EntriesRemoved(removed));
                 }
                 self.store.purge_removed(now() - 24 * 3600 * 1000);
                 for file in self.store.prune_media(now(), MEDIA_BUDGET) {
@@ -997,33 +1027,37 @@ impl Engine {
                 self.status.running = false;
                 self.status.finished_at = Some(now());
                 self.status.next_at = Some(now() + wait.as_millis() as i64);
-                (self.emit)(Event::Feeds(self.store.feeds()));
-                (self.emit)(Event::Refresh(self.status.clone()));
+                self.emit(Event::Feeds(self.store.feeds()));
+                self.emit(Event::Refresh(self.status.clone()));
             }
             Internal::RefreshDone(_) => {}
-            Internal::Discovered(q, r) => (self.emit)(Event::Discovered(q, r)),
+            Internal::Discovered(to, q, r) => self.reply(to, Event::Discovered(q, r)),
             Internal::Page(job, r) => self.page(job, r),
             Internal::Api(call) => self.api(call),
+            Internal::Pairing(to, link) => self.reply(to, Event::Pairing(link)),
             Internal::Funnel(on, r) => {
-                let local = format!("http://127.0.0.1:{}/{}/", self.settings.public_port, self.store.token());
-                match r {
-                    Ok(Some(url)) => {
+                let local = format!("http://127.0.0.1:{}/{}/", public_port(), self.store.token());
+                let message = match (on, r) {
+                    (_, Ok(Some(url))) => {
                         self.public_url = Some(url.clone());
-                        if on {
-                            (self.emit)(Event::Message(format!("Your I recommend feed is public at {url}")));
-                        }
+                        format!("Your I recommend feed is public at {url}")
                     }
-                    Ok(None) => {
+                    (_, Ok(None)) => {
                         self.public_url = Some(local);
-                        (self.emit)(Event::Message("Your I recommend feed is no longer public.".into()));
+                        "Your I recommend feed is no longer public.".into()
                     }
-                    Err(e) => {
+                    (true, Err(e)) => {
                         self.public_url = Some(local);
-                        (self.emit)(Event::Message(format!("Couldn't publish through Tailscale Funnel: {e}")));
+                        format!("Couldn't publish through Tailscale Funnel: {e}")
                     }
-                }
+                    (false, Err(e)) => {
+                        self.public_url = Some(local);
+                        format!("Couldn't stop Tailscale Funnel: {e}")
+                    }
+                };
+                self.emit(Event::Message(message));
                 self.publish();
-                (self.emit)(Event::PublicUrl(self.public_url.clone()));
+                self.emit(Event::PublicUrl(self.public_url.clone()));
             }
             Internal::Ask(sat::Ask::Outbox { reply }) => {
                 let pushed: i64 = self.store.get("sync_pushed").and_then(|v| v.parse().ok()).unwrap_or(0);
@@ -1047,7 +1081,7 @@ impl Engine {
                     self.feeds_changed();
                 }
                 if !added.is_empty() {
-                    (self.emit)(Event::EntriesAdded(added));
+                    self.emit(Event::EntriesAdded(added));
                 }
             }
             Internal::HubOnline(online, address) => {
@@ -1075,17 +1109,17 @@ impl Engine {
                     self.store.put("sync_pulled", "0");
                     self.store.put("content_cursor", "0");
                     self.start_satellite(link);
-                    (self.emit)(Event::Message("Paired with the hub. Syncing\u{2026}".into()));
+                    self.emit(Event::Message("Paired with the hub. Syncing\u{2026}".into()));
                     self.sync_status();
                 }
-                Err(e) => (self.emit)(Event::Message(format!("Couldn't pair: {e}"))),
+                Err(e) => self.emit(Event::Message(format!("Couldn't pair: {e}"))),
             },
             Internal::Offer(host, r) => {
                 if let Ok(c) = r
                     && !c.is_empty()
                     && c.iter().all(|c| !c.subscribed)
                 {
-                    (self.emit)(Event::FollowOffer(host, c));
+                    self.emit(Event::FollowOffer(host, c));
                 }
             }
             Internal::MediaFetched(url, r) => {
@@ -1102,31 +1136,31 @@ impl Engine {
                     }
                 };
                 if self.media_waiting.remove(&url) {
-                    (self.emit)(Event::Media(url, reply));
+                    self.emit(Event::Media(url, reply));
                 }
             }
             Internal::Read(job, r, by) => self.read(job, r, by),
             Internal::Added(id, r) => {
                 let result = self.apply_fetch(&id, r);
-                (self.emit)(Event::Feeds(self.store.feeds()));
+                self.emit(Event::Feeds(self.store.feeds()));
                 match result {
                     Ok(added) => {
                         let n = added.len();
                         if !added.is_empty() {
-                            (self.emit)(Event::EntriesAdded(added));
+                            self.emit(Event::EntriesAdded(added));
                         }
                         if let Some(f) = self.store.feed(&id) {
-                            (self.emit)(Event::FeedAdded(Ok((f, n))));
+                            self.emit(Event::FeedAdded(Ok((f, n))));
                         }
                     }
-                    Err(e) => (self.emit)(Event::FeedAdded(Err(e))),
+                    Err(e) => self.emit(Event::FeedAdded(Err(e))),
                 }
             }
         }
     }
 
     #[profiling::function]
-    fn request(&mut self, r: Request) {
+    fn request(&mut self, from: Client, r: Request) {
         match r {
             Request::SetRead(ids, v) => self.local(Command::Read(ids, v)),
             Request::SetBookmarked(ids, v) => self.local(Command::Bookmark(ids, v)),
@@ -1136,12 +1170,12 @@ impl Engine {
                 let known = self.known();
                 self.spawn(async move {
                     let r = work::discover(&client, &q, &known).await;
-                    Internal::Discovered(q, r)
+                    Internal::Discovered(from, q, r)
                 });
             }
             Request::AddFeed(url, title, folders) => {
                 if !title.is_empty() && !self.known().contains(&store::feed_id(&url)) && self.known().contains(&work::fingerprint(&title, &url)) {
-                    (self.emit)(Event::FeedAdded(Err(format!("you already follow {title} at another address"))));
+                    self.emit(Event::FeedAdded(Err(format!("you already follow {title} at another address"))));
                     return;
                 }
                 self.local(Command::Subscribe(url, title, folders));
@@ -1153,7 +1187,7 @@ impl Engine {
                 let text = match std::fs::read_to_string(&path) {
                     Ok(t) => t,
                     Err(e) => {
-                        (self.emit)(Event::Message(format!("Couldn't read {}: {e}", path.display())));
+                        self.emit(Event::Message(format!("Couldn't read {}: {e}", path.display())));
                         return;
                     }
                 };
@@ -1182,10 +1216,10 @@ impl Engine {
                     }
                 }
                 self.batching = false;
-                (self.emit)(Event::Feeds(self.store.feeds()));
-                (self.emit)(Event::Folders(self.store.folders()));
+                self.emit(Event::Feeds(self.store.feeds()));
+                self.emit(Event::Folders(self.store.folders()));
                 let skipped = if skipped > 0 { format!(", skipped {skipped} unsafe links") } else { String::new() };
-                (self.emit)(Event::Message(format!("Imported {added} new feeds{skipped}")));
+                self.emit(Event::Message(format!("Imported {added} new feeds{skipped}")));
                 if added > 0 {
                     self.start_refresh(false);
                 }
@@ -1197,7 +1231,7 @@ impl Engine {
                     Ok(()) => format!("Exported {} feeds to {}", feeds.len(), path.display()),
                     Err(e) => format!("Couldn't write {}: {e}", path.display()),
                 };
-                (self.emit)(Event::Message(msg));
+                self.emit(Event::Message(msg));
             }
             Request::ImportLegacy(path) => {
                 let msg = match self.store.import_legacy(&path) {
@@ -1207,8 +1241,8 @@ impl Engine {
                     }
                     Err(e) => format!("Import failed: {e}"),
                 };
-                self.snapshot();
-                (self.emit)(Event::Message(msg));
+                self.snapshot(Audience::All);
+                self.emit(Event::Message(msg));
             }
             Request::LoadBody(id, mode) => {
                 let Some((entry, content, summary)) = self.store.entry(&id) else { return };
@@ -1220,11 +1254,11 @@ impl Engine {
                         } else {
                             Ok(parse::blocks(&html, Some(&entry.url)))
                         };
-                        (self.emit)(Event::Body(Body { entry: id, mode, blocks, note: None }));
+                        self.emit(Event::Body(Body { entry: id, mode, blocks, note: None }));
                     }
                     Mode::Clean => {
                         if let Some(html) = self.store.clean_body(&id) {
-                            (self.emit)(Event::Body(Body {
+                            self.emit(Event::Body(Body {
                                 entry: id,
                                 mode,
                                 blocks: Ok(parse::blocks(&html, Some(&entry.url))),
@@ -1233,7 +1267,7 @@ impl Engine {
                             return;
                         }
                         if entry.url.is_empty() {
-                            (self.emit)(Event::Body(Body {
+                            self.emit(Event::Body(Body {
                                 entry: id,
                                 mode,
                                 blocks: Err("This entry has no link to extract.".into()),
@@ -1258,24 +1292,28 @@ impl Engine {
             Request::Unrecommend(id) => self.local(Command::Unrecommend(id)),
             Request::Search(q) => {
                 let ids = self.store.search(&q);
-                (self.emit)(Event::SearchResults(q, ids));
+                self.reply(from, Event::SearchResults(q, ids));
             }
             Request::SaveLink(input) => match net::parse_url(&input) {
                 Ok(u) => self.local(Command::SaveLink(u.to_string())),
-                Err(e) => (self.emit)(Event::Message(format!("Couldn't save {input}: {e}"))),
+                Err(e) => self.emit(Event::Message(format!("Couldn't save {input}: {e}"))),
             },
             Request::Probe(input) => match net::parse_url(&input) {
-                Ok(u) => self.fetch_page(Job::Probe(u.to_string()), u.to_string()),
-                Err(e) => (self.emit)(Event::Probed(input, Err(e))),
+                Ok(u) => self.fetch_page(Job::Probe(u.to_string(), from), u.to_string()),
+                Err(e) => self.reply(from, Event::Probed(input, Err(e))),
             },
-            Request::UseWebExtractor => self.web_extractor += 1,
+            Request::UseWebExtractor => {
+                if !self.extractors.contains(&from) {
+                    self.extractors.push(from);
+                }
+            }
             Request::PairCode => {
                 if self.hub.is_some() {
-                    (self.emit)(Event::Message("This device syncs with a hub; pair new devices on the hub.".into()));
+                    self.reply(from, Event::Message("This device syncs with a hub; pair new devices on the hub.".into()));
                     return;
                 }
                 let code = self.store.issue_code(now());
-                (self.emit)(Event::Pairing(self.pairing_link(&code)));
+                self.pairing_link(from, code);
             }
             Request::Pair(link, name) => {
                 let device = self.device.clone();
@@ -1291,7 +1329,7 @@ impl Engine {
                 let _ = std::fs::remove_file(self.dir.join("secrets/hub.json"));
                 self.hub = None;
                 self.hub_online = false;
-                (self.emit)(Event::Message("This device no longer syncs with a hub. Restart the engine to make it a hub.".into()));
+                self.emit(Event::Message("This device no longer syncs with a hub. Restart the engine to make it a hub.".into()));
                 self.sync_status();
             }
             Request::ForgetDevice(name) => {
@@ -1301,24 +1339,23 @@ impl Engine {
                 self.sync_status();
             }
             Request::Resync => {
-                self.snapshot();
+                self.snapshot(Audience::Client(from));
                 self.sync_status();
             }
-            Request::Detach { extractor } => {
-                if extractor {
-                    self.web_extractor = self.web_extractor.saturating_sub(1);
-                }
-                if self.web_extractor == 0 {
-                    for (_, (job, url, html)) in std::mem::take(&mut self.jobs) {
+            Request::Detach => {
+                self.extractors.retain(|&c| c != from);
+                let orphaned: Vec<u64> = self.jobs.iter().filter(|(_, j)| j.3 == from).map(|(&id, _)| id).collect();
+                for id in orphaned {
+                    if let Some((job, url, html, _)) = self.jobs.remove(&id) {
                         self.read_locally(job, url, html);
                     }
                 }
             }
-            Request::Shutdown => std::process::exit(0),
+            Request::Shutdown => {}
             Request::SetTabs(tabs) => self.local(Command::Tabs(tabs)),
             Request::Media(urls) => self.want_media(urls, true),
             Request::Extracted(id, r) => {
-                let Some((job, url, html)) = self.jobs.remove(&id) else { return };
+                let Some((job, url, html, _)) = self.jobs.remove(&id) else { return };
                 match r {
                     Ok(x) if !x.html.trim().is_empty() => self.read(job, Ok(x), Extractor::Defuddle),
                     _ => self.read_locally(job, url, html),

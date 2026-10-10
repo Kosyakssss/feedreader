@@ -1,6 +1,7 @@
 mod article;
 mod cmds;
 mod extract;
+mod menu;
 mod model;
 mod palette;
 mod tabs;
@@ -13,10 +14,10 @@ use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
 use engine::{Event, Request};
-use toolkit::commands::{Chord, Key, Registry};
-use toolkit::gpu::Gpu;
-use toolkit::text::{Face, Text, TextStyle};
-use toolkit::ui::{DARK, LIGHT, Metrics, Palette, Rect, Scene};
+use graticule::commands::{Chord, Key, Registry};
+use graticule::gpu::Gpu;
+use graticule::text::{Face, Text, TextStyle};
+use graticule::ui::{DARK, LIGHT, Metrics, Palette, Rect, Scene};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
@@ -56,7 +57,7 @@ struct State {
     gpu: Gpu,
     text: Text,
     model: Model,
-    registry: Registry<Cmd, Model>,
+    registry: &'static Registry<Cmd, Model>,
     engine: engine::Handle,
     emit: Arc<dyn Fn(Event) + Send + Sync>,
     background: bool,
@@ -80,6 +81,7 @@ struct State {
     theme: theme::Theme,
     system_dark: bool,
     _watcher: Option<notify::RecommendedWatcher>,
+    _menu: Option<menu::Menu>,
 }
 
 struct App {
@@ -186,10 +188,10 @@ fn watch(dir: &std::path::Path, proxy: EventLoopProxy<Wake>) -> Option<notify::R
 
 impl State {
     fn palette(&self) -> Palette {
-        let dark = match self.model.settings.appearance.as_str() {
-            "dark" => true,
-            "light" => false,
-            _ => self.system_dark,
+        let dark = match self.model.settings.appearance {
+            engine::Appearance::Dark => true,
+            engine::Appearance::Light => false,
+            engine::Appearance::System => self.system_dark,
         };
         if dark { self.theme.dark } else { self.theme.light }
     }
@@ -217,9 +219,9 @@ impl State {
         self.model.images.begin_frame();
         let stats = FrameStats::from(&self.frames);
         let palette = self.palette();
-        let mut scene = Scene::new(&mut self.text, self.metrics, self.model.lines, palette);
+        let mut scene = Scene::new(&mut self.text, self.metrics, self.model.line_style(), palette);
         scene.pointer = self.pointer_inside.then_some(self.mouse);
-        let out = view::paint(&mut self.model, &self.registry, &mut scene, stats);
+        let out = view::paint(&mut self.model, self.registry, &mut scene, stats);
         let quads = std::mem::take(&mut scene.quads);
         self.hits = std::mem::take(&mut scene.hits);
         drop(scene);
@@ -289,9 +291,10 @@ impl State {
                         let bg = self.palette().bg;
                         ((bg[0] * 255.0) as u8, (bg[1] * 255.0) as u8, (bg[2] * 255.0) as u8, 255)
                     })
-                    .with_initialization_script(
-                        "document.addEventListener('keydown', e => { if (e.key === 'Escape' || (e.metaKey && e.key === 'w')) { e.preventDefault(); window.ipc.postMessage('close'); } }, true);",
-                    )
+                    .with_initialization_script(format!(
+                        "document.addEventListener('keydown', e => {{ if (e.key === 'Escape' || (e.{}Key && e.key === 'w')) {{ e.preventDefault(); window.ipc.postMessage('close'); }} }}, true);",
+                        if cfg!(target_os = "macos") { "meta" } else { "ctrl" }
+                    ))
                     .with_ipc_handler(move |_| {
                         let _ = proxy.send_event(Wake::WebClose);
                     })
@@ -357,14 +360,10 @@ impl State {
             self.edit_theme();
         }
         flush(&mut self.model, &self.engine, &mut self.clipboard);
-        if self.model.quitting {
-            std::thread::sleep(Duration::from_millis(150));
-            std::process::exit(0);
-        }
         self.window.request_redraw();
     }
 
-    fn field(&mut self) -> Option<&mut toolkit::field::Field> {
+    fn field(&mut self) -> Option<&mut graticule::field::Field> {
         match self.model.focus {
             Focus::Filter => Some(&mut self.model.filter),
             Focus::Prompt => self.model.prompt.as_mut().map(|p| &mut p.field),
@@ -389,7 +388,14 @@ impl State {
 
     #[profiling::function]
     fn key(&mut self, event: &winit::event::KeyEvent) -> bool {
-        let cmd = self.modifiers.super_key();
+        let (cmd, foreign) = if cfg!(target_os = "macos") {
+            (self.modifiers.super_key(), self.modifiers.control_key())
+        } else {
+            (self.modifiers.control_key(), self.modifiers.super_key())
+        };
+        if foreign {
+            return false;
+        }
         let shift = self.modifiers.shift_key();
         let alt = self.modifiers.alt_key();
         let key = match &event.logical_key {
@@ -423,17 +429,19 @@ impl State {
             cmd,
             shift: shift && shift_matters,
         };
-        if self.model.focus != Focus::Main && !cmd && matches!(key, Key::Char(_)) && !self.model.confirm.is_some() {
-            if let Some(t) = event.text.as_ref().map(|t| t.to_string())
-                && self.field().is_some_and(|f| f.preedit.is_empty())
-                && !t.chars().any(char::is_control)
-            {
-                if let Some(f) = self.field() {
-                    f.insert(&t);
-                }
-                self.field_changed();
-                return true;
+        if self.model.focus != Focus::Main
+            && !cmd
+            && matches!(key, Key::Char(_))
+            && self.model.confirm.is_none()
+            && let Some(t) = event.text.as_ref().map(|t| t.to_string())
+            && self.field().is_some_and(|f| f.preedit.is_empty())
+            && !t.chars().any(char::is_control)
+        {
+            if let Some(f) = self.field() {
+                f.insert(&t);
             }
+            self.field_changed();
+            return true;
         }
         if let Some(c) = self.registry.lookup(&self.model, &chord) {
             cmds::exec(&mut self.model, c);
@@ -493,6 +501,10 @@ impl State {
         false
     }
 
+    fn primary(&self) -> bool {
+        if cfg!(target_os = "macos") { self.modifiers.super_key() } else { self.modifiers.control_key() }
+    }
+
     #[profiling::function]
     fn press(&mut self) {
         if let Some(w) = &self.webview
@@ -503,6 +515,7 @@ impl State {
         let (x, y) = self.mouse;
         let hit = self.hit_at(x, y);
         let shift = self.modifiers.shift_key();
+        let primary = self.primary();
         let now = Instant::now();
         let double = self.last_click.is_some_and(|(t, px, py)| {
             now - t < Duration::from_millis(400) && (px - x).abs() < 6.0 && (py - y).abs() < 6.0
@@ -549,7 +562,7 @@ impl State {
             Some(Hit::Row(row)) => {
                 m.list.cursor = row;
                 let id = m.entries[m.list.visible[row]].id.clone();
-                if self.modifiers.super_key() {
+                if primary {
                     let url = m.entries[m.list.visible[row]].url.clone();
                     m.open.push(url);
                     m.act("Opened in the browser and marked read".into(), model::Op::Read(vec![(id, true)]));
@@ -615,14 +628,14 @@ impl State {
                 }
             }
             Some(Hit::Play(src, kind)) => {
-                if self.modifiers.super_key() {
+                if primary {
                     m.open.push(src);
                 } else {
                     m.open_target(model::Target::Play(src, kind));
                 }
             }
             Some(Hit::Link(url)) | Some(Hit::Media(url)) => {
-                if self.modifiers.super_key() {
+                if primary {
                     m.open.push(url);
                 } else {
                     m.open_page(url);
@@ -827,7 +840,7 @@ impl ApplicationHandler<Wake> for App {
             window,
             gpu,
             text,
-            model: Model::new(toolkit::images::Images::new({
+            model: Model::new(graticule::images::Images::new({
                 let proxy = self.proxy.clone();
                 move || {
                     let _ = proxy.send_event(Wake::Images);
@@ -857,6 +870,7 @@ impl ApplicationHandler<Wake> for App {
             theme: theme::Theme::new(&engine::data_dir()),
             system_dark: false,
             _watcher: watch(&engine::data_dir(), self.proxy.clone()),
+            _menu: menu::install(event_loop),
         };
         state.system_dark = state.window.theme() == Some(winit::window::Theme::Dark);
         state.reload_theme();
@@ -872,7 +886,7 @@ impl ApplicationHandler<Wake> for App {
         self.state = Some(state);
     }
 
-    fn user_event(&mut self, _: &ActiveEventLoop, wake: Wake) {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, wake: Wake) {
         let Some(s) = self.state.as_mut() else { return };
         match wake {
             Wake::Engine => s.drain_events(),
@@ -896,6 +910,9 @@ impl ApplicationHandler<Wake> for App {
             Wake::Theme => s.reload_theme(),
         }
         s.after();
+        if s.model.quitting {
+            event_loop.exit();
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
@@ -1005,6 +1022,17 @@ impl ApplicationHandler<Wake> for App {
         if redraw {
             s.after();
         }
+        if s.model.quitting {
+            event_loop.exit();
+        }
+    }
+
+    fn exiting(&mut self, _: &ActiveEventLoop) {
+        if let Some(mut s) = self.state.take() {
+            s.save_history();
+            flush(&mut s.model, &s.engine, &mut s.clipboard);
+            s.engine.close();
+        }
     }
 }
 
@@ -1037,7 +1065,7 @@ fn headless() -> (engine::Handle, Receiver<Event>, Model) {
             std::process::exit(1);
         }
     };
-    let mut model = Model::new(toolkit::images::Images::new(|| {}));
+    let mut model = Model::new(graticule::images::Images::new(|| {}));
     wait_for(&rx, &mut model, Duration::from_secs(20), |_, e| matches!(e, Event::Snapshot { .. }));
     (handle, rx, model)
 }
@@ -1056,13 +1084,13 @@ fn snapshot(args: &[String]) {
     let registry = cmds::registry();
     let pointer = get("--pointer").and_then(|p| p.split_once(',').map(|(a, b)| (a.parse().unwrap(), b.parse().unwrap())));
     let mut quads = Vec::new();
-    let paint = |model: &mut Model, text: &mut Text, quads: &mut Vec<toolkit::gpu::Quad>| {
+    let paint = |model: &mut Model, text: &mut Text, quads: &mut Vec<graticule::gpu::Quad>| {
         let started = Instant::now();
         text.begin_frame();
         model.images.begin_frame();
-        let mut scene = Scene::new(text, mt, model.lines, if model.settings.appearance == "dark" { DARK } else { LIGHT });
+        let mut scene = Scene::new(text, mt, model.line_style(), if model.settings.appearance == engine::Appearance::Dark { DARK } else { LIGHT });
         scene.pointer = pointer;
-        view::paint(model, &registry, &mut scene, FrameStats::default());
+        view::paint(model, registry, &mut scene, FrameStats::default());
         *quads = std::mem::take(&mut scene.quads);
         started.elapsed().as_secs_f32() * 1000.0
     };
@@ -1161,7 +1189,7 @@ fn snapshot(args: &[String]) {
     for (id, d) in model.images.take_uploads() {
         gpu.add_image(id, d.width, d.height, &d.rgba);
     }
-    let pixels = gpu.snapshot(&quads, if model.settings.appearance == "dark" { DARK.bg } else { LIGHT.bg });
+    let pixels = gpu.snapshot(&quads, if model.settings.appearance == engine::Appearance::Dark { DARK.bg } else { LIGHT.bg });
     let file = std::fs::File::create(&out).unwrap();
     let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
     enc.set_color(png::ColorType::Rgba);

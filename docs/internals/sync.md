@@ -16,6 +16,7 @@ A library that existed before sync, or that was filled by importing the old app'
 ## Hub and satellite
 
 - The hub listens on port 8790 (`FEEDREADER_SYNC_PORT`) on every interface. Every route but pairing and health needs a bearer token; tokens are stored hashed. A pairing code is single-use and lasts 15 minutes.
+- Requests must name the hub in `Host`: an IP address, `localhost`, or this machine's Tailscale name (full or short). Anything else gets 421, which shuts out DNS rebinding from a web page, whose `Host` is always the attacker's domain.
 - A satellite keeps its hub link in `secrets/hub.json` (0600). Its loop pushes its own unsent changes, long-polls `/v1/sync` for everyone else's (25 seconds), then pages `/v1/content` for entries the hub fetched, by a content sequence (`entries.cseq`) that moves when an entry is added or gains its body.
 - A local change cuts a pending long-poll short so it goes out at once. Before long-polling an address the loop checks `/v1/health` with a 2-second limit, because a firewall in stealth mode drops connections instead of refusing them and a long-poll would otherwise hang until its timeout.
 - While the hub answers, a satellite doesn't fetch feeds and takes images from the hub; when it doesn't, the satellite refreshes and fetches on its own. Nothing it fetched is uploaded: the hub fetches its own copy and the ids match.

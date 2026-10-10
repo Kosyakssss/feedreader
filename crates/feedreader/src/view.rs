@@ -1,7 +1,7 @@
 use chrono::{DateTime, Local};
 use engine::Mode;
-use toolkit::commands::{Chord, Registry, keys_label};
-use toolkit::ui::{Rect, Scene};
+use graticule::commands::{Chord, Registry, keys_label};
+use graticule::ui::{Rect, Scene};
 
 use crate::article;
 use crate::cmds::Cmd;
@@ -339,7 +339,7 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
     let main = if wide {
         let pane_w = cw * 26.0;
         paint_pane(m, s, Rect::new(0.0, body_top, pane_w, body_bottom - body_top));
-        if m.lines == toolkit::ui::LineStyle::Ascii {
+        if m.settings.lines == engine::Lines::Ascii {
             s.vline(pane_w, body_top, body_bottom);
         } else {
             s.vline(pane_w, (top + ch / 2.0).floor(), (body_bottom + ch / 2.0).floor() + hair);
@@ -358,7 +358,7 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
     let main = if m.tabs.is_empty() || m.palette.is_some() {
         main
     } else {
-        paint_tabs(m, s, Rect::new(main.x - cw, main.y, main.w + cw, ch));
+        paint_tabs(m, s, Rect::new((main.x - cw).max(0.0), main.y, main.w + cw, ch));
         s.hline(main.y + ch, main.x - cw * 0.5, main.right() + cw);
         Rect::new(main.x, main.y + ch * 2.0, main.w, main.h - ch * 2.0)
     };
@@ -889,7 +889,7 @@ fn setting_row(m: &Model, s: Setting) -> (&'static str, String) {
     let st = &m.settings;
     match s {
         Setting::ReadingMode => ("Open entries in", format!("{} mode", st.reading_mode.name())),
-        Setting::Lines => ("Lines and borders", m.lines.name().to_string()),
+        Setting::Lines => ("Lines and borders", m.settings.lines.name().to_string()),
         Setting::RefreshMinutes => ("Refresh every", format!("{} minutes", st.refresh_minutes)),
         Setting::MaxEntries => ("Keep at most", format!("{} entries", st.max_entries)),
         Setting::MaxAge => (
@@ -908,13 +908,16 @@ fn setting_row(m: &Model, s: Setting) -> (&'static str, String) {
         Setting::ImportLegacy => ("Import from the old app", "choose a file".into()),
         Setting::Publish => (
             "Publish I recommend on the internet",
-            if st.publish { "on, through Tailscale Funnel".into() } else { "off; only this computer can read it".into() },
+            match (st.publish, m.public_url.as_deref().is_some_and(|u| u.starts_with("https://"))) {
+                (true, true) => "on, through Tailscale Funnel".into(),
+                (true, false) => "on, but Tailscale Funnel isn't serving it".into(),
+                (false, _) => "off; only this computer can read it".into(),
+            },
         ),
         Setting::Mute => ("Mute a word or phrase", "add".into()),
-        Setting::Appearance => ("Appearance", match st.appearance.as_str() {
-            "light" => "light".into(),
-            "dark" => "dark".into(),
-            _ => "follows the system".into(),
+        Setting::Appearance => ("Appearance", match st.appearance {
+            engine::Appearance::System => "follows the system".into(),
+            a => a.name().into(),
         }),
         Setting::ReadingSize => ("Article text size", format!("{}%", st.reading_size)),
         Setting::ReadingWidth => ("Article column width", format!("{} characters", st.reading_width)),

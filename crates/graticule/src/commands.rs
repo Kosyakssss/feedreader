@@ -53,12 +53,13 @@ impl Chord {
     }
 
     pub fn label(&self) -> String {
+        let mac = cfg!(target_os = "macos");
         let mut s = String::new();
-        if self.shift {
-            s.push('\u{21E7}');
-        }
         if self.cmd {
-            s.push('\u{2318}');
+            s.push_str(if mac { "\u{2318}" } else { "Ctrl+" });
+        }
+        if self.shift {
+            s.push_str(if mac { "\u{21E7}" } else { "Shift+" });
         }
         match self.key {
             Key::Char(c) => s.extend(if self.cmd { c.to_uppercase().collect::<Vec<_>>() } else { vec![c] }),

@@ -1,10 +1,10 @@
 use std::ops::Range;
 
 use engine::{Block, Inline, Mode, Request};
-use toolkit::images::Images;
-use toolkit::images::Slot;
-use toolkit::text::{Face, SpanStyle};
-use toolkit::ui::{Rect, Scene};
+use graticule::images::Images;
+use graticule::images::Slot;
+use graticule::text::{Face, SpanStyle};
+use graticule::ui::{Rect, Scene};
 
 use crate::model::{Geom, Model};
 use crate::view::{Hit, Scroll};

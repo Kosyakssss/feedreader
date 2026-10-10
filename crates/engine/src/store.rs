@@ -4,7 +4,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
 use crate::parse::NewEntry;
-use crate::types::{Entry, EntryId, Feed, FeedId, Folder, Mode, Recommendation, Rule, SAVED, Scope, Settings};
+use crate::types::{Appearance, Entry, Lines, EntryId, Feed, FeedId, Folder, Mode, Recommendation, Rule, SAVED, Scope, Settings};
 
 const SCHEMA: &str = "
 create table if not exists feeds (
@@ -121,6 +121,10 @@ create index if not exists entry_media_url on entry_media(url);
 pub struct Store {
     db: Connection,
 }
+
+type LegacyFeed = (String, String, String, i64, Option<String>, Option<String>, Option<i64>, Option<String>);
+
+type FeedState = (String, String, String, Option<String>, bool, bool, Option<String>);
 
 pub fn feed_id(url: &str) -> FeedId {
     let key = match url::Url::parse(url) {
@@ -260,6 +264,14 @@ impl Store {
         Ok(Self { db })
     }
 
+    pub fn begin(&self) {
+        let _ = self.db.execute_batch("begin");
+    }
+
+    pub fn commit(&self) {
+        let _ = self.db.execute_batch("commit");
+    }
+
     pub fn feeds(&self) -> Vec<Feed> {
         let mut st = self
             .db
@@ -344,7 +356,7 @@ impl Store {
 
     #[profiling::function]
     pub fn insert_entries(&mut self, feed: &str, items: Vec<NewEntry>, now: i64) -> Inserted {
-        let tx = self.db.transaction().unwrap();
+        let tx = self.db.savepoint().unwrap();
         let mut added = Vec::new();
         let mut updated = Vec::new();
         let mut images = Vec::new();
@@ -433,7 +445,7 @@ impl Store {
     }
 
     pub fn set_read(&mut self, ids: &[EntryId], read: bool, now: i64) {
-        let tx = self.db.transaction().unwrap();
+        let tx = self.db.savepoint().unwrap();
         {
             let mut st = tx
                 .prepare_cached(
@@ -449,7 +461,7 @@ impl Store {
     }
 
     pub fn set_bookmarked(&mut self, ids: &[EntryId], on: bool, now: i64) {
-        let tx = self.db.transaction().unwrap();
+        let tx = self.db.savepoint().unwrap();
         {
             let mut st = tx
                 .prepare_cached(
@@ -525,7 +537,7 @@ impl Store {
                 doomed.push(id);
             }
         }
-        let tx = self.db.transaction().unwrap();
+        let tx = self.db.savepoint().unwrap();
         for id in &doomed {
             let _ = tx.execute("delete from entries_fts where rowid = (select rowid from entries where id = ?1)", [id]);
             let _ = tx.execute("delete from entries where id = ?1", [id]);
@@ -567,10 +579,9 @@ impl Store {
                 "refresh_minutes" => s.refresh_minutes = v.parse().unwrap_or(s.refresh_minutes),
                 "confirm_open_over" => s.confirm_open_over = v.parse().unwrap_or(s.confirm_open_over),
                 "reading_mode" => s.reading_mode = Mode::parse(&v).unwrap_or(s.reading_mode),
-                "lines" => s.lines = v,
+                "lines" => s.lines = Lines::parse(&v).unwrap_or_default(),
                 "merge_duplicates" => s.merge_duplicates = v == "1",
-                "public_port" => s.public_port = v.parse().unwrap_or(s.public_port),
-                "appearance" => s.appearance = v,
+                "appearance" => s.appearance = Appearance::parse(&v).unwrap_or_default(),
                 "reading_size" => s.reading_size = v.parse().unwrap_or(s.reading_size),
                 "reading_width" => s.reading_width = v.parse().unwrap_or(s.reading_width),
                 "publish" => s.publish = v == "1",
@@ -587,10 +598,9 @@ impl Store {
             ("refresh_minutes", s.refresh_minutes.to_string()),
             ("confirm_open_over", s.confirm_open_over.to_string()),
             ("reading_mode", s.reading_mode.name().to_string()),
-            ("lines", s.lines.clone()),
+            ("lines", s.lines.name().to_string()),
             ("merge_duplicates", if s.merge_duplicates { "1".into() } else { "0".into() }),
-            ("public_port", s.public_port.to_string()),
-            ("appearance", s.appearance.clone()),
+            ("appearance", s.appearance.name().to_string()),
             ("reading_size", s.reading_size.to_string()),
             ("reading_width", s.reading_width.to_string()),
             ("publish", if s.publish { "1".into() } else { "0".into() }),
@@ -646,7 +656,7 @@ impl Store {
     }
 
     pub fn set_feed_folders(&mut self, feed: &str, names: &[String]) {
-        let tx = self.db.transaction().unwrap();
+        let tx = self.db.savepoint().unwrap();
         let _ = tx.execute("delete from folder_feeds where feed_id = ?1", [feed]);
         for name in names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()) {
             let existing: Option<String> = tx
@@ -672,7 +682,7 @@ impl Store {
     }
 
     pub fn restore_folder(&mut self, f: &Folder) {
-        let tx = self.db.transaction().unwrap();
+        let tx = self.db.savepoint().unwrap();
         let _ = tx.execute("insert or replace into folders (id, name) values (?1, ?2)", params![f.id, f.name]);
         for feed in &f.feeds {
             let _ = tx.execute("insert or ignore into folder_feeds (folder_id, feed_id) values (?1, ?2)", params![f.id, feed]);
@@ -815,7 +825,7 @@ impl Store {
     pub fn import_legacy(&mut self, path: &Path) -> Result<(usize, usize), String> {
         let old = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|e| e.to_string())?;
-        let feeds: Vec<(String, String, String, i64, Option<String>, Option<String>, Option<i64>, Option<String>)> = old
+        let feeds: Vec<LegacyFeed> = old
             .prepare("select id, url, label, position, etag, lastModified, lastFetched, error from feeds order by position")
             .map_err(|e| e.to_string())?
             .query_map([], |r| {
@@ -824,7 +834,7 @@ impl Store {
             .map_err(|e| e.to_string())?
             .filter_map(Result::ok)
             .collect();
-        let tx = self.db.transaction().map_err(|e| e.to_string())?;
+        let tx = self.db.savepoint().map_err(|e| e.to_string())?;
         let mut ids = std::collections::HashMap::new();
         for (old_id, url, label, position, etag, lm, fetched, error) in &feeds {
             let id = feed_id(url);
@@ -971,7 +981,7 @@ impl Store {
     }
 
     pub fn take_content(&mut self, feeds: &[WireFeed], entries: &[WireEntry]) -> Vec<Entry> {
-        let tx = self.db.transaction().unwrap();
+        let tx = self.db.savepoint().unwrap();
         for f in feeds {
             let _ = tx.execute(
                 "insert into feeds (id, url, title, site_url, position, last_fetched, error)
@@ -1115,7 +1125,7 @@ impl Store {
     pub fn state_commands(&self) -> Vec<crate::types::Command> {
         use crate::types::Command;
         let mut out = Vec::new();
-        let feeds: Vec<(String, String, String, Option<String>, bool, bool, Option<String>)> = self
+        let feeds: Vec<FeedState> = self
             .db
             .prepare("select id, url, title, label, pinned, hidden, mode from feeds where removed_at is null and id <> 'saved'")
             .and_then(|mut st| {
@@ -1290,7 +1300,7 @@ impl Store {
     }
 
     pub fn link_media(&mut self, links: &[(EntryId, String)]) {
-        let tx = self.db.transaction().unwrap();
+        let tx = self.db.savepoint().unwrap();
         for (entry, url) in links {
             let _ = tx.execute("insert or ignore into entry_media (entry_id, url) values (?1, ?2)", params![entry, url]);
         }

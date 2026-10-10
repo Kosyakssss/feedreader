@@ -36,7 +36,7 @@ fn candidate(url: &Url, parsed: &ParsedFeed, kind: &str, known: &HashSet<String>
             || parsed.site_url.as_deref().is_some_and(|s| known.contains(&fingerprint(&parsed.title, s))),
         recent: {
             let mut items: Vec<(Option<i64>, &str)> = parsed.entries.iter().map(|e| (e.published, e.title.as_str())).collect();
-            items.sort_by(|a, b| b.0.cmp(&a.0));
+            items.sort_by_key(|i| std::cmp::Reverse(i.0));
             let mut seen = HashSet::new();
             items.into_iter().filter(|(_, t)| !t.is_empty() && seen.insert(*t)).take(3).map(|(_, t)| t.to_string()).collect()
         },

@@ -52,10 +52,10 @@ pub fn parse_date(raw: &str) -> Option<DateTime<Utc>> {
         return Some(d.with_timezone(&Utc));
     }
     let mut t = s.replace(" UTC", " +0000").replace(" Z", " +0000");
-    if let Some(i) = t.find(", ") {
-        if t[..i].chars().all(|c| c.is_alphabetic()) {
-            t = t[i + 2..].to_string();
-        }
+    if let Some(i) = t.find(", ")
+        && t[..i].chars().all(|c| c.is_alphabetic())
+    {
+        t = t[i + 2..].to_string();
     }
     let parts: Vec<&str> = t.split_whitespace().collect();
     let fixed: Vec<String> = parts
