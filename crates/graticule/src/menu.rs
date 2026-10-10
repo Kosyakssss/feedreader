@@ -5,12 +5,12 @@ pub type Menu = muda::Menu;
 pub type Menu = ();
 
 #[cfg(target_os = "macos")]
-pub fn install(event_loop: &winit::event_loop::ActiveEventLoop) -> Option<Menu> {
+pub fn install(event_loop: &winit::event_loop::ActiveEventLoop, title: &str) -> Option<Menu> {
     use muda::{PredefinedMenuItem as Item, Submenu};
     use winit::platform::macos::ActiveEventLoopExtMacOS;
     event_loop.set_allows_automatic_window_tabbing(false);
     let app = Submenu::with_items(
-        "Feedreader",
+        title,
         true,
         &[
             &Item::about(None, None),
@@ -38,6 +38,6 @@ pub fn install(event_loop: &winit::event_loop::ActiveEventLoop) -> Option<Menu> 
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn install(_: &winit::event_loop::ActiveEventLoop) -> Option<Menu> {
+pub fn install(_: &winit::event_loop::ActiveEventLoop, _: &str) -> Option<Menu> {
     None
 }

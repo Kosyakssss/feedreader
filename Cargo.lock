@@ -1074,13 +1074,10 @@ dependencies = [
 name = "feedreader"
 version = "0.1.0"
 dependencies = [
- "arboard",
  "chrono",
  "engine",
  "graticule",
- "muda",
  "notify",
- "png",
  "profiling",
  "qrcode",
  "serde",
@@ -1625,14 +1622,18 @@ dependencies = [
 name = "graticule"
 version = "0.1.0"
 dependencies = [
+ "arboard",
  "bytemuck",
  "image",
+ "muda",
  "parley",
+ "png",
  "pollster",
  "profiling",
  "swash",
  "wgpu",
  "winit",
+ "wry",
 ]
 
 [[package]]

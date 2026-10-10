@@ -1,6 +1,7 @@
 use chrono::{DateTime, Local};
 use engine::Mode;
 use graticule::commands::{Chord, Registry, keys_label};
+use graticule::shell::FrameStats;
 use graticule::ui::{Rect, Scene};
 
 use crate::article;
@@ -42,40 +43,10 @@ pub enum Hit {
     Prompt,
 }
 
-#[derive(Clone, Copy, Default)]
-pub struct FrameStats {
-    pub paint: f32,
-    pub gpu: f32,
-    pub max_paint: f32,
-    pub max_gpu: f32,
-}
-
-impl FrameStats {
-    pub fn from(frames: &[[f32; 3]]) -> Self {
-        let last = frames.last().copied().unwrap_or_default();
-        let max = |i: usize| frames.iter().map(|f| f[i]).fold(0.0, f32::max);
-        Self {
-            paint: last[0],
-            gpu: last[1],
-            max_paint: max(0),
-            max_gpu: max(1),
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Web {
     Url(String),
     Player(String, String),
-}
-
-impl Web {
-    pub fn key(&self) -> String {
-        match self {
-            Web::Url(u) => u.clone(),
-            Web::Player(src, _) => format!("player:{src}"),
-        }
-    }
 }
 
 pub struct PaintOut {

@@ -1,6 +1,7 @@
 use engine::{Mode, Request, Rule};
 use graticule::commands::{Chord, Command, Key, Registry};
 use graticule::field::Field;
+use graticule::shell::Effect;
 
 use crate::model::{Confirm, Discovery, Focus, Model, Op, Page, Prompt, PromptKind, Row, Setting, Target, View};
 
@@ -408,7 +409,7 @@ fn open_targets(m: &mut Model, ids: Vec<String>) {
         }
     }
     let n = urls.len();
-    m.open.extend(urls);
+    m.effects.extend(urls.into_iter().map(Effect::Open));
     if n > 0 {
         m.act(format!("Opened {} in the browser and marked read", plural(n)), Op::Read(read));
     } else {
@@ -511,7 +512,7 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
         }
         Cmd::Browser => {
             if let Some(url) = m.reader.as_ref().and_then(|r| r.target().link().map(str::to_string)) {
-                m.open.push(url);
+                m.effects.push(Effect::Open(url));
             } else {
                 let t = m.targets();
                 open_targets(m, t);
@@ -524,7 +525,7 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
             };
             if let Some(u) = url.filter(|u| !u.is_empty()) {
                 m.message = Some(format!("Copied {u}"));
-                m.copy = Some(u);
+                m.effects.push(Effect::Copy(u));
             }
         }
         Cmd::UnreadAll => {
@@ -668,9 +669,10 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
         Cmd::QuitCompletely => {
             m.quitting = true;
             m.out.push(Request::Shutdown);
+            m.effects.push(Effect::Quit);
         }
         Cmd::RestartEngine => {
-            m.restart_engine = true;
+            m.out.push(Request::Shutdown);
             m.message = Some("Restarting the engine\u{2026}".into());
         }
         Cmd::DismissOffer => {
@@ -694,7 +696,7 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
         Cmd::Copy => {
             if let Some(t) = m.reader.as_ref().and_then(|r| r.selected_text()) {
                 m.message = Some(format!("Copied {} characters.", t.chars().count()));
-                m.copy = Some(t);
+                m.effects.push(Effect::Copy(t));
             }
         }
         Cmd::More => m.bar_expanded = !m.bar_expanded,
@@ -737,7 +739,7 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
         Cmd::CopyPublicLink => {
             if let Some(u) = m.public_url.clone() {
                 m.message = Some(format!("Copied {u}"));
-                m.copy = Some(u);
+                m.effects.push(Effect::Copy(u));
             }
         }
         Cmd::Mute => {
@@ -865,7 +867,7 @@ fn edit_setting(m: &mut Model) {
         Setting::PublicLink => match m.public_url.clone() {
             Some(u) => {
                 m.message = Some(format!("Copied {u}"));
-                m.copy = Some(u);
+                m.effects.push(Effect::Copy(u));
             }
             None => m.message = Some("The public listener isn't running; another program may be using its port.".into()),
         },

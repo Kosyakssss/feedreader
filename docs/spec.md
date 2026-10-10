@@ -408,7 +408,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 4. **Open.** Laws: the approved list in §5.10, starting with sync, undo and outbound safety, plus frame budgets checked automatically.
 
 ### 10.3 Graticule
-5. **Open.** The shell moves out of Feedreader into Graticule: event loop, input to commands, focus, hover, drag, scroll, text input, clipboard, menus, web views; interaction state kept by Graticule; effects as data; the view stops writing into the model.
+5. **Partial.** The shell lives in Graticule (`graticule::shell`): the event loop, keys to commands, editing of the focused field, IME, clipboard, hit testing, hover, cursors, clicks and drags, the wheel, the web pane, the menu bar, file drops and effects as data; apps implement `graticule::shell::App`, and `Offscreen` renders the same way for snapshots. Open: interaction state (scroll offsets, drags) kept by Graticule instead of the app's model, so the view stops writing into the model.
 6. **Open.** Registry-driven components: action bar (grouped, no hiding), help as a drawn tree, palette, context menus (macOS, the one `unsafe`), menu bar.
 7. **Open.** Text: selection on by default; fields with native behavior; native file dialogs.
 8. **Open.** Components, one at a time with gallery sheets: entry row, list with scrollbar and position, find field with tokens, places strip, tab strip with the new tab, spec sheet, table, tree, confirm row and message line, badges, article.

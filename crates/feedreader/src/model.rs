@@ -5,6 +5,7 @@ use engine::{Block, Candidate, Entry, EntryId, Event, Feed, FeedId, Folder, Mode
 pub use engine::Target;
 use graticule::field::Field;
 use graticule::images::Images;
+use graticule::shell::Effect;
 use graticule::text::SpanStyle;
 use graticule::ui::LineStyle;
 
@@ -345,13 +346,11 @@ pub struct Model {
     pub bar_expanded: bool,
     pub out: Vec<Request>,
     pub images: Images,
-    pub open: Vec<String>,
-    pub copy: Option<String>,
+    pub effects: Vec<Effect>,
     pub edit_theme: bool,
     pub attached: bool,
     pub history_dirty: bool,
     pub quitting: bool,
-    pub restart_engine: bool,
     undo: Vec<Change>,
     redo: Vec<Change>,
 }
@@ -428,13 +427,11 @@ impl Model {
             bar_expanded: false,
             out: Vec::new(),
             images,
-            open: Vec::new(),
-            copy: None,
+            effects: Vec::new(),
             edit_theme: false,
             attached: false,
             history_dirty: false,
             quitting: false,
-            restart_engine: false,
             undo: Vec::new(),
             redo: Vec::new(),
         }
@@ -842,7 +839,7 @@ impl Model {
             Event::Sync(st) => self.sync = Some(st),
             Event::Pairing(link) => {
                 self.message = Some("Pairing link copied. Open it on the other device within 15 minutes, or scan the code in Settings.".into());
-                self.copy = Some(link.clone());
+                self.effects.push(Effect::Copy(link.clone()));
                 self.pairing = Some(link);
             }
             Event::Tabs(tabs) => {

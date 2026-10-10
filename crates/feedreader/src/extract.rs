@@ -1,10 +1,9 @@
 use std::collections::VecDeque;
 
 use engine::{Extracted, Request};
-use winit::event_loop::EventLoopProxy;
-use winit::window::Window;
+use graticule::shell::{Waker, Window};
 
-use crate::Wake;
+use crate::app::Wake;
 
 const DEFUDDLE: &str = include_str!("../assets/defuddle/defuddle.js");
 
@@ -52,12 +51,12 @@ impl Extractor {
         }
     }
 
-    pub fn push(&mut self, window: &Window, proxy: &EventLoopProxy<Wake>, job: u64, url: String, html: String) -> Vec<Request> {
+    pub fn push(&mut self, window: &Window, waker: &Waker<Wake>, job: u64, url: String, html: String) -> Vec<Request> {
         self.queue.push_back((job, url, html));
         if self.phase == Phase::Idle {
             self.phase = Phase::Loading;
-            let ready = proxy.clone();
-            let results = proxy.clone();
+            let ready = waker.clone();
+            let results = waker.clone();
             let built = wry::WebViewBuilder::new()
                 .with_html(PAGE)
                 .with_bounds(wry::Rect {
@@ -69,11 +68,11 @@ impl Extractor {
                 .with_initialization_script(format!("{DEFUDDLE}\n{RUNNER}"))
                 .with_on_page_load_handler(move |event, _| {
                     if matches!(event, wry::PageLoadEvent::Finished) {
-                        let _ = ready.send_event(Wake::ExtractorReady);
+                        ready.wake(Wake::ExtractorReady);
                     }
                 })
                 .with_ipc_handler(move |req| {
-                    let _ = results.send_event(Wake::Extracted(req.body().clone()));
+                    results.wake(Wake::Extracted(req.body().clone()));
                 })
                 .build_as_child(window);
             match built {
