@@ -304,7 +304,7 @@ Status: done, partial or open. Each step is committed and pushed to `main` when 
 11. **Done.** Light and dark palettes following the system (or fixed in Settings), `theme.toml` in the data folder with live reload and the last good colors kept on errors, article text size and column width.
 12. **Done.** Undo persists for 24 hours per device; every change is an engine command in the change log.
 13. **Done.** `feedreader serve` on an owner-only Unix socket, one engine per library (lock file), the app and the command line attach or start it in the background, quit completely and restart engine, `service install` and `uninstall` for launchd and systemd.
-14. **Partial.** Sync: commands with hybrid clocks and last-writer-wins per field, the change log (seeded from existing state), the hub's HTTP API, satellites with an outbox, long-poll and content paging, working on their own while the hub is away, pairing by link or QR code, paired devices in Settings. Open: Funnel for the public link, the version handshake, households.
+14. **Partial.** Sync: commands with hybrid clocks and last-writer-wins per field, the change log (seeded from existing state), the hub's HTTP API, satellites with an outbox, long-poll and content paging, working on their own while the hub is away, pairing by link or QR code, paired devices in Settings. Funnel publishing of the I recommend link is an opt-in setting on its own port (10000). Open: the version handshake, households, rate limiting on the public listener.
 15. **Open.** Android.
 16. **Done.** Adaptive refresh per feed, Retry-After and Cache-Control, at most 2 fetches per host.
 17. **Open.** Export bundle, move to another machine, households.

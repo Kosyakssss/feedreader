@@ -573,6 +573,7 @@ impl Store {
                 "appearance" => s.appearance = v,
                 "reading_size" => s.reading_size = v.parse().unwrap_or(s.reading_size),
                 "reading_width" => s.reading_width = v.parse().unwrap_or(s.reading_width),
+                "publish" => s.publish = v == "1",
                 _ => {}
             }
         }
@@ -592,6 +593,7 @@ impl Store {
             ("appearance", s.appearance.clone()),
             ("reading_size", s.reading_size.to_string()),
             ("reading_width", s.reading_width.to_string()),
+            ("publish", if s.publish { "1".into() } else { "0".into() }),
         ];
         for (k, v) in pairs {
             let _ = self.db.execute(

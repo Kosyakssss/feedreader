@@ -906,6 +906,10 @@ fn setting_row(m: &Model, s: Setting) -> (&'static str, String) {
             m.public_url.clone().unwrap_or_else(|| "not available".into()),
         ),
         Setting::ImportLegacy => ("Import from the old app", "choose a file".into()),
+        Setting::Publish => (
+            "Publish I recommend on the internet",
+            if st.publish { "on, through Tailscale Funnel".into() } else { "off; only this computer can read it".into() },
+        ),
         Setting::Mute => ("Mute a word or phrase", "add".into()),
         Setting::Appearance => ("Appearance", match st.appearance.as_str() {
             "light" => "light".into(),

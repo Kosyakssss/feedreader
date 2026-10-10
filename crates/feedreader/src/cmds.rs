@@ -254,7 +254,7 @@ pub fn registry() -> Registry<Cmd, Model> {
             c(Cmd::Export, vec![ch('e')], |_| "export OPML".into(), feeds_page),
             c(Cmd::Open, vec![ch('o'), k(Key::Enter)], |_| "show entries".into(), |m| feeds_page(m) && !m.feeds.is_empty()),
             c(Cmd::Edit, vec![k(Key::Enter), ch('o')], |m| match crate::model::settings_rows(m).get(m.settings_page.cursor) {
-                Some(crate::model::Row::Setting(Setting::ReadingMode | Setting::Lines | Setting::MergeDuplicates | Setting::Appearance)) => "change".into(),
+                Some(crate::model::Row::Setting(Setting::ReadingMode | Setting::Lines | Setting::MergeDuplicates | Setting::Appearance | Setting::Publish)) => "change".into(),
                 Some(crate::model::Row::Setting(Setting::PairDevice)) => "show a pairing code".into(),
                 Some(crate::model::Row::Setting(Setting::ConnectHub)) => "paste a link".into(),
                 Some(crate::model::Row::Setting(Setting::Unpair)) => "unpair".into(),
@@ -848,6 +848,12 @@ fn edit_setting(m: &mut Model) {
             m.act(label.into(), Op::Settings(n));
         }
         Setting::Mute => exec(m, Cmd::Mute),
+        Setting::Publish => {
+            let mut n = s.clone();
+            n.publish = !s.publish;
+            let label = if n.publish { "Publishing I recommend through Tailscale Funnel" } else { "Stopped publishing I recommend" };
+            m.act(label.into(), Op::Settings(n));
+        }
         Setting::Appearance => {
             let mut n = s.clone();
             n.appearance = match s.appearance.as_str() {

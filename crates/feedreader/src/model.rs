@@ -123,6 +123,7 @@ pub enum Setting {
     ImportLegacy,
     MergeDuplicates,
     PublicLink,
+    Publish,
     Mute,
     Appearance,
     ReadingSize,
@@ -146,6 +147,7 @@ pub const SETTINGS: &[Setting] = &[
     Setting::ConfirmOver,
     Setting::MergeDuplicates,
     Setting::PublicLink,
+    Setting::Publish,
     Setting::ImportLegacy,
     Setting::Mute,
 ];

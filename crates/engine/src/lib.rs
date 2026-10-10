@@ -26,6 +26,8 @@ use store::Store;
 
 const MEDIA_BUDGET: i64 = 1_000_000_000;
 
+const FUNNEL_PORT: u16 = 10000;
+
 pub fn sync_port() -> u16 {
     std::env::var("FEEDREADER_SYNC_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8790)
 }
@@ -188,6 +190,7 @@ pub(crate) enum Internal {
     Content(hub::Content),
     HubOnline(bool, String),
     Paired(Result<sat::HubLink, String>),
+    Funnel(bool, Result<Option<String>, String>),
     Page(Job, Result<(String, String), String>),
     MediaFetched(String, Result<(String, String, i64), String>),
     Offer(String, Result<Vec<Candidate>, String>),
@@ -325,7 +328,7 @@ impl Engine {
     #[profiling::function]
     fn publish(&mut self) {
         let token = self.store.token();
-        let base = format!("http://127.0.0.1:{}/{token}/", self.settings.public_port);
+        let base = self.public_url.clone().unwrap_or_else(|| format!("http://127.0.0.1:{}/{token}/", self.settings.public_port));
         let items = self.store.public_items();
         let mut p = self.published.write().unwrap();
         p.atom = public::atom(&token, &base, &items);
@@ -348,6 +351,9 @@ impl Engine {
                 self.public_url = Some(format!("http://127.0.0.1:{port}/{}/", self.store.token()));
             }
             Err(_) => self.public_url = None,
+        }
+        if self.settings.publish && self.hub.is_none() {
+            self.funnel(true);
         }
         if self.hub.is_none() && self.store.get("log_seeded").is_none() {
             self.seed_log();
@@ -678,6 +684,9 @@ impl Engine {
                     return;
                 }
                 let st = st.clone();
+                if st.publish != self.settings.publish && self.hub.is_none() {
+                    self.funnel(st.publish);
+                }
                 let interval_changed = st.refresh_minutes != self.settings.refresh_minutes;
                 let retention_changed = st.max_entries != self.settings.max_entries || st.max_age_days != self.settings.max_age_days;
                 self.store.save_settings(&st);
@@ -697,6 +706,33 @@ impl Engine {
                 (self.emit)(Event::Settings(self.settings.clone()));
             }
         }
+    }
+
+    fn funnel(&mut self, on: bool) {
+        let port = self.settings.public_port;
+        let token = self.store.token();
+        self.spawn(async move {
+            let r = tokio::task::spawn_blocking(move || {
+                let args: Vec<String> = if on {
+                    vec!["funnel".into(), "--bg".into(), format!("--https={FUNNEL_PORT}"), format!("http://127.0.0.1:{port}")]
+                } else {
+                    vec!["funnel".into(), format!("--https={FUNNEL_PORT}"), "off".into()]
+                };
+                let out = std::process::Command::new("tailscale").args(&args).output().map_err(|e| format!("tailscale isn't available: {e}"))?;
+                if !out.status.success() {
+                    return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+                }
+                if !on {
+                    return Ok(None);
+                }
+                let name = tailscale_name().ok_or("tailscale has no name for this machine")?;
+                Ok(Some(format!("https://{name}:{FUNNEL_PORT}/{token}/")))
+            })
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r);
+            Internal::Funnel(on, r)
+        });
     }
 
     fn fetches(&self) -> bool {
@@ -968,6 +1004,27 @@ impl Engine {
             Internal::Discovered(q, r) => (self.emit)(Event::Discovered(q, r)),
             Internal::Page(job, r) => self.page(job, r),
             Internal::Api(call) => self.api(call),
+            Internal::Funnel(on, r) => {
+                let local = format!("http://127.0.0.1:{}/{}/", self.settings.public_port, self.store.token());
+                match r {
+                    Ok(Some(url)) => {
+                        self.public_url = Some(url.clone());
+                        if on {
+                            (self.emit)(Event::Message(format!("Your I recommend feed is public at {url}")));
+                        }
+                    }
+                    Ok(None) => {
+                        self.public_url = Some(local);
+                        (self.emit)(Event::Message("Your I recommend feed is no longer public.".into()));
+                    }
+                    Err(e) => {
+                        self.public_url = Some(local);
+                        (self.emit)(Event::Message(format!("Couldn't publish through Tailscale Funnel: {e}")));
+                    }
+                }
+                self.publish();
+                (self.emit)(Event::PublicUrl(self.public_url.clone()));
+            }
             Internal::Ask(sat::Ask::Outbox { reply }) => {
                 let pushed: i64 = self.store.get("sync_pushed").and_then(|v| v.parse().ok()).unwrap_or(0);
                 let pulled: i64 = self.store.get("sync_pulled").and_then(|v| v.parse().ok()).unwrap_or(0);

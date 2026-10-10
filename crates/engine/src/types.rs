@@ -107,6 +107,8 @@ pub struct Settings {
     pub appearance: String,
     pub reading_size: u32,
     pub reading_width: u32,
+    #[serde(default)]
+    pub publish: bool,
 }
 
 impl Default for Settings {
@@ -123,6 +125,7 @@ impl Default for Settings {
             appearance: "system".into(),
             reading_size: 100,
             reading_width: 78,
+            publish: false,
         }
     }
 }
