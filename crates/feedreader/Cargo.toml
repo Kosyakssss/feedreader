@@ -23,3 +23,6 @@ qrcode = { version = "0.14", default-features = false }
 
 [features]
 profile = ["dep:tracy-client", "profiling/profile-with-tracy", "graticule/profile", "engine/profile"]
+
+[dev-dependencies]
+proptest = "1.12.0"

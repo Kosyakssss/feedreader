@@ -259,6 +259,12 @@ pub struct History {
     redo: Vec<Change>,
 }
 
+pub struct Mark {
+    anchor: Option<EntryId>,
+    offset: f32,
+    cursor: Option<EntryId>,
+}
+
 #[derive(Default)]
 pub struct ListState {
     pub visible: Vec<usize>,
@@ -584,9 +590,14 @@ impl Model {
     }
 
     fn refold(&mut self) {
+        let mark = self.mark();
+        self.refold_from(mark);
+    }
+
+    fn refold_from(&mut self, mark: Mark) {
         self.rehide();
         self.recount();
-        self.rebuild();
+        self.rebuild_from(mark);
     }
 
     pub fn sort_feeds(&mut self) {
@@ -627,17 +638,22 @@ impl Model {
         in_view && state_ok && text_ok
     }
 
-    #[profiling::function]
-    pub fn rebuild(&mut self) {
+    fn mark(&self) -> Mark {
         let row_h = self.list.row_h;
         let first = (self.list.scroll / row_h).floor() as usize;
-        let anchor = self.list.visible.get(first).map(|&i| self.entries.get(i).map(|e| e.id.clone()));
-        let offset = self.list.scroll - first as f32 * row_h;
-        let cursor_id = self
-            .list
-            .visible
-            .get(self.list.cursor)
-            .and_then(|&i| self.entries.get(i).map(|e| e.id.clone()));
+        let id = |row: usize| self.list.visible.get(row).and_then(|&i| self.entries.get(i)).map(|e| e.id.clone());
+        Mark { anchor: id(first), offset: self.list.scroll - first as f32 * row_h, cursor: id(self.list.cursor) }
+    }
+
+    pub fn rebuild(&mut self) {
+        let mark = self.mark();
+        self.rebuild_from(mark);
+    }
+
+    #[profiling::function]
+    fn rebuild_from(&mut self, mark: Mark) {
+        let row_h = self.list.row_h;
+        let Mark { anchor, offset, cursor: cursor_id } = mark;
         let needle = self.filter.text.to_lowercase();
         let visible: Vec<usize> = (0..self.entries.len())
             .filter(|&i| self.matches(&self.entries[i], &needle))
@@ -650,7 +666,7 @@ impl Model {
         if let Some(c) = position(&cursor_id, &self.list.visible, &self.entries) {
             self.list.cursor = c;
         }
-        if let Some(Some(a)) = anchor.map(|a| position(&a, &self.list.visible, &self.entries)) {
+        if let Some(a) = position(&anchor, &self.list.visible, &self.entries) {
             self.list.scroll = a as f32 * row_h + offset;
         }
         self.list.cursor = self.list.cursor.min(self.list.visible.len().saturating_sub(1));
@@ -700,6 +716,7 @@ impl Model {
                 public_url,
                 tabs,
             } => {
+                let mark = self.mark();
                 if !self.ready {
                     self.restore_tabs(tabs);
                 }
@@ -715,7 +732,7 @@ impl Model {
                 self.reindex_feeds();
                 self.reindex_entries();
                 self.sort_feeds();
-                self.refold();
+                self.refold_from(mark);
             }
             Event::Folders(folders) => {
                 self.folders = folders;
@@ -752,6 +769,7 @@ impl Model {
                 self.feeds_page.reveal(n);
             }
             Event::EntriesAdded(added) => {
+                let mark = self.mark();
                 for e in added {
                     if let Some(&i) = self.entry_index.get(&e.id) {
                         self.entries[i] = e;
@@ -760,9 +778,10 @@ impl Model {
                     }
                 }
                 self.reindex_entries();
-                self.refold();
+                self.refold_from(mark);
             }
             Event::EntriesUpdated(list) => {
+                let mark = self.mark();
                 for (id, title, published) in list {
                     if let Some(&i) = self.entry_index.get(&id) {
                         self.entries[i].title = title;
@@ -770,14 +789,15 @@ impl Model {
                     }
                 }
                 self.reindex_entries();
-                self.rebuild();
+                self.rebuild_from(mark);
             }
             Event::EntriesRemoved(ids) => {
+                let mark = self.mark();
                 let gone: HashSet<EntryId> = ids.into_iter().collect();
                 self.entries.retain(|e| !gone.contains(&e.id));
                 self.link_keys.retain(|id, _| !gone.contains(id));
                 self.reindex_entries();
-                self.refold();
+                self.refold_from(mark);
             }
             Event::Refresh(status) => {
                 let finished = self.refresh.running && !status.running;
@@ -926,15 +946,17 @@ impl Model {
                 Op::Settings(old)
             }
             Op::Pin(id, on) => {
+                let old = self.feed(&id).is_some_and(|f| f.pinned);
                 self.set_feed(&id, |f| f.pinned = on);
                 self.out.push(Request::SetPinned(id.clone(), on));
-                Op::Pin(id, !on)
+                Op::Pin(id, old)
             }
             Op::Hide(id, on) => {
+                let old = self.feed(&id).is_some_and(|f| f.hidden);
                 self.set_feed(&id, |f| f.hidden = on);
                 self.out.push(Request::SetHidden(id.clone(), on));
                 self.refold();
-                Op::Hide(id, !on)
+                Op::Hide(id, old)
             }
             Op::FeedMode(id, mode) => {
                 let old = self.feed(&id).and_then(|f| f.mode);
@@ -969,16 +991,19 @@ impl Model {
                 Op::DeleteFolder(f)
             }
             Op::AddRule(r) => {
+                let old = self.rules.iter().find(|x| x.id == r.id).cloned();
+                self.rules.retain(|x| x.id != r.id);
                 self.rules.push(r.clone());
                 self.out.push(Request::AddRule(r.clone()));
                 self.refold();
-                Op::RemoveRule(r)
+                old.map(Op::AddRule).unwrap_or(Op::RemoveRule(r))
             }
             Op::RemoveRule(r) => {
+                let old = self.rules.iter().find(|x| x.id == r.id).cloned();
                 self.rules.retain(|x| x.id != r.id);
                 self.out.push(Request::RemoveRule(r.id.clone()));
                 self.refold();
-                Op::AddRule(r)
+                old.map(Op::AddRule).unwrap_or(Op::RemoveRule(r))
             }
             Op::CloseTab(id) => {
                 self.close_tab(id);

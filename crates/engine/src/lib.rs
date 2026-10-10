@@ -4,6 +4,8 @@ mod public;
 pub mod rules;
 pub mod serve;
 mod hub;
+#[cfg(test)]
+mod laws;
 mod sat;
 mod schedule;
 mod store;
@@ -590,10 +592,8 @@ impl Engine {
             }
             Command::Subscribe(url, title, folders) => {
                 let id = store::feed_id(url);
-                if !fresh(&self.store, format!("sub:{id}")) {
-                    return;
-                }
-                let feed = match self.store.add_feed(url, title) {
+                let subscribed = self.store.claim(&format!("sub:{id}"), at, dev, "1");
+                let feed = match self.store.ensure_feed(url, title) {
                     Ok(f) => f,
                     Err(e) => {
                         self.emit(Event::FeedAdded(Err(e.to_string())));
@@ -601,13 +601,18 @@ impl Engine {
                     }
                 };
                 if !folders.is_empty() {
-                    self.store.add_to_folders(&feed.id, folders);
-                    self.folders_changed();
+                    let pairs: Vec<(String, String)> = folders.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).map(|n| (store::folder_id(n), n.to_string())).collect();
+                    self.membership(&id, &pairs, at, dev);
                 }
+                self.materialize(&id);
                 if self.batching {
                     return;
                 }
                 self.feeds_changed();
+                self.folders_changed();
+                if !subscribed {
+                    return;
+                }
                 self.emit(Event::EntriesAdded(self.store.removed_entries(&feed.id)));
                 if self.fetches() {
                     let client = self.client.clone();
@@ -619,64 +624,58 @@ impl Engine {
                 }
             }
             Command::Unsubscribe(id) => {
-                if fresh(&self.store, format!("sub:{id}")) {
+                if self.store.claim(&format!("sub:{id}"), at, dev, "0") {
                     self.store.remove_feed(id, t);
                     self.feeds_changed();
                 }
             }
             Command::Resubscribe(id) => {
-                if fresh(&self.store, format!("sub:{id}")) {
+                if self.store.claim(&format!("sub:{id}"), at, dev, "1") {
                     self.store.restore_feed(id);
                     self.feeds_changed();
                     self.emit(Event::EntriesAdded(self.store.removed_entries(id)));
                 }
             }
             Command::Rename(id, label) => {
-                if fresh(&self.store, format!("label:{id}")) {
+                if self.store.claim(&format!("label:{id}"), at, dev, &serde_json::to_string(label).unwrap_or_default()) {
                     self.store.rename_feed(id, label.as_deref().filter(|l| !l.trim().is_empty()));
                     self.feeds_changed();
                 }
             }
             Command::Folders(feed, names) => {
-                if fresh(&self.store, format!("folders:{feed}")) {
-                    self.store.set_feed_folders(feed, names);
-                    if !self.batching {
-                        self.folders_changed();
-                    }
-                }
+                let pairs: Vec<(String, String)> = names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).map(|n| (store::folder_id(n), n.to_string())).collect();
+                self.membership(feed, &pairs, at, dev);
             }
+            Command::Membership(feed, pairs) => self.membership(feed, pairs, at, dev),
             Command::RenameFolder(id, name) => {
-                if fresh(&self.store, format!("folder:{id}")) {
-                    self.store.rename_folder(id, name);
-                    self.folders_changed();
+                if self.store.claim(&format!("folder:{id}"), at, dev, &format!("+{name}")) {
+                    self.folders_rebuilt();
                 }
             }
             Command::DeleteFolder(id) => {
-                if fresh(&self.store, format!("folder:{id}")) {
-                    self.store.delete_folder(id);
-                    self.folders_changed();
+                if self.store.claim(&format!("folder:{id}"), at, dev, "-") {
+                    self.folders_rebuilt();
                 }
             }
             Command::RestoreFolder(f) => {
-                if fresh(&self.store, format!("folder:{}", f.id)) {
-                    self.store.restore_folder(f);
-                    self.folders_changed();
+                if self.store.claim(&format!("folder:{}", f.id), at, dev, &format!("+{}", f.name)) {
+                    self.folders_rebuilt();
                 }
             }
             Command::Pin(id, on) => {
-                if fresh(&self.store, format!("pin:{id}")) {
+                if self.store.claim(&format!("pin:{id}"), at, dev, if *on { "1" } else { "0" }) {
                     self.store.set_feed_flag(id, "pinned", *on);
                     self.feeds_changed();
                 }
             }
             Command::Hide(id, on) => {
-                if fresh(&self.store, format!("hide:{id}")) {
+                if self.store.claim(&format!("hide:{id}"), at, dev, if *on { "1" } else { "0" }) {
                     self.store.set_feed_flag(id, "hidden", *on);
                     self.feeds_changed();
                 }
             }
             Command::FeedMode(id, mode) => {
-                if fresh(&self.store, format!("mode:{id}")) {
+                if self.store.claim(&format!("mode:{id}"), at, dev, mode.map(Mode::name).unwrap_or("")) {
                     self.store.set_feed_mode(id, *mode);
                     self.feeds_changed();
                 }
@@ -748,6 +747,57 @@ impl Engine {
                 self.emit(Event::Settings(self.settings.clone()));
             }
         }
+    }
+
+    fn materialize(&mut self, feed: &str) {
+        match self.store.register(&format!("sub:{feed}")) {
+            Some((at, v)) if v == "0" => self.store.remove_feed(feed, at / 1000),
+            _ => self.store.restore_feed(feed),
+        }
+        if let Some((_, v)) = self.store.register(&format!("label:{feed}")) {
+            let label: Option<String> = serde_json::from_str(&v).unwrap_or(None);
+            self.store.rename_feed(feed, label.as_deref().filter(|l| !l.trim().is_empty()));
+        }
+        for (key, column) in [("pin", "pinned"), ("hide", "hidden")] {
+            if let Some((_, v)) = self.store.register(&format!("{key}:{feed}")) {
+                self.store.set_feed_flag(feed, column, v == "1");
+            }
+        }
+        if let Some((_, v)) = self.store.register(&format!("mode:{feed}")) {
+            self.store.set_feed_mode(feed, Mode::parse(&v));
+        }
+    }
+
+    fn membership(&mut self, feed: &str, pairs: &[(String, String)], at: i64, dev: &str) {
+        for (id, name) in pairs {
+            self.store.claim(&format!("folder:{id}"), 0, "", &format!("+{name}"));
+        }
+        let ids: Vec<&String> = pairs.iter().map(|(id, _)| id).collect();
+        self.store.claim(&format!("folders:{feed}"), at, dev, &serde_json::to_string(&ids).unwrap_or_default());
+        self.folders_rebuilt();
+    }
+
+    fn folders_rebuilt(&mut self) {
+        self.store.rebuild_folders();
+        if !self.batching {
+            self.folders_changed();
+        }
+    }
+
+    fn resolve_folders(&self, names: &[String]) -> Vec<(String, String)> {
+        let existing = self.store.folders();
+        let mut out: Vec<(String, String)> = Vec::new();
+        for n in names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()) {
+            if out.iter().any(|(_, x)| x.eq_ignore_ascii_case(n)) {
+                continue;
+            }
+            let id = match existing.iter().find(|f| f.name.eq_ignore_ascii_case(n)) {
+                Some(f) => f.id.clone(),
+                None => self.store.new_folder_id(n),
+            };
+            out.push((id, n.to_string()));
+        }
+        out
     }
 
     fn funnel(&mut self, on: bool) {
@@ -1178,7 +1228,14 @@ impl Engine {
                     self.emit(Event::FeedAdded(Err(format!("you already follow {title} at another address"))));
                     return;
                 }
-                self.local(Command::Subscribe(url, title, folders));
+                let id = store::feed_id(&url);
+                self.local(Command::Subscribe(url, title, Vec::new()));
+                if !folders.is_empty() {
+                    let mut names: Vec<String> = self.store.folders().into_iter().filter(|f| f.feeds.contains(&id)).map(|f| f.name).collect();
+                    names.extend(folders);
+                    let pairs = self.resolve_folders(&names);
+                    self.local(Command::Membership(id, pairs));
+                }
             }
             Request::RemoveFeed(id) => self.local(Command::Unsubscribe(id)),
             Request::RestoreFeed(id) => self.local(Command::Resubscribe(id)),
@@ -1208,7 +1265,8 @@ impl Engine {
                                 let mut names: Vec<String> = self.store.folders().into_iter().filter(|x| x.feeds.contains(&id)).map(|x| x.name).collect();
                                 if !names.iter().any(|n| n.eq_ignore_ascii_case(&f)) {
                                     names.push(f);
-                                    self.local(Command::Folders(id, names));
+                                    let pairs = self.resolve_folders(&names);
+                                    self.local(Command::Membership(id, pairs));
                                 }
                             }
                         }
@@ -1279,7 +1337,10 @@ impl Engine {
                     }
                 }
             }
-            Request::SetFeedFolders(feed, names) => self.local(Command::Folders(feed, names)),
+            Request::SetFeedFolders(feed, names) => {
+                let pairs = self.resolve_folders(&names);
+                self.local(Command::Membership(feed, pairs));
+            }
             Request::RenameFolder(id, name) => self.local(Command::RenameFolder(id, name)),
             Request::DeleteFolder(id) => self.local(Command::DeleteFolder(id)),
             Request::RestoreFolder(f) => self.local(Command::RestoreFolder(f)),

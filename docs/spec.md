@@ -204,7 +204,7 @@ crates/feedreader  the binary: desktop app, headless `serve`, command line
 - Entries can update (edited, late bodies, images) without touching state.
 - Ordering key: published time, falling back to first-seen, tie-broken by id. Stable under updates and identical on hub and satellites.
 - Commands that keep an entry around (bookmark, recommend, open in a tab) carry a small snapshot (title, link, feed, dates) so other devices can show it before fetching it.
-- Merge: single values are last-write-wins by hybrid logical clocks. Sets (subscriptions, folder membership, pins) are add/remove sets, add wins. For tabs, closing wins over a concurrent scroll update.
+- Merge: every synced value is a last-write-wins register by hybrid logical clocks, including subscriptions, a feed's folder list and folders themselves; a value can arrive before the row it belongs to and is applied when the row appears (`docs/internals/sync.md`). Add-wins sets for subscriptions and folder membership are Open: the simpler registers converge today, and the laws hold for them. For tabs, closing wins over a concurrent scroll update.
 - Undo: every mutating command has an inverse; clients build undo from it. Unsubscribe is a soft delete kept for the 24-hour undo window. Undoing a recommendation after a friend fetched it appends a tombstone.
 - Catch-up: a persistent, monotonically increasing revision; reconnecting devices request changes since N, with a full snapshot if N is too old.
 
@@ -254,7 +254,7 @@ crates/feedreader  the binary: desktop app, headless `serve`, command line
 - **Diagnostics:** one log file per day, 7-day retention, in `~/Library/Logs/feedreader` or `$XDG_STATE_HOME/feedreader`. Never log secrets or tokens. A health endpoint reports pid, uptime, data dir, port and refresh state.
 
 ### 5.10 Laws
-Behavior that must hold for every input, checked by property tests (proptest) over generated operation sequences, shrunk to minimal failing cases (the niri approach). This list is approved; new laws are added with the owner. None is written yet (§10).
+Behavior that must hold for every input, checked by property tests (proptest) over generated operation sequences, shrunk to minimal failing cases (the niri approach). This list is approved; new laws are added with the owner. Status is in §10.
 - **Sync:** applying a command twice equals applying it once. Delivering the same commands in any order converges to the same state everywhere. A client reconnecting after any offline period ends with the hub's state once its own queued changes merge. Last-write-wins never lets an older change beat a newer one, even with wrong clocks. Add wins over a concurrent remove.
 - **Undo:** doing then undoing a command restores the previous state within the 24-hour window. Redo after undo equals the original command.
 - **Counts:** the unread count of any list equals the number of unread, not-hidden entries in it, on every client.
@@ -405,7 +405,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 1. **Open.** Design language: grid rules, style tokens, typed values and the component inventory (each component mapped as kept, grounded or skipped), drawn up with the owner from the references (§7).
 2. **Open.** IBM Plex Mono and Sans, whole-pixel cells derived from the mono advance, character graphics drawn by Graticule.
 3. **Open.** The gallery.
-4. **Open.** Laws: the approved list in §5.10, starting with sync, undo and outbound safety, plus frame budgets checked automatically.
+4. **Partial.** Laws (§5.10), in `crates/engine/src/laws.rs` and `crates/feedreader/src/laws.rs`: sync convergence in any order, applying twice, newest wins; outbound safety for IPv4 and IPv4 inside IPv6; identity; parsing never crashes and gives stable ids; retention; counts against what each view lists; undo and redo; nothing moving under the reader when entries arrive or are marked read. Writing them fixed lost feed settings and folder renames across devices, undo of pin, hide and rules, and scroll anchoring during refresh. Open: add wins over a concurrent remove (§5.2), the parsing corpus of real-world feeds, frame budgets.
 
 ### 10.3 Graticule
 5. **Partial.** The shell lives in Graticule (`graticule::shell`): the event loop, keys to commands, editing of the focused field, IME, clipboard, hit testing, hover, cursors, clicks and drags, the wheel, the web pane, the menu bar, file drops and effects as data; apps implement `graticule::shell::App`, and `Offscreen` renders the same way for snapshots. Open: interaction state (scroll offsets, drags) kept by Graticule instead of the app's model, so the view stops writing into the model.

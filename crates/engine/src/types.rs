@@ -308,6 +308,7 @@ pub enum Command {
     Resubscribe(FeedId),
     Rename(FeedId, Option<String>),
     Folders(FeedId, Vec<String>),
+    Membership(FeedId, Vec<(String, String)>),
     RenameFolder(String, String),
     DeleteFolder(String),
     RestoreFolder(Folder),

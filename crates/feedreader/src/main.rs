@@ -2,6 +2,8 @@ mod app;
 mod article;
 mod cmds;
 mod extract;
+#[cfg(test)]
+mod laws;
 mod model;
 mod palette;
 mod tabs;

@@ -28,3 +28,6 @@ url = "2.5.8"
 
 [features]
 profile = ["profiling/profile-with-tracy"]
+
+[dev-dependencies]
+proptest = "1.12.0"

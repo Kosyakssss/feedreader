@@ -144,6 +144,24 @@ pub fn feed_id(url: &str) -> FeedId {
     digest[..8].iter().map(|b| format!("{b:02x}")).collect()
 }
 
+pub fn folder_id(name: &str) -> String {
+    let digest = Sha256::digest(format!("folder:{}", name.trim().to_lowercase()).as_bytes());
+    digest[..8].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn free_folder_id(db: &Connection, name: &str) -> String {
+    let taken = |id: &str| -> Option<String> { db.query_row("select name from folders where id = ?1", [id], |r| r.get(0)).optional().ok().flatten() };
+    let mut n = 0;
+    loop {
+        let id = if n == 0 { folder_id(name) } else { folder_id(&format!("{name}\u{0}{n}")) };
+        match taken(&id) {
+            None => return id,
+            Some(existing) if existing.eq_ignore_ascii_case(name.trim()) => return id,
+            Some(_) => n += 1,
+        }
+    }
+}
+
 pub fn new_id() -> String {
     let mut bytes = [0u8; 8];
     getrandom::fill(&mut bytes).expect("system randomness");
@@ -256,7 +274,46 @@ impl Store {
                  insert into entries_fts (rowid, title, body) select rowid, title, coalesce(content, summary, '') from entries;",
             )?;
         }
-        db.pragma_update(None, "user_version", 3)?;
+        let clock_cols: Vec<String> = db
+            .prepare("select name from pragma_table_info('clock')")?
+            .query_map([], |r| r.get(0))?
+            .filter_map(Result::ok)
+            .collect();
+        if !clock_cols.iter().any(|c| c == "value") {
+            db.execute_batch("alter table clock add column value text")?;
+        }
+        if version < 4 {
+            if version > 0 {
+                db.query_row("pragma wal_checkpoint(truncate)", [], |_| Ok(()))?;
+                let _ = std::fs::copy(path, path.with_extension(format!("sqlite.v{version}.bak")));
+            }
+            db.execute_batch("begin")?;
+            let folders: Vec<(String, String)> = db
+                .prepare("select id, name from folders order by rowid")?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .filter_map(Result::ok)
+                .collect();
+            for (old, name) in folders {
+                let new = free_folder_id(&db, &name);
+                if new != old {
+                    db.execute("insert into folders (id, name, position) select ?2, name, position from folders where id = ?1", params![old, new])?;
+                    db.execute("update folder_feeds set folder_id = ?2 where folder_id = ?1", params![old, new])?;
+                    db.execute("delete from folders where id = ?1", params![old])?;
+                    db.execute("update rules set scope = ?2 where scope = ?1", params![format!("folder:{old}"), format!("folder:{new}")])?;
+                    db.execute("update clock set key = ?2 where key = ?1", params![format!("folder:{old}"), format!("folder:{new}")])?;
+                }
+            }
+            db.execute_batch(
+                "insert into clock (key, at, device, value) select 'folder:' || id, 0, '', '+' || name from folders where true
+                   on conflict(key) do update set value = excluded.value where clock.value is null;
+                 insert into clock (key, at, device, value)
+                   select 'folders:' || feed_id, 0, '', json_group_array(folder_id) from folder_feeds where true group by feed_id
+                   on conflict(key) do update set value = excluded.value where clock.value is null;
+                 update clock set value = '-' where key like 'folder:%' and value is null;
+                 commit;",
+            )?;
+        }
+        db.pragma_update(None, "user_version", 4)?;
         db.execute(
             "insert or ignore into feeds (id, url, title, position, hidden) values (?1, 'feedreader:saved', 'Saved links', 1000000, 1)",
             [SAVED],
@@ -320,17 +377,14 @@ impl Store {
             .flatten()
     }
 
-    pub fn add_feed(&self, url: &str, title: &str) -> rusqlite::Result<Feed> {
+    pub fn ensure_feed(&self, url: &str, title: &str) -> rusqlite::Result<Feed> {
         let id = feed_id(url);
-        let position: i64 = self
-            .db
-            .query_row("select coalesce(min(position), 0) - 1 from feeds", [], |r| r.get(0))?;
+        let position: i64 = self.db.query_row("select coalesce(min(position), 0) - 1 from feeds", [], |r| r.get(0))?;
         self.db.execute(
-            "insert into feeds (id, url, title, position) values (?1, ?2, ?3, ?4)
-             on conflict(id) do update set removed_at = null",
+            "insert or ignore into feeds (id, url, title, position) values (?1, ?2, ?3, ?4)",
             params![id, url, title, position],
         )?;
-        Ok(self.feed(&id).expect("feed just added"))
+        self.db.query_row(&format!("select {FEED_COLS} from feeds where id = ?1"), [&id], feed_row)
     }
 
     pub fn set_fetch_result(
@@ -636,16 +690,6 @@ impl Store {
             .collect()
     }
 
-    pub fn add_to_folders(&mut self, feed: &str, names: &[String]) {
-        let mut all: Vec<String> = self.folders().into_iter().filter(|f| f.feeds.iter().any(|x| x == feed)).map(|f| f.name).collect();
-        for n in names {
-            if !all.iter().any(|a| a.eq_ignore_ascii_case(n.trim())) {
-                all.push(n.trim().to_string());
-            }
-        }
-        self.set_feed_folders(feed, &all);
-    }
-
     pub fn offered(&self, host: &str) -> bool {
         let key = format!("offered:{host}");
         let seen = self.db.query_row("select 1 from settings where key = ?1", [&key], |_| Ok(())).is_ok();
@@ -655,37 +699,40 @@ impl Store {
         seen
     }
 
-    pub fn set_feed_folders(&mut self, feed: &str, names: &[String]) {
-        let tx = self.db.savepoint().unwrap();
-        let _ = tx.execute("delete from folder_feeds where feed_id = ?1", [feed]);
-        for name in names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()) {
-            let existing: Option<String> = tx
-                .query_row("select id from folders where name = ?1 collate nocase", [name], |r| r.get(0))
-                .optional()
-                .unwrap_or(None);
-            let id = existing.unwrap_or_else(|| {
-                let id = new_id();
-                let _ = tx.execute("insert into folders (id, name) values (?1, ?2)", params![id, name]);
-                id
-            });
-            let _ = tx.execute("insert or ignore into folder_feeds (folder_id, feed_id) values (?1, ?2)", params![id, feed]);
+    pub fn new_folder_id(&self, name: &str) -> String {
+        let mut n = 0;
+        loop {
+            let id = if n == 0 { folder_id(name) } else { folder_id(&format!("{name}\u{0}{n}")) };
+            match self.register(&format!("folder:{id}")) {
+                None => return id,
+                Some((_, v)) if v.strip_prefix('+').is_some_and(|x| x.eq_ignore_ascii_case(name.trim())) => return id,
+                Some(_) => n += 1,
+            }
         }
-        tx.commit().unwrap();
     }
 
-    pub fn rename_folder(&self, id: &str, name: &str) {
-        let _ = self.db.execute("update folders set name = ?2 where id = ?1", params![id, name]);
-    }
-
-    pub fn delete_folder(&self, id: &str) {
-        let _ = self.db.execute("delete from folders where id = ?1", [id]);
-    }
-
-    pub fn restore_folder(&mut self, f: &Folder) {
+    pub fn rebuild_folders(&mut self) {
         let tx = self.db.savepoint().unwrap();
-        let _ = tx.execute("insert or replace into folders (id, name) values (?1, ?2)", params![f.id, f.name]);
-        for feed in &f.feeds {
-            let _ = tx.execute("insert or ignore into folder_feeds (folder_id, feed_id) values (?1, ?2)", params![f.id, feed]);
+        let named: Vec<(String, String)> = tx
+            .prepare("select substr(key, 8), substr(value, 2) from clock where key like 'folder:%' and value like '+%' order by key")
+            .and_then(|mut st| st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map(|rows| rows.filter_map(Result::ok).collect()))
+            .unwrap_or_default();
+        let members: Vec<(String, String)> = tx
+            .prepare("select substr(key, 9), value from clock where key like 'folders:%' and value is not null")
+            .and_then(|mut st| st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map(|rows| rows.filter_map(Result::ok).collect()))
+            .unwrap_or_default();
+        let _ = tx.execute("delete from folder_feeds", []);
+        let _ = tx.execute("delete from folders", []);
+        for (id, name) in &named {
+            let _ = tx.execute("insert into folders (id, name) values (?1, ?2)", params![id, name]);
+        }
+        for (feed, ids) in members {
+            for id in serde_json::from_str::<Vec<String>>(&ids).unwrap_or_default() {
+                let _ = tx.execute(
+                    "insert or ignore into folder_feeds (folder_id, feed_id) select ?1, ?2 where exists (select 1 from folders where id = ?1)",
+                    params![id, feed],
+                );
+            }
         }
         tx.commit().unwrap();
     }
@@ -1136,11 +1183,14 @@ impl Store {
             })
             .unwrap_or_default();
         let folders = self.folders();
+        for f in &folders {
+            out.push(Command::RenameFolder(f.id.clone(), f.name.clone()));
+        }
         for (id, url, title, label, pinned, hidden, mode) in feeds {
             out.push(Command::Subscribe(url, title, Vec::new()));
-            let names: Vec<String> = folders.iter().filter(|f| f.feeds.contains(&id)).map(|f| f.name.clone()).collect();
-            if !names.is_empty() {
-                out.push(Command::Folders(id.clone(), names));
+            let pairs: Vec<(String, String)> = folders.iter().filter(|f| f.feeds.contains(&id)).map(|f| (f.id.clone(), f.name.clone())).collect();
+            if !pairs.is_empty() {
+                out.push(Command::Membership(id.clone(), pairs));
             }
             if label.is_some() {
                 out.push(Command::Rename(id.clone(), label));
@@ -1217,6 +1267,22 @@ impl Store {
             serde_json::from_str(&cmd).ok().map(|command| (seq, crate::types::Change { id, device, at, command }))
         })
         .collect()
+    }
+
+    pub fn claim(&self, key: &str, at: i64, device: &str, value: &str) -> bool {
+        let won = self.newer(key, at, device);
+        if won {
+            let _ = self.db.execute("update clock set value = ?2 where key = ?1", params![key, value]);
+        }
+        won
+    }
+
+    pub fn register(&self, key: &str) -> Option<(i64, String)> {
+        self.db
+            .query_row("select at, value from clock where key = ?1 and value is not null", [key], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()
+            .ok()
+            .flatten()
     }
 
     pub fn newer(&self, key: &str, at: i64, device: &str) -> bool {

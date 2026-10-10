@@ -9,6 +9,19 @@ Every change to user state is a `Command` inside a `Change { id, device, at }`. 
 - Each field has a key in the `clock` table (`read:<entry>`, `pin:<feed>`, `folders:<feed>`, `settings`, …). A change writes a field only if its `at` is newer than the key's, ties broken by device id. That is the whole merge rule; it makes the order changes arrive in irrelevant.
 - The `changes` log is for catch-up, not for rebuilding state; the state tables are the truth.
 
+## Registers: a value can arrive before its row
+
+Changes reach devices in different orders, so a feed's label, pin, hidden flag, reading mode or folders can arrive before the subscription that creates the feed's row. The clock table therefore keeps each field's winning value too (`clock.value`), not just its time, and `Engine::materialize` writes the registers into the feed's row whenever a `Subscribe` makes sure the row exists. A `Subscribe` always creates the row (it carries the only copy of the URL); whether the feed counts as subscribed is the `sub:<feed>` register, so an older subscribe never undoes a newer unsubscribe.
+
+## Folders are rebuilt from registers
+
+- A folder is the register `folder:<id>`: `+name`, or `-` once deleted. A feed's membership is the register `folders:<feed>`: a JSON list of folder ids. The `folders` and `folder_feeds` tables are rebuilt from these after every folder command, so they are a pure function of the registers.
+- Folder ids derive from the name the folder was created with (`store::folder_id`), so two devices creating "News" agree on its id; renaming keeps the id. A name whose id is taken by a renamed or deleted folder gets a suffixed id.
+- The device making a change resolves names to ids and sends `Membership(feed, [(id, name)])`. Naming a folder in a membership gives it a name register at time zero, so any real rename or delete wins over it. The older `Folders(feed, names)`, still in existing change logs, maps each name to its derived id.
+- `user_version` 4 moved existing folders to derived ids and seeded their registers, after copying the database to `feedreader.sqlite.v3.bak`.
+
+The laws in `crates/engine/src/laws.rs` check that any order of the same changes converges, that applying twice equals once, and that the result equals applying them oldest first.
+
 ## The log is seeded once
 
 A library that existed before sync, or that was filled by importing the old app's database, has state the log never saw. On first start as a hub (and after a legacy import) the engine writes synthetic changes describing the current state with clocks 1, 2, 3…, so any real change beats them and a newly paired device still receives everything.
