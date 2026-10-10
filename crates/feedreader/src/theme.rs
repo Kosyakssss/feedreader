@@ -62,7 +62,23 @@ impl Theme {
             }
             Err(e) => return Err(e.to_string()),
         };
-        let (light, dark) = parse(&text)?;
+        let good = self.path.with_extension("last-good.toml");
+        let (light, dark) = match parse(&text) {
+            Ok(p) => {
+                let _ = std::fs::write(&good, &text);
+                p
+            }
+            Err(e) => {
+                if self.light == LIGHT
+                    && self.dark == DARK
+                    && let Some(p) = std::fs::read_to_string(&good).ok().and_then(|t| parse(&t).ok())
+                {
+                    self.light = p.0;
+                    self.dark = p.1;
+                }
+                return Err(e);
+            }
+        };
         self.light = light;
         self.dark = dark;
         Ok(true)
