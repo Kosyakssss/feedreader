@@ -1,3 +1,3 @@
 fn main() {
-    graticule::specimen::main("GRATICULE SP-01 SPECIMEN", graticule::sheets::all);
+    graticule::specimen::main("Graticule", graticule::sheets::all);
 }

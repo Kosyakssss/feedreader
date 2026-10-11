@@ -7,6 +7,7 @@ use crate::commands::{Chord, Command, Key, Registry};
 use crate::field::Field;
 use crate::grid::Area;
 use crate::images::{Images, Slot};
+use crate::kit::{Kind, Tone, Value};
 use crate::proof::{Proofs, Status, Variant, file_name, lines_name, write_png};
 use crate::shell::{self, App, Config, Ctx, Cursor, Effect, FrameStats, Offscreen, Painted};
 use crate::state::{Id, Scrolling, State};
@@ -282,9 +283,18 @@ impl Bench {
         let divider = screen.take_left(1);
         let main = screen;
 
+        let prop = s.m.prop(400.0);
         let title = top.inset(1, 0);
-        let w = s.write(title, self.title, s.m.prop(600.0), pal.ink);
-        let mut x = title.col + (w / s.m.cell_w).ceil() as i32 + 3;
+        let mut x = title.col;
+        x += s.value(title, Value::Product("SP-01")) + 1;
+        let style = s.m.prop(600.0);
+        let name_cols = s.cols("Specimen", style);
+        s.write(Area::new(x, top.row, name_cols, 1), "Specimen", style, pal.ink);
+        x += name_cols + 1;
+        let of = format!("of {}", self.title);
+        let cols = s.cols(&of, prop);
+        s.write(Area::new(x, top.row, cols, 1), &of, prop, pal.muted);
+        x += cols + 4;
         let controls: [(Cmd, &str, String); 5] = [
             (Cmd::Style, "lines", lines_name(self.style).into()),
             (Cmd::Appearance, "appearance", format!("{:?}", self.appearance).to_lowercase()),
@@ -293,16 +303,7 @@ impl Bench {
             (Cmd::Grid, "grid", if self.grid { "on".into() } else { "off".into() }),
         ];
         for (cmd, label, value) in controls {
-            let text = format!("{label} {value}");
-            let cols = text.chars().count() as i32;
-            let a = Area::new(x, top.row, cols, 1);
-            let r = s.rect(a);
-            s.hover(r);
-            let lw = s.write(a, label, mono, pal.muted);
-            let after = Area::new(x + (lw / s.m.cell_w).round() as i32 + 1, top.row, value.chars().count() as i32, 1);
-            s.write(after, &value, mono, pal.ink);
-            s.hit(r, Hit::Run(cmd));
-            x += cols + 3;
+            x += s.cycle(Area::new(x, top.row, top.right() - x, 1), label, &value, Some(Hit::Run(cmd))) + 3;
         }
         s.rule(rule);
         s.rule(status_rule);
@@ -334,31 +335,24 @@ impl Bench {
         let proof_row = main.take_top(1);
         main.take_top(1);
         if let Some(sheet) = self.sheets.get(self.current) {
-            let w = s.write(head, sheet.group, s.m.prop(400.0), pal.muted);
-            let after = head.at((w / s.m.cell_w).ceil() as i32 + 1, 0, head.cols, 1);
-            s.write(after, &format!("/ {}", sheet.name), s.m.prop(600.0), pal.ink);
+            s.breadcrumb(head, &[sheet.group, sheet.name], |_| None);
             let ms = format!("paint {:.2} ms", self.paint_ms);
             let cols = ms.len() as i32;
-            s.write(Area::new(head.right() - cols, head.row, cols, 1), &ms, mono, pal.muted);
-            let (proof, ink) = match self.status() {
-                Some(Status::Same) => ("matches its proof".to_string(), pal.muted),
-                Some(Status::Changed(n)) => (format!("{n} pixels differ from its proof"), pal.warn),
-                Some(Status::Missing) | None => ("no proof yet".to_string(), pal.faint),
+            s.value(Area::new(head.right() - cols, head.row, cols, 1), Value::Count(&ms));
+            let changed = matches!(self.status(), Some(Status::Changed(_)));
+            let (stamp, tone, detail) = match self.status() {
+                Some(Status::Same) => ("approved", Tone::Ok, "matches its proof".to_string()),
+                Some(Status::Changed(n)) => ("changed", Tone::Warn, format!("{n} pixels differ from its proof")),
+                Some(Status::Missing) | None => ("new", Tone::Neutral, "no proof yet".to_string()),
             };
             let mut x = proof_row.col;
-            let w = s.write(Area::new(x, proof_row.row, proof.chars().count() as i32, 1), &proof, mono, ink);
-            x += (w / s.m.cell_w).ceil() as i32 + 3;
-            let mut actions = vec![(Cmd::Approve, "approve")];
-            if matches!(self.status(), Some(Status::Changed(_))) {
-                actions.push((Cmd::Diff, if self.diff { "show the sheet" } else { "show what changed" }));
-            }
-            for (cmd, label) in actions {
-                let a = Area::new(x, proof_row.row, label.len() as i32, 1);
-                let r = s.rect(a);
-                s.hover(r);
-                s.write(a, label, mono, pal.link);
-                s.hit(r, Hit::Run(cmd));
-                x += label.len() as i32 + 3;
+            x += s.value(proof_row, Value::State(stamp, tone)) + 1;
+            let dc = s.cols(&detail, prop);
+            s.write(Area::new(x, proof_row.row, dc, 1), &detail, prop, pal.muted);
+            x += dc + 2;
+            x += s.button(Area::new(x, proof_row.row, proof_row.right() - x, 1), "approve", if changed { Kind::Primary } else { Kind::Normal }, Some(Hit::Run(Cmd::Approve)));
+            if changed {
+                s.button(Area::new(x, proof_row.row, proof_row.right() - x, 1), if self.diff { "show the sheet" } else { "show what changed" }, Kind::Normal, Some(Hit::Run(Cmd::Diff)));
             }
             let area = match self.frame.cols() {
                 Some(cols) if cols + 2 < main.cols => Area::new(main.col, main.row, cols + 2, main.rows),
@@ -413,13 +407,17 @@ impl Bench {
             }
         }
 
-        let keys: Vec<String> = registry()
-            .available(self)
-            .filter(|c| !c.keys.is_empty())
-            .map(|c| format!("{} {}", crate::commands::keys_label(&c.keys), (c.label)(self)))
-            .collect();
-        let line = self.note.clone().unwrap_or_else(|| keys.join("   "));
-        s.write(status.inset(1, 0), &line, mono, pal.muted);
+        match &self.note {
+            Some(note) => s.message(status.inset(1, 0), note, Tone::Ok, None),
+            None => {
+                let line = status.inset(1, 0);
+                let mut col = 0;
+                for c in registry().available(self).filter(|c| !c.keys.is_empty()) {
+                    col += s.action(line.at(col, 0, line.cols - col, 1), &c.keys, &(c.label)(self), Some(Hit::Run(c.id))) + 3;
+                }
+            }
+        }
+
     }
 }
 
@@ -539,7 +537,7 @@ pub fn main(title: &'static str, sheets: impl Fn() -> Vec<Sheet> + 'static) {
         export(title, sheets(), Path::new(&out))
     } else {
         shell::run(
-            Config { title, size: (1280.0, 820.0), min_size: (640.0, 400.0), font_size: 13.0, visible: true },
+            Config { title: Box::leak(format!("SP-01 Specimen \u{00B7} {title}").into_boxed_str()), size: (1280.0, 820.0), min_size: (640.0, 400.0), font_size: 13.0, visible: true },
             move |_, _| Ok(Runner { bench: Bench::new(title, sheets()), images: Images::new(|| {}) }),
         )
     };
