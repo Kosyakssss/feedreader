@@ -58,6 +58,7 @@ fn library() -> impl Strategy<Value = Event> {
                     published,
                     read,
                     bookmarked: false,
+                    attachments: Vec::new(),
                 })
                 .collect();
             let folders = folders
@@ -199,6 +200,7 @@ fn arrivals() -> impl Strategy<Value = Vec<Entry>> {
                 published,
                 read: false,
                 bookmarked: false,
+                attachments: Vec::new(),
             })
             .collect()
     })

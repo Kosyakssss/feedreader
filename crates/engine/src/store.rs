@@ -4,7 +4,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
 use crate::parse::NewEntry;
-use crate::types::{Appearance, Entry, Lines, EntryId, Feed, FeedId, Folder, Mode, Recommendation, Rule, SAVED, Scope, Settings};
+use crate::types::{Appearance, Attachment, Entry, Lines, EntryId, Feed, FeedId, Folder, Mode, Recommendation, Rule, SAVED, Scope, Settings};
 
 const SCHEMA: &str = "
 create table if not exists feeds (
@@ -217,7 +217,15 @@ fn fts_query(q: &str) -> String {
 }
 
 const FEED_COLS: &str = "id, url, title, label, site_url, position, last_fetched, error, pinned, hidden, mode";
-const ENTRY_COLS: &str = "e.id, e.feed_id, e.url, e.title, e.author, e.published, coalesce(s.read, 0), coalesce(s.bookmarked, 0)";
+const ENTRY_COLS: &str = "e.id, e.feed_id, e.url, e.title, e.author, e.published, coalesce(s.read, 0), coalesce(s.bookmarked, 0), e.attachments";
+
+fn attachments_of(json: Option<String>) -> Vec<Attachment> {
+    json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default()
+}
+
+fn attachments_json(list: &[Attachment]) -> Option<String> {
+    if list.is_empty() { None } else { serde_json::to_string(list).ok() }
+}
 
 fn entry_row(r: &rusqlite::Row) -> rusqlite::Result<Entry> {
     Ok(Entry {
@@ -229,6 +237,7 @@ fn entry_row(r: &rusqlite::Row) -> rusqlite::Result<Entry> {
         published: r.get(5)?,
         read: r.get::<_, i64>(6)? == 1,
         bookmarked: r.get::<_, i64>(7)? == 1,
+        attachments: attachments_of(r.get(8)?),
     })
 }
 
@@ -263,6 +272,9 @@ impl Store {
             .query_map([], |r| r.get(0))?
             .filter_map(Result::ok)
             .collect();
+        if !ecols.iter().any(|c| c == "attachments") {
+            db.execute_batch("alter table entries add column attachments text")?;
+        }
         if !ecols.iter().any(|c| c == "cseq") {
             db.execute_batch("alter table entries add column cseq integer not null default 0; update entries set cseq = rowid;")?;
         }
@@ -370,7 +382,7 @@ impl Store {
                     "select {ENTRY_COLS}, e.content, e.summary from entries e left join states s on s.entry_id = e.id where e.id = ?1"
                 ),
                 [id],
-                |r| Ok((entry_row(r)?, r.get(8)?, r.get(9)?)),
+                |r| Ok((entry_row(r)?, r.get(9)?, r.get(10)?)),
             )
             .optional()
             .ok()
@@ -414,11 +426,12 @@ impl Store {
         let mut added = Vec::new();
         let mut updated = Vec::new();
         let mut images = Vec::new();
+        let mut refilled = Vec::new();
         {
             let mut insert = tx
                 .prepare_cached(
-                    "insert or ignore into entries (id, feed_id, source_id, url, title, author, published, first_seen, summary, content, cseq)
-                     values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, (select coalesce(max(cseq), 0) + 1 from entries))",
+                    "insert or ignore into entries (id, feed_id, source_id, url, title, author, published, first_seen, summary, content, attachments, cseq)
+                     values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, (select coalesce(max(cseq), 0) + 1 from entries))",
                 )
                 .unwrap();
             let mut current = tx.prepare_cached("select title, published from entries where id = ?1").unwrap();
@@ -428,7 +441,9 @@ impl Store {
                      title = case when title in ('', 'Untitled', 'untitled') then ?5 else title end,
                      published = case when published < 631152000000 then ?6 else published end,
                      cseq = case when content is null and ?2 is not null or title in ('', 'Untitled', 'untitled') or published < 631152000000
-                       then (select coalesce(max(cseq), 0) + 1 from entries) else cseq end
+                       or attachments is null and ?7 is not null
+                       then (select coalesce(max(cseq), 0) + 1 from entries) else cseq end,
+                     attachments = coalesce(attachments, ?7)
                      where id = ?1",
                 )
                 .unwrap();
@@ -454,7 +469,8 @@ impl Store {
                         published,
                         now,
                         item.summary,
-                        item.content
+                        item.content,
+                        attachments_json(&item.attachments)
                     ])
                     .unwrap_or(0);
                 if n == 1 {
@@ -475,10 +491,15 @@ impl Store {
                         published,
                         read: false,
                         bookmarked: false,
+                        attachments: item.attachments,
                     });
                 } else {
                     let before: Option<(String, i64)> = current.query_row([&id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
-                    let _ = fill.execute(params![id, item.content, item.summary, item.author, item.title, published]);
+                    let had: bool = tx.query_row("select attachments is not null from entries where id = ?1", [&id], |r| r.get(0)).unwrap_or(true);
+                    let _ = fill.execute(params![id, item.content, item.summary, item.author, item.title, published, attachments_json(&item.attachments)]);
+                    if !had && !item.attachments.is_empty() {
+                        refilled.push(id.clone());
+                    }
                     if let Some(body) = item.content.as_deref().or(item.summary.as_deref()) {
                         let _ = tx.execute(
                             "update entries_fts set body = ?2 where rowid = (select rowid from entries where id = ?1) and body = ''",
@@ -495,7 +516,8 @@ impl Store {
             }
         }
         tx.commit().unwrap();
-        Inserted { added, updated, images }
+        let refilled = refilled.iter().filter_map(|id| self.entry(id).map(|x| x.0)).collect();
+        Inserted { added, updated, images, refilled }
     }
 
     pub fn set_read(&mut self, ids: &[EntryId], read: bool, now: i64) {
@@ -866,6 +888,7 @@ impl Store {
             published: now,
             read: true,
             bookmarked: true,
+            attachments: Vec::new(),
         }
     }
 
@@ -966,6 +989,8 @@ pub struct WireEntry {
     pub first_seen: i64,
     pub summary: Option<String>,
     pub content: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -994,7 +1019,7 @@ impl Store {
         let entries = self
             .db
             .prepare_cached(
-                "select id, feed_id, source_id, url, title, author, published, first_seen, summary, content, cseq
+                "select id, feed_id, source_id, url, title, author, published, first_seen, summary, content, cseq, attachments
                  from entries where cseq > ?1 order by cseq limit ?2",
             )
             .and_then(|mut st| {
@@ -1011,6 +1036,7 @@ impl Store {
                             first_seen: r.get(7)?,
                             summary: r.get(8)?,
                             content: r.get(9)?,
+                            attachments: attachments_of(r.get(11)?),
                         },
                         r.get::<_, i64>(10)?,
                     ))
@@ -1042,11 +1068,12 @@ impl Store {
         for e in entries {
             let n = tx
                 .execute(
-                    "insert into entries (id, feed_id, source_id, url, title, author, published, first_seen, summary, content, cseq)
-                     values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, (select coalesce(max(cseq), 0) + 1 from entries))
+                    "insert into entries (id, feed_id, source_id, url, title, author, published, first_seen, summary, content, attachments, cseq)
+                     values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, (select coalesce(max(cseq), 0) + 1 from entries))
                      on conflict(id) do update set title = excluded.title, published = excluded.published,
-                     summary = coalesce(excluded.summary, entries.summary), content = coalesce(excluded.content, entries.content)",
-                    params![e.id, e.feed_id, e.source_id, e.url, e.title, e.author, e.published, e.first_seen, e.summary, e.content],
+                     summary = coalesce(excluded.summary, entries.summary), content = coalesce(excluded.content, entries.content),
+                     attachments = coalesce(excluded.attachments, entries.attachments)",
+                    params![e.id, e.feed_id, e.source_id, e.url, e.title, e.author, e.published, e.first_seen, e.summary, e.content, attachments_json(&e.attachments)],
                 )
                 .unwrap_or(0);
             if n > 0 {
@@ -1151,6 +1178,7 @@ pub struct Inserted {
     pub added: Vec<Entry>,
     pub updated: Vec<(EntryId, String, i64)>,
     pub images: Vec<String>,
+    pub refilled: Vec<Entry>,
 }
 
 pub struct MediaRow {

@@ -64,6 +64,26 @@ impl Feed {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Attachment {
+    pub url: String,
+    pub kind: String,
+    pub bytes: Option<u64>,
+    pub seconds: Option<u64>,
+}
+
+impl Attachment {
+    pub fn class(&self) -> &'static str {
+        if self.kind.starts_with("audio/") {
+            "audio"
+        } else if self.kind.starts_with("video/") {
+            "video"
+        } else {
+            "file"
+        }
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Entry {
     pub id: EntryId,
@@ -74,6 +94,8 @@ pub struct Entry {
     pub published: i64,
     pub read: bool,
     pub bookmarked: bool,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

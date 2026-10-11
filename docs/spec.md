@@ -431,7 +431,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 ### 10.8 Engine and platform
 16. **Open.** Sync: the version handshake, households, rate limiting on the public listener, the engine-wide TOML file.
 17. **Open.** Engine errors reported instead of discarded (§5.9).
-18. **Partial.** Media: images and pruning done. Open: attachments as data shown in every mode (today they are links appended to the feed's text, so Clean mode loses them), attachments cached for offline (limits are Open, §9), prefetching unread entries up to 30 days old (§5.6), favicons.
+18. **Partial.** Media: images and pruning done; attachments are data (type, size, duration) shown in every reading mode. Open: attachments cached for offline (limits are Open, §9), prefetching unread entries up to 30 days old (§5.6), favicons, attachments in the public I recommend feed.
 19. **Partial.** Discovery. Open: JSON-LD, h-feed, sitemaps.
 20. **Partial.** Tabs. Open: reordering by drag, one web view per tab.
 21. **Open.** Export bundle, move to another machine.

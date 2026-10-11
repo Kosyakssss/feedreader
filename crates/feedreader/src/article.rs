@@ -55,6 +55,48 @@ pub struct Header {
     pub title: String,
     pub meta: String,
     pub url: String,
+    pub attachments: Vec<engine::Attachment>,
+}
+
+fn size(bytes: u64) -> String {
+    match bytes {
+        b if b >= 1_000_000_000 => format!("{:.1} GB", b as f64 / 1e9),
+        b if b >= 1_000_000 => format!("{:.1} MB", b as f64 / 1e6),
+        b if b >= 1_000 => format!("{} KB", b / 1000),
+        b => format!("{b} B"),
+    }
+}
+
+fn duration(seconds: u64) -> String {
+    let (h, m, s) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
+}
+
+pub fn attachments(s: &mut Scene<Hit>, list: &[engine::Attachment], x: f32, y: f32, width: f32) -> f32 {
+    let mt = s.m;
+    let (cw, ch) = (mt.cell_w, mt.cell_h);
+    let colors = [s.palette.ink, s.palette.link, s.palette.ink, s.palette.muted];
+    let mut row = y;
+    for a in list {
+        let name = a.url.rsplit('/').find(|p| !p.is_empty()).unwrap_or(&a.url);
+        let name = name.split(['?', '#']).next().unwrap_or(name);
+        let mut parts = vec![a.class().to_string(), name.to_string()];
+        if let Some(b) = a.bytes {
+            parts.push(size(b));
+        }
+        if let Some(sec) = a.seconds {
+            parts.push(duration(sec));
+        }
+        let label = parts.join(" \u{00B7} ");
+        let style = SpanStyle { underline: true, color: 3, ..SpanStyle::plain(Face::Mono) };
+        let w = s.measure(&label, mt.mono()).min(width);
+        let r = Rect::new(x - cw * 0.5, row, w + cw, ch);
+        s.hover(r);
+        s.spans(&[(label.as_str(), style)], mt.size, ch, x, row, None, Some(width), &colors);
+        s.hit(r, if a.class() == "file" { Hit::Media(a.url.clone()) } else { Hit::Play(a.url.clone(), a.class().to_string()) });
+        row += ch;
+    }
+    row - y
 }
 
 #[profiling::function]
@@ -150,7 +192,7 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
     let title_size = (mt.size * 1.5).round();
     let title_line = (ch * 1.5).round();
     let title_h = s.text.height(&[(header.title.as_str(), title_style)], title_size, title_line, width);
-    let head_h = ch * 0.5 + title_h + ch * 3.0;
+    let head_h = ch * 0.5 + title_h + ch * (3 + header.attachments.len()) as f32;
     let status_h = status.as_ref().map(|(t, _)| s.text.height(&[(t.as_str(), base)], body, line, width) + gap).unwrap_or(0.0);
     let mut heights = Vec::with_capacity(laid.len());
     for l in &laid {
@@ -187,6 +229,7 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
     y += ch;
     s.text(&header.url, mono, x0, y, Some(width), pal.faint);
     y += ch;
+    y += attachments(s, &header.attachments, x0, y, width);
     s.hline(y, area.x - cw * 0.5, area.right());
     y += ch;
     if let Some(n) = &r.note {

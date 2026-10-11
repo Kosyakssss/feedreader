@@ -30,6 +30,7 @@ fn engine() -> Engine {
             summary: None,
             content: None,
             images: Vec::new(),
+            attachments: Vec::new(),
         })
         .collect();
     e.store.insert_entries(&feed.id, items, now);
@@ -269,6 +270,7 @@ proptest! {
                 summary: None,
                 content: None,
                 images: Vec::new(),
+                attachments: Vec::new(),
             })
             .collect();
         e.store.insert_entries(&feed, items, now);

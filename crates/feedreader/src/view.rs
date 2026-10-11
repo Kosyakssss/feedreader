@@ -695,13 +695,14 @@ fn paint_reader(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOu
                 y += ch;
                 s.text(&meta, mono, x, y, Some(width), pal.muted);
                 y += ch;
+                y += article::attachments(s, &e.attachments, x, y, width);
                 s.hline(y, main.x - cw * 0.5, main.right());
                 y += ch;
                 let rest = Rect::new(main.x, y, main.w, main.bottom() - y);
                 s.text("Loading the page\u{2026}", mono, rest.x + cw, rest.y, None, pal.faint);
                 out.webview = Some((rest, Web::Url(e.url.clone())));
             } else {
-                article::paint(m, s, main, article::Header { title, meta, url: e.url.clone() });
+                article::paint(m, s, main, article::Header { title, meta, url: e.url.clone(), attachments: e.attachments.clone() });
             }
         }
     }

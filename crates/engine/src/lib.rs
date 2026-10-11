@@ -970,6 +970,9 @@ impl Engine {
             if !ins.updated.is_empty() {
                 self.emit(Event::EntriesUpdated(ins.updated));
             }
+            if !ins.refilled.is_empty() {
+                self.emit(Event::EntriesAdded(ins.refilled));
+            }
             self.want_media(ins.images, false);
             ins.added
         })
@@ -1022,7 +1025,7 @@ impl Engine {
         match result {
             Ok(Fetch::NotModified) => {
                 self.store.set_fetch_result(id, None, None, None, None, t);
-                Ok(store::Inserted { added: Vec::new(), updated: Vec::new(), images: Vec::new() })
+                Ok(store::Inserted { added: Vec::new(), updated: Vec::new(), images: Vec::new(), refilled: Vec::new() })
             }
             Ok(Fetch::Parsed(parsed, validators)) => {
                 let error = parsed.entries.is_empty().then_some("Feed returned no entries");

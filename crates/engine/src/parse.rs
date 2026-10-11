@@ -2,7 +2,7 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use scraper::{ElementRef, Html, Node};
 use url::Url;
 
-use crate::types::{Block, Inline};
+use crate::types::{Attachment, Block, Inline};
 
 pub struct ParsedFeed {
     pub title: String,
@@ -19,6 +19,7 @@ pub struct NewEntry {
     pub summary: Option<String>,
     pub content: Option<String>,
     pub images: Vec<String>,
+    pub attachments: Vec<Attachment>,
 }
 
 pub fn image_urls(html: &str, base: Option<&Url>, limit: usize) -> Vec<String> {
@@ -158,6 +159,7 @@ pub fn parse_feed(bytes: &[u8], base: &str) -> Result<ParsedFeed, String> {
             let has_image = content.as_deref().or(summary.as_deref()).is_some_and(|c| c.contains("<img"));
             let attr = |s: &str| html_escape::encode_double_quoted_attribute(s).to_string();
             let mut thumb = None;
+            let mut attachments: Vec<Attachment> = Vec::new();
             for m in &e.media {
                 for c in &m.content {
                     if let Some(u) = &c.url {
@@ -166,8 +168,13 @@ pub fn parse_feed(bytes: &[u8], base: &str) -> Result<ParsedFeed, String> {
                             if !has_image {
                                 media.push_str(&format!("<p><img src=\"{}\"></p>", attr(u.as_str())));
                             }
-                        } else {
-                            media.push_str(&format!("<p><a href=\"{0}\" data-media=\"{1}\">{0}</a></p>", attr(u.as_str()), attr(&kind)));
+                        } else if !attachments.iter().any(|a| a.url == u.as_str()) {
+                            attachments.push(Attachment {
+                                url: u.to_string(),
+                                kind,
+                                bytes: c.size.filter(|&s| s > 0),
+                                seconds: c.duration.or(m.duration).map(|d| d.as_secs()).filter(|&s| s > 0),
+                            });
                         }
                     }
                 }
@@ -194,6 +201,7 @@ pub fn parse_feed(bytes: &[u8], base: &str) -> Result<ParsedFeed, String> {
                 summary,
                 content,
                 images,
+                attachments,
             }
         })
         .collect();
