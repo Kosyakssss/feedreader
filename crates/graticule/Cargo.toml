@@ -7,6 +7,8 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
+accesskit = "0.25"
+accesskit_winit = "0.34"
 arboard = "3.6.1"
 bytemuck = { version = "1.25.2", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }

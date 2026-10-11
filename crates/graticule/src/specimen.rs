@@ -488,6 +488,12 @@ fn snapshot(title: &'static str, sheets: Vec<Sheet>, args: &[String], out: &Path
         }
     }
     let (quads, ms) = frames.pop().unwrap_or_default();
+    if args.iter().any(|a| a == "--access") {
+        let frame = crate::access::Frame { title, hits: &screen.hits, runs: &screen.runs, fields: &screen.fields, focused: None };
+        for (_, node) in crate::access::tree(frame, &screen.text).nodes {
+            println!("{:?} {:?}", node.role(), node.label().or(node.value()).unwrap_or_default());
+        }
+    }
     let mut images = Images::new(|| {});
     let pixels = screen.capture(&quads, palette.bg, &mut images);
     screen.save_png(out, &pixels)?;

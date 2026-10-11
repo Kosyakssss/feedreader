@@ -146,6 +146,7 @@ pub struct Scene<'a, H> {
 #[derive(Clone, Copy, Debug)]
 pub struct Run {
     pub key: u64,
+    pub selectable: bool,
     pub origin: (f32, f32),
     pub rect: Rect,
     clip: [f32; 4],
@@ -158,12 +159,12 @@ pub fn spot(runs: &[Run], text: &Text, (x, y): (f32, f32), reach: Option<f32>, c
         let dx = if x < r.rect.x { r.rect.x - x } else if x >= r.rect.right() { x - r.rect.right() + 1.0 } else { 0.0 };
         (dy, dx)
     };
-    let inside = runs.iter().enumerate().rev().find(|(_, r)| r.rect.contains(x, y));
+    let inside = runs.iter().enumerate().rev().find(|(_, r)| r.selectable && r.rect.contains(x, y));
     let (order, run) = match inside {
         Some(found) => found,
         None => {
             let reach = reach?;
-            let near = runs.iter().enumerate().min_by(|(_, a), (_, b)| distance(a).partial_cmp(&distance(b)).unwrap_or(std::cmp::Ordering::Equal))?;
+            let near = runs.iter().enumerate().filter(|(_, r)| r.selectable).min_by(|(_, a), (_, b)| distance(a).partial_cmp(&distance(b)).unwrap_or(std::cmp::Ordering::Equal))?;
             if distance(near.1).0 > reach {
                 return None;
             }
@@ -477,20 +478,19 @@ impl<'a, H> Scene<'a, H> {
         let clip = self.clip();
         let quad = self.quads.len();
         let drawn = self.text.draw_spans(&mut self.quads, block, Paint { origin: at, limit, colors, clip });
-        if self.selectable {
-            let x0 = at.0.max(clip[0]);
-            let y0 = at.1.max(clip[1]);
-            let x1 = (at.0 + drawn.width).min(clip[2]);
-            let y1 = (at.1 + drawn.height).min(clip[3]);
-            if x1 > x0 && y1 > y0 {
-                self.runs.push(Run { key: drawn.key, origin: at, rect: Rect::new(x0, y0, x1 - x0, y1 - y0), clip, quad });
-            }
+        let x0 = at.0.max(clip[0]);
+        let y0 = at.1.max(clip[1]);
+        let x1 = (at.0 + drawn.width).min(clip[2]);
+        let y1 = (at.1 + drawn.height).min(clip[3]);
+        if x1 > x0 && y1 > y0 {
+            let selectable = self.selectable;
+            self.runs.push(Run { key: drawn.key, selectable, origin: at, rect: Rect::new(x0, y0, x1 - x0, y1 - y0), clip, quad });
         }
         drawn
     }
 
     fn find_run(&self, spot: Spot) -> Option<usize> {
-        self.runs.iter().enumerate().filter(|(_, r)| r.key == spot.key).min_by_key(|(i, _)| i.abs_diff(spot.order)).map(|(i, _)| i)
+        self.runs.iter().enumerate().filter(|(_, r)| r.selectable && r.key == spot.key).min_by_key(|(i, _)| i.abs_diff(spot.order)).map(|(i, _)| i)
     }
 
     pub fn finish(&mut self) {
@@ -508,6 +508,9 @@ impl<'a, H> Scene<'a, H> {
         let color = self.palette.selection;
         for i in (start.order..=end.order).rev() {
             let run = self.runs[i];
+            if !run.selectable {
+                continue;
+            }
             let len = self.text.source(run.key).map_or(0, str::len);
             let from = if i == start.order { start.byte } else { 0 };
             let to = if i == end.order { end.byte } else { len };

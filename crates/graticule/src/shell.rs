@@ -112,6 +112,13 @@ enum Signal<W> {
     App(W),
     WebClose,
     Images,
+    Access(accesskit_winit::Event),
+}
+
+impl<W> From<accesskit_winit::Event> for Signal<W> {
+    fn from(e: accesskit_winit::Event) -> Self {
+        Signal::Access(e)
+    }
 }
 
 pub struct Waker<W: 'static> {
@@ -275,6 +282,8 @@ struct Running<A: App> {
     quit: bool,
     visible: bool,
     _menu: Option<menu::Menu>,
+    access: Option<accesskit_winit::Adapter>,
+    title: &'static str,
 }
 
 fn mods(m: ModifiersState) -> Mods {
@@ -340,12 +349,25 @@ impl<A: App> Running<A> {
         let presented = Instant::now();
         self.sync_web(painted.web, palette.bg);
         self.sync_ime(self.focused.map(|f| f.caret));
+        self.update_access();
         let ms = |a: Instant, b: Instant| (b - a).as_secs_f32() * 1000.0;
         self.frames.push([ms(started, done), ms(done, presented), ms(presented, Instant::now())]);
         profiling::finish_frame!();
         if self.frames.len() > 240 {
             self.frames.remove(0);
         }
+    }
+
+    fn update_access(&mut self) {
+        let Some(access) = self.access.as_mut() else { return };
+        let hits: Vec<Rect> = self.hits.iter().map(|(r, _)| *r).collect();
+        let value = self.app.field().map(|f| f.text.clone());
+        let focused = self.focused.map(|f| f.rect).zip(value);
+        let (text, runs, fields, title) = (&self.text, &self.runs, &self.fields, self.title);
+        access.update_if_active(|| {
+            let frame = crate::access::Frame { title, hits: &hits, runs, fields, focused: focused.as_ref().map(|(r, v)| (*r, v.as_str())) };
+            crate::access::tree(frame, text)
+        });
     }
 
     fn sync_web(&mut self, web: Option<(Rect, Web)>, bg: [f32; 4]) {
@@ -632,7 +654,7 @@ impl<A: App> Running<A> {
         let (start, end) = sel.ordered();
         let mut out = String::new();
         let mut last: Option<Rect> = None;
-        for (i, run) in self.runs.iter().enumerate().take(end.order + 1).skip(start.order) {
+        for (i, run) in self.runs.iter().enumerate().take(end.order + 1).skip(start.order).filter(|(_, r)| r.selectable) {
             let src = self.text.source(run.key)?;
             let from = if i == start.order { start.byte } else { 0 };
             let to = if i == end.order { end.byte } else { src.len() };
@@ -757,7 +779,7 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             .with_title(self.config.title)
             .with_inner_size(LogicalSize::new(self.config.size.0, self.config.size.1))
             .with_min_inner_size(LogicalSize::new(self.config.min_size.0, self.config.min_size.1))
-            .with_visible(self.config.visible);
+            .with_visible(false);
         let window = match event_loop.create_window(attributes) {
             Ok(w) => Arc::new(w),
             Err(e) => {
@@ -766,6 +788,10 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
                 return;
             }
         };
+        let access = self.config.visible.then(|| accesskit_winit::Adapter::with_event_loop_proxy(event_loop, &window, self.proxy.clone()));
+        if self.config.visible {
+            window.set_visible(true);
+        }
         let size = window.inner_size();
         let gpu = Gpu::new(Some(window.clone()), (size.width, size.height));
         let mut text = self.fonts.take().and_then(|t| t.join().ok()).unwrap_or_default();
@@ -829,6 +855,8 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             quit: false,
             visible: self.config.visible,
             _menu: menu,
+            access,
+            title: self.config.title,
         };
         running.settle();
         if self.config.visible {
@@ -850,6 +878,24 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
                 true
             }
             Signal::Images => true,
+            Signal::Access(e) => match e.window_event {
+                accesskit_winit::WindowEvent::InitialTreeRequested => {
+                    r.update_access();
+                    false
+                }
+                accesskit_winit::WindowEvent::ActionRequested(req) => {
+                    match (req.action, crate::access::hit_of(req.target_node)) {
+                        (accesskit::Action::Click, Some(i)) if i < r.hits.len() => {
+                            let hit = Some(r.hits[i].1.clone());
+                            let mut cx = cx!(r);
+                            r.app.press(hit, &mut cx);
+                            true
+                        }
+                        _ => false,
+                    }
+                }
+                accesskit_winit::WindowEvent::AccessibilityDeactivated => false,
+            },
         };
         if redraw {
             r.settle();
@@ -861,6 +907,9 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         let Some(r) = self.running.as_mut() else { return };
+        if let Some(a) = &mut r.access {
+            a.process_event(&r.window, &event);
+        }
         let redraw = match event {
             WindowEvent::CloseRequested => {
                 event_loop.exit();
@@ -975,6 +1024,8 @@ pub struct Offscreen {
     pub text: Text,
     pub state: State,
     pub runs: Vec<Run>,
+    pub hits: Vec<Rect>,
+    pub fields: Vec<Rect>,
     pub metrics: Metrics,
     width: u32,
     height: u32,
@@ -984,7 +1035,7 @@ impl Offscreen {
     pub fn new(width: u32, height: u32, scale: f32, font_size: f32) -> Self {
         let mut text = Text::new();
         let metrics = metrics(&mut text, font_size, scale, width, height);
-        Self { gpu: Gpu::new(None, (width, height)), text, state: State::default(), runs: Vec::new(), metrics, width, height }
+        Self { gpu: Gpu::new(None, (width, height)), text, state: State::default(), runs: Vec::new(), hits: Vec::new(), fields: Vec::new(), metrics, width, height }
     }
 
     pub fn paint<H>(&mut self, style: LineStyle, palette: Palette, pointer: Option<(f32, f32)>, f: impl FnOnce(&mut Scene<H>)) -> (Vec<Quad>, f32) {
@@ -996,6 +1047,8 @@ impl Offscreen {
         f(&mut scene);
         scene.finish();
         self.runs = std::mem::take(&mut scene.runs);
+        self.hits = scene.hits.iter().map(|(r, _)| *r).collect();
+        self.fields = std::mem::take(&mut scene.fields);
         let quads = std::mem::take(&mut scene.quads);
         (quads, started.elapsed().as_secs_f32() * 1000.0)
     }
