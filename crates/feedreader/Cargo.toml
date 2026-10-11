@@ -6,6 +6,12 @@ edition.workspace = true
 [lints]
 workspace = true
 
+[package.metadata.graticule]
+name = "Feedreader"
+id = "app.feedreader"
+command = "feedreader"
+category = "public.app-category.news"
+
 [dependencies]
 graticule = { path = "../graticule" }
 engine = { path = "../engine" }

@@ -14,10 +14,20 @@ The plan and the decisions behind it are in [`docs/spec.md`](docs/spec.md).
 Install [Rust](https://rustup.rs), then from the repository:
 
 ```sh
-scripts/bundle.sh             # builds Feedreader.app into ~/Applications and links ~/.local/bin/feedreader
+cargo run -p bindery -- install -p feedreader   # builds Feedreader.app into ~/Applications and links ~/.local/bin/feedreader
 ```
 
-or, without installing anything, `cargo run --release`.
+or, without installing anything, `cargo run --release`. Bindery (BD-01) is Graticule's packager; `cargo install --path crates/bindery` puts it on your path, and then `bindery list`, `bindery check` and `bindery update` keep installed apps current (`bindery service install` checks once a day, quietly).
+
+## Graticule's tools
+
+```sh
+cargo run -p graticule --bin specimen            # SP-01 Specimen: every component in every state
+cargo run -p graticule --bin specimen -- --out target/specimen   # the same, as a page of images
+GRATICULE_SCOPE=1 cargo run --release            # SC-01 Scope over Feedreader, also under View in the menu bar
+```
+
+Pictures in `crates/graticule/pictures` are compiled at build time by EN-01 Engraver (`crates/engraver`).
 
 Data lives in `~/Library/Application Support/Feedreader` on macOS and `$XDG_DATA_HOME/Feedreader` on Linux. Set `FEEDREADER_HOME` to use another folder.
 
