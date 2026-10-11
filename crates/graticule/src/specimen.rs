@@ -230,6 +230,7 @@ impl Bench {
 
     pub fn paint(&mut self, s: &mut Scene<Hit>) {
         s.state.scrolling = self.scrolling;
+        s.selectable = false;
         let pal = s.palette;
         let mono = s.m.mono();
         let mut screen = s.screen();
@@ -310,7 +311,9 @@ impl Bench {
             };
             s.push_clip(s.rect(inner));
             let started = Instant::now();
+            s.selectable = true;
             (sheet.paint)(s, inner, &self.sandbox);
+            s.selectable = false;
             self.paint_ms = started.elapsed().as_secs_f32() * 1000.0;
             s.pop_clip();
             if self.grid {
@@ -472,10 +475,17 @@ fn snapshot(title: &'static str, sheets: Vec<Sheet>, args: &[String], out: &Path
     let pointer = arg("--pointer").and_then(|s| s.split_once(',').and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?))));
     let mut screen = Offscreen::new(w * scale as u32, h * scale as u32, scale, 13.0);
     let palette = bench.palette(false);
+    let drag = arg("--drag").and_then(|s| {
+        let n: Vec<f32> = s.split([',', ':']).filter_map(|v| v.parse().ok()).collect();
+        (n.len() == 4).then(|| ((n[0] * scale, n[1] * scale), (n[2] * scale, n[3] * scale)))
+    });
     let mut frames = Vec::new();
-    for _ in 0..3 {
+    for i in 0..3 {
         let (quads, ms) = screen.paint(bench.style, palette, pointer, |s| bench.paint(s));
         frames.push((quads, ms));
+        if let (0, Some((from, to))) = (i, drag) {
+            screen.select(from, to);
+        }
     }
     let (quads, ms) = frames.pop().unwrap_or_default();
     let mut images = Images::new(|| {});

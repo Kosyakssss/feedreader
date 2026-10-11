@@ -31,3 +31,7 @@ Box drawing (U+2500–U+257F), block elements (U+2580–U+259F) and braille (U+2
 ## Moves that need the layout go through the shell
 
 `Field` is a pure editing model and doesn't know where its text wrapped. In a multi-line field, up, down and the line ends return `Edit::Line`, and the shell answers them from the layout the field was last painted with (`Focused.wrap`), using parley's line navigation. Everything else, including Return, Cmd with the arrows and Ctrl-K up to the end of the line, stays in the model, so the field law covers it.
+
+## Selection is resolved after the frame
+
+Every piece of text drawn while `Scene::selectable` is on is recorded as a run: its layout's key, origin, visible rectangle and where its glyph quads start. A selection end is a run's layout key, its position in drawing order and a byte offset. Painting doesn't know where a selection starts until every run is drawn, so `Scene::finish` matches each end to the run with the same key nearest its old position, then inserts the highlight quads just before each selected run's glyphs. Matching by key rather than position keeps a selection on the same text when a list scrolls or entries arrive; a selection whose text is gone is dropped. Copying reads the text back from the layout cache, joining runs on one row with a space and rows with a newline.

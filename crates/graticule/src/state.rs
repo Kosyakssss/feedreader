@@ -161,9 +161,34 @@ impl Scroll {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Spot {
+    pub key: u64,
+    pub order: usize,
+    pub byte: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Selected {
+    pub anchor: Spot,
+    pub focus: Spot,
+}
+
+impl Selected {
+    pub fn ordered(&self) -> (Spot, Spot) {
+        let (a, f) = (self.anchor, self.focus);
+        if (a.order, a.byte) <= (f.order, f.byte) { (a, f) } else { (f, a) }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.anchor.order == self.focus.order && self.anchor.byte == self.focus.byte
+    }
+}
+
 #[derive(Default)]
 pub struct State {
     scrolls: HashMap<Id, Scroll>,
+    pub selection: Option<Selected>,
     pub scrolling: Scrolling,
     frame: u64,
 }

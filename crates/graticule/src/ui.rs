@@ -2,7 +2,7 @@ use crate::chars::{self, Pen, Shape};
 use crate::gpu::Quad;
 use crate::field::Field;
 use crate::grid::Area;
-use crate::state::{Id, Layout, State};
+use crate::state::{Id, Layout, Selected, Spot, State};
 use crate::text::{Block, Drawn, Face, Paint, SpanStyle, Text, TextStyle};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -136,9 +136,42 @@ pub struct Scene<'a, H> {
     pub scrollables: Vec<(Rect, Id)>,
     pub tracks: Vec<(Rect, Id)>,
     pub pressed: bool,
+    pub selectable: bool,
+    pub runs: Vec<Run>,
     shift: (f32, f32),
     clips: Vec<[f32; 4]>,
     pen: Vec<Rect>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Run {
+    pub key: u64,
+    pub origin: (f32, f32),
+    pub rect: Rect,
+    clip: [f32; 4],
+    quad: usize,
+}
+
+pub fn spot(runs: &[Run], text: &Text, (x, y): (f32, f32), reach: Option<f32>, clicks: u32) -> Option<(Spot, Spot)> {
+    let distance = |r: &Run| {
+        let dy = if y < r.rect.y { r.rect.y - y } else if y >= r.rect.bottom() { y - r.rect.bottom() + 1.0 } else { 0.0 };
+        let dx = if x < r.rect.x { r.rect.x - x } else if x >= r.rect.right() { x - r.rect.right() + 1.0 } else { 0.0 };
+        (dy, dx)
+    };
+    let inside = runs.iter().enumerate().rev().find(|(_, r)| r.rect.contains(x, y));
+    let (order, run) = match inside {
+        Some(found) => found,
+        None => {
+            let reach = reach?;
+            let near = runs.iter().enumerate().min_by(|(_, a), (_, b)| distance(a).partial_cmp(&distance(b)).unwrap_or(std::cmp::Ordering::Equal))?;
+            if distance(near.1).0 > reach {
+                return None;
+            }
+            near
+        }
+    };
+    let range = text.pick(run.key, x - run.origin.0, y - run.origin.1, clicks)?;
+    Some((Spot { key: run.key, order, byte: range.start }, Spot { key: run.key, order, byte: range.end }))
 }
 
 pub struct Lines {
@@ -181,6 +214,8 @@ impl<'a, H> Scene<'a, H> {
             scrollables: Vec::new(),
             tracks: Vec::new(),
             pressed: false,
+            selectable: true,
+            runs: Vec::new(),
             shift: (0.0, 0.0),
             clips: vec![[0.0, 0.0, m.width, m.height]],
             pen: Vec::new(),
@@ -440,10 +475,68 @@ impl<'a, H> Scene<'a, H> {
 
     pub fn spans(&mut self, block: Block, at: (f32, f32), limit: Option<f32>, colors: &[[f32; 4]]) -> Drawn {
         let clip = self.clip();
-        self.text.draw_spans(&mut self.quads, block, Paint { origin: at, limit, colors, clip })
+        let quad = self.quads.len();
+        let drawn = self.text.draw_spans(&mut self.quads, block, Paint { origin: at, limit, colors, clip });
+        if self.selectable {
+            let x0 = at.0.max(clip[0]);
+            let y0 = at.1.max(clip[1]);
+            let x1 = (at.0 + drawn.width).min(clip[2]);
+            let y1 = (at.1 + drawn.height).min(clip[3]);
+            if x1 > x0 && y1 > y0 {
+                self.runs.push(Run { key: drawn.key, origin: at, rect: Rect::new(x0, y0, x1 - x0, y1 - y0), clip, quad });
+            }
+        }
+        drawn
+    }
+
+    fn find_run(&self, spot: Spot) -> Option<usize> {
+        self.runs.iter().enumerate().filter(|(_, r)| r.key == spot.key).min_by_key(|(i, _)| i.abs_diff(spot.order)).map(|(i, _)| i)
+    }
+
+    pub fn finish(&mut self) {
+        let Some(sel) = self.state.selection else { return };
+        let (Some(a), Some(f)) = (self.find_run(sel.anchor), self.find_run(sel.focus)) else {
+            self.state.selection = None;
+            return;
+        };
+        let sel = Selected { anchor: Spot { order: a, ..sel.anchor }, focus: Spot { order: f, ..sel.focus } };
+        self.state.selection = Some(sel);
+        if sel.is_empty() {
+            return;
+        }
+        let (start, end) = sel.ordered();
+        let color = self.palette.selection;
+        for i in (start.order..=end.order).rev() {
+            let run = self.runs[i];
+            let len = self.text.source(run.key).map_or(0, str::len);
+            let from = if i == start.order { start.byte } else { 0 };
+            let to = if i == end.order { end.byte } else { len };
+            let quads: Vec<Quad> = self
+                .text
+                .rects_in(run.key, from..to)
+                .into_iter()
+                .map(|q| Quad {
+                    pos: [run.origin.0 + q[0], run.origin.1 + q[1]],
+                    size: [q[2].max(1.0), q[3]],
+                    uv: [0.0; 4],
+                    color,
+                    clip: run.clip,
+                    kind: 0,
+                    image: 0,
+                    pad: [0; 2],
+                })
+                .collect();
+            self.quads.splice(run.quad..run.quad, quads);
+        }
     }
 
     pub fn field(&mut self, r: Rect, f: &Field, focused: bool, placeholder: &str) {
+        let selectable = std::mem::replace(&mut self.selectable, false);
+        self.paint_field(r, f, focused, placeholder);
+        self.selectable = selectable;
+    }
+
+    fn paint_field(&mut self, r: Rect, f: &Field, focused: bool, placeholder: &str) {
         let mono = self.m.mono();
         let pal = self.palette;
         self.fill(r, pal.field);
@@ -489,6 +582,12 @@ impl<'a, H> Scene<'a, H> {
     }
 
     pub fn text_area(&mut self, id: Id, r: Rect, f: &Field, focused: bool, placeholder: &str) {
+        let selectable = std::mem::replace(&mut self.selectable, false);
+        self.paint_text_area(id, r, f, focused, placeholder);
+        self.selectable = selectable;
+    }
+
+    fn paint_text_area(&mut self, id: Id, r: Rect, f: &Field, focused: bool, placeholder: &str) {
         let pal = self.palette;
         let mono = self.m.mono();
         let (size, line) = (mono.size, self.m.cell_h);

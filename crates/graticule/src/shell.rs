@@ -17,7 +17,8 @@ use crate::ui::Focused;
 use crate::gpu::{Gpu, Quad};
 use crate::images::Images;
 use crate::menu;
-use crate::state::{Id, State};
+use crate::state::{Id, Selected, Spot, State};
+use crate::ui::Run;
 use crate::text::{Face, Text, TextStyle};
 use crate::ui::{LineStyle, Metrics, Palette, Rect, Scene};
 
@@ -251,6 +252,8 @@ struct Running<A: App> {
     scrollables: Vec<(Rect, Id)>,
     tracks: Vec<(Rect, Id)>,
     thumb: Option<(Id, Rect, f32)>,
+    runs: Vec<Run>,
+    picking: bool,
     web: Option<wry::WebView>,
     web_key: Option<String>,
     web_visible: bool,
@@ -312,6 +315,8 @@ impl<A: App> Running<A> {
         scene.pointer = self.pointer_inside.then_some(self.mouse);
         scene.pressed = self.left_down;
         let painted = self.app.paint(&mut scene, stats);
+        scene.finish();
+        self.runs = std::mem::take(&mut scene.runs);
         let quads = std::mem::take(&mut scene.quads);
         self.hits = std::mem::take(&mut scene.hits);
         self.scrollables = std::mem::take(&mut scene.scrollables);
@@ -535,6 +540,17 @@ impl<A: App> Running<A> {
         if control {
             return false;
         }
+        if m.primary
+            && !m.shift
+            && plain == Key::Char('c')
+            && self.app.field().is_none()
+            && let Some(text) = self.selected_text()
+        {
+            if let Some(c) = &mut self.clipboard {
+                let _ = c.set_text(text);
+            }
+            return true;
+        }
         let shift_matters = m.primary || !matches!(key, Key::Char(c) if !c.is_ascii_alphabetic());
         let chord = Chord { key: plain, cmd: m.primary, shift: m.shift && shift_matters };
         if let Some(c) = self.app.registry().lookup(self.app.model(), &chord) {
@@ -564,11 +580,16 @@ impl<A: App> Running<A> {
             return;
         }
         let now = Instant::now();
-        let double = self.last_click.is_some_and(|(t, px, py)| now - t < Duration::from_millis(400) && (px - x).abs() < 6.0 && (py - y).abs() < 6.0);
+        let again = self.last_click.is_some_and(|(t, px, py)| now - t < Duration::from_millis(400) && (px - x).abs() < 6.0 && (py - y).abs() < 6.0);
         self.last_click = Some((now, x, y));
-        self.clicks = if double { 2 } else { 1 };
+        self.clicks = if again { (self.clicks + 1).min(3) } else { 1 };
         self.left_down = true;
         let hit = self.hit_at(x, y);
+        if hit.is_none() && !self.fields.iter().any(|r| r.contains(x, y)) {
+            self.pick(x, y, true);
+        } else {
+            self.state.selection = None;
+        }
         let mut cx = cx!(self);
         self.app.press(hit, &mut cx);
         self.selecting = false;
@@ -584,6 +605,48 @@ impl<A: App> Running<A> {
             if clicks == 2 { f.select_word(at) } else { f.place(at, shift) }
             self.selecting = true;
         }
+    }
+
+    fn spot(&self, x: f32, y: f32, reach: f32, clicks: u32) -> Option<(Spot, Spot)> {
+        crate::ui::spot(&self.runs, &self.text, (x, y), Some(reach), clicks)
+    }
+
+    fn pick(&mut self, x: f32, y: f32, starting: bool) {
+        let shift = self.modifiers.shift_key();
+        if starting {
+            match (self.spot(x, y, self.metrics.cell_h, self.clicks), self.state.selection) {
+                (Some((_, focus)), Some(sel)) if shift && self.clicks == 1 => self.state.selection = Some(Selected { focus, ..sel }),
+                (Some((anchor, focus)), _) => {
+                    self.state.selection = Some(Selected { anchor, focus });
+                    self.picking = true;
+                }
+                (None, _) => self.state.selection = None,
+            }
+        } else if let (Some((_, focus)), Some(sel)) = (self.spot(x, y, f32::MAX, 1), self.state.selection) {
+            self.state.selection = Some(Selected { focus, ..sel });
+        }
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        let sel = self.state.selection.filter(|s| !s.is_empty())?;
+        let (start, end) = sel.ordered();
+        let mut out = String::new();
+        let mut last: Option<Rect> = None;
+        for (i, run) in self.runs.iter().enumerate().take(end.order + 1).skip(start.order) {
+            let src = self.text.source(run.key)?;
+            let from = if i == start.order { start.byte } else { 0 };
+            let to = if i == end.order { end.byte } else { src.len() };
+            if let Some(prev) = last {
+                if (run.origin.1 - prev.y).abs() > 1.0 {
+                    out.push('\n');
+                } else if run.origin.0 > prev.right() + 1.0 {
+                    out.push(' ');
+                }
+            }
+            out.push_str(src.get(from..to)?);
+            last = Some(Rect::new(run.origin.0, run.origin.1, run.rect.right() - run.origin.0, run.rect.h));
+        }
+        Some(out)
     }
 
     fn caret_at(&mut self, x: f32, y: f32) -> Option<usize> {
@@ -650,6 +713,11 @@ impl<A: App> Running<A> {
     fn moved(&mut self) -> bool {
         if self.left_down && self.thumb.is_some() {
             self.drag_thumb();
+            return true;
+        }
+        if self.left_down && self.picking {
+            let (x, y) = self.mouse;
+            self.pick(x, y, false);
             return true;
         }
         if self.left_down && self.selecting {
@@ -738,6 +806,8 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             scrollables: Vec::new(),
             tracks: Vec::new(),
             thumb: None,
+            runs: Vec::new(),
+            picking: false,
             web: None,
             web_key: None,
             web_visible: false,
@@ -872,6 +942,7 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             WindowEvent::MouseInput { state: ElementState::Released, button: MouseButton::Left, .. } => {
                 r.left_down = false;
                 r.selecting = false;
+                r.picking = false;
                 r.app.release();
                 r.thumb.take().is_some()
             }
@@ -903,6 +974,7 @@ pub struct Offscreen {
     gpu: Gpu,
     pub text: Text,
     pub state: State,
+    pub runs: Vec<Run>,
     pub metrics: Metrics,
     width: u32,
     height: u32,
@@ -912,7 +984,7 @@ impl Offscreen {
     pub fn new(width: u32, height: u32, scale: f32, font_size: f32) -> Self {
         let mut text = Text::new();
         let metrics = metrics(&mut text, font_size, scale, width, height);
-        Self { gpu: Gpu::new(None, (width, height)), text, state: State::default(), metrics, width, height }
+        Self { gpu: Gpu::new(None, (width, height)), text, state: State::default(), runs: Vec::new(), metrics, width, height }
     }
 
     pub fn paint<H>(&mut self, style: LineStyle, palette: Palette, pointer: Option<(f32, f32)>, f: impl FnOnce(&mut Scene<H>)) -> (Vec<Quad>, f32) {
@@ -922,8 +994,17 @@ impl Offscreen {
         let mut scene = Scene::new(&mut self.text, &mut self.state, self.metrics, style, palette);
         scene.pointer = pointer;
         f(&mut scene);
+        scene.finish();
+        self.runs = std::mem::take(&mut scene.runs);
         let quads = std::mem::take(&mut scene.quads);
         (quads, started.elapsed().as_secs_f32() * 1000.0)
+    }
+
+    pub fn select(&mut self, from: (f32, f32), to: (f32, f32)) {
+        let reach = self.metrics.cell_h;
+        let start = crate::ui::spot(&self.runs, &self.text, from, Some(reach), 1);
+        let end = crate::ui::spot(&self.runs, &self.text, to, Some(f32::MAX), 1);
+        self.state.selection = start.zip(end).map(|((anchor, _), (focus, _))| Selected { anchor, focus });
     }
 
     pub fn capture(&mut self, quads: &[Quad], bg: [f32; 4], images: &mut Images) -> Vec<u8> {

@@ -114,7 +114,7 @@ pub struct Text {
     sans: String,
     layouts_cx: LayoutContext<u8>,
     scale: ScaleContext,
-    layouts: HashMap<u64, (Layout<u8>, u64)>,
+    layouts: HashMap<u64, (Layout<u8>, String, u64)>,
     glyphs: HashMap<GlyphKey, Option<Slot>>,
     shapes: HashMap<u64, Option<Slot>>,
     shelf: Shelf,
@@ -123,6 +123,7 @@ pub struct Text {
 }
 
 pub struct Drawn {
+    pub key: u64,
     pub width: f32,
     pub height: f32,
     pub underlines: Vec<([f32; 4], Range<usize>)>,
@@ -184,7 +185,7 @@ impl Text {
         self.frame += 1;
         if self.layouts.len() > 8000 {
             let frame = self.frame;
-            self.layouts.retain(|_, (_, used)| frame - *used < 120);
+            self.layouts.retain(|_, (_, _, used)| frame - *used < 120);
         }
     }
 
@@ -195,7 +196,7 @@ impl Text {
         self.shelf = Shelf { x: 0, y: 0, row: 0 };
     }
 
-    fn layout(&mut self, spans: &[(&str, SpanStyle)], size: f32, line: f32, wrap: Option<f32>) -> &Layout<u8> {
+    fn key_of(spans: &[(&str, SpanStyle)], size: f32, line: f32, wrap: Option<f32>) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         for (t, s) in spans {
             t.hash(&mut h);
@@ -204,7 +205,15 @@ impl Text {
         size.to_bits().hash(&mut h);
         line.to_bits().hash(&mut h);
         wrap.map(|w| w.floor() as u32).hash(&mut h);
-        let key = h.finish();
+        h.finish()
+    }
+
+    fn layout(&mut self, spans: &[(&str, SpanStyle)], size: f32, line: f32, wrap: Option<f32>) -> &Layout<u8> {
+        let key = Self::key_of(spans, size, line, wrap);
+        self.layout_at(key, spans, size, line, wrap)
+    }
+
+    fn layout_at(&mut self, key: u64, spans: &[(&str, SpanStyle)], size: f32, line: f32, wrap: Option<f32>) -> &Layout<u8> {
         let frame = self.frame;
         let fonts = &mut self.fonts;
         let cx = &mut self.layouts_cx;
@@ -238,10 +247,35 @@ impl Text {
             let mut layout = b.build(&text);
             layout.break_all_lines(wrap);
             layout.align(Alignment::Start, AlignmentOptions::default());
-            (layout, frame)
+            (layout, text, frame)
         });
-        entry.1 = frame;
+        entry.2 = frame;
         &entry.0
+    }
+
+    pub fn source(&self, key: u64) -> Option<&str> {
+        self.layouts.get(&key).map(|e| e.1.as_str())
+    }
+
+    pub fn rects_in(&self, key: u64, range: Range<usize>) -> Vec<[f32; 4]> {
+        let Some((layout, _, _)) = self.layouts.get(&key) else { return Vec::new() };
+        let a = parley::Cursor::from_byte_index(layout, range.start, parley::Affinity::Downstream);
+        let b = parley::Cursor::from_byte_index(layout, range.end, parley::Affinity::Upstream);
+        parley::Selection::new(a, b)
+            .geometry(layout)
+            .into_iter()
+            .map(|(bb, _)| [bb.x0 as f32, bb.y0 as f32, (bb.x1 - bb.x0) as f32, (bb.y1 - bb.y0) as f32])
+            .collect()
+    }
+
+    pub fn pick(&self, key: u64, x: f32, y: f32, clicks: u32) -> Option<Range<usize>> {
+        let (layout, _, _) = self.layouts.get(&key)?;
+        let sel = match clicks {
+            0 | 1 => parley::Selection::from_point(layout, x, y),
+            2 => parley::Selection::word_from_point(layout, x, y),
+            _ => parley::Selection::line_from_point(layout, x, y),
+        };
+        Some(sel.text_range())
     }
 
     pub fn measure(&mut self, text: &str, style: TextStyle, line: f32) -> f32 {
@@ -312,7 +346,8 @@ impl Text {
         let mut runs: Vec<Run> = Vec::new();
         let mut underlines = Vec::new();
         let mut rules: Vec<([f32; 4], [f32; 4])> = Vec::new();
-        let layout = self.layout(spans, size, line, wrap);
+        let key = Self::key_of(spans, size, line, wrap);
+        let layout = self.layout_at(key, spans, size, line, wrap);
         let (width, height) = (layout.width(), layout.height());
         let cut = p.limit.filter(|l| width > *l).map(|l| l - ellipsis);
         let mut truncated = false;
@@ -414,6 +449,7 @@ impl Text {
             );
         }
         Drawn {
+            key,
             width: if truncated { end + ellipsis } else { width },
             height,
             underlines,
