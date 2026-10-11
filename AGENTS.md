@@ -53,7 +53,7 @@ The most common defect is a change that works on the path you tried and is missi
 - **Apps.** Desktop (macOS, Linux), wide and narrow layouts, the headless `serve` engine and the command line. Android is paused (spec §1.3); don't extend it.
 - **Engine roles.** Hub and satellite, online and offline, a satellite reconnecting after days away.
 - **Entry points.** An action belongs in the registry, so it shows in the bar, the help page and the palette, and works by mouse. Bulk versions work on the selection. Add a CLI command when scripts need it.
-- **Contracts.** `Request`, `Event` and `Command` in the engine crate are the wire format. Change them and every app follows.
+- **Contracts.** `Request`, `Event` and `Command` in the engine crate are the wire format. Change them and every app follows; an incompatible change bumps `engine::PROTOCOL`.
 - **Reverse states.** A way in needs a way out and a way to see it: bookmark and unbookmark, pin and unpin, recommend and remove. Every user-visible change is undoable.
 - **Connection routes.** Localhost, same network, Tailscale; http and https.
 - **Docs.** Check whether the change makes the spec, the README or `docs/` wrong.

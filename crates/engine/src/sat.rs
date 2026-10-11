@@ -68,13 +68,20 @@ pub fn client() -> reqwest::Client {
         .expect("sync client")
 }
 
-async fn alive(client: &reqwest::Client, base: &str) -> bool {
-    client
-        .get(format!("{base}/v1/health"))
-        .timeout(Duration::from_secs(2))
-        .send()
-        .await
-        .is_ok_and(|r| r.status().is_success())
+enum Health {
+    Up,
+    Down,
+    Other(u64),
+}
+
+async fn alive(client: &reqwest::Client, base: &str) -> Health {
+    let Ok(r) = client.get(format!("{base}/v1/health")).timeout(Duration::from_secs(2)).send().await else { return Health::Down };
+    if !r.status().is_success() {
+        return Health::Down;
+    }
+    let body = r.bytes().await.unwrap_or_default();
+    let protocol = serde_json::from_slice::<serde_json::Value>(&body).ok().and_then(|v| v.get("protocol").and_then(|p| p.as_u64())).unwrap_or(0);
+    if protocol == crate::PROTOCOL as u64 { Health::Up } else { Health::Other(protocol) }
 }
 
 async fn post_sync(client: &reqwest::Client, base: &str, token: &str, req: &SyncRequest) -> Result<Pulled, String> {
@@ -140,13 +147,16 @@ pub async fn run(link: HubLink, engine: UnboundedSender<crate::Internal>, mut ch
         let base = link.addresses[addr % link.addresses.len()].clone();
         let req = SyncRequest { since: pulled, changes: outbox, wait: true };
         changed.mark_unchanged();
-        let result = if !alive(&client, &base).await {
-            Some(Err("not answering".to_string()))
-        } else {
-            tokio::select! {
+        let result = match alive(&client, &base).await {
+            Health::Down => Some(Err("not answering".to_string())),
+            Health::Other(p) => {
+                let _ = engine.send(crate::Internal::HubVersion(base.clone(), p));
+                Some(Err(format!("speaks protocol {p}, this device {}", crate::PROTOCOL)))
+            }
+            Health::Up => tokio::select! {
                 r = post_sync(&client, &base, &link.token, &req) => Some(r),
                 _ = changed.changed(), if req.changes.is_empty() => None,
-            }
+            },
         };
         let Some(result) = result else { continue };
         match result {

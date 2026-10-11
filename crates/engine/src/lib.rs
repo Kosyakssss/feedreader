@@ -31,6 +31,8 @@ const MEDIA_BUDGET: i64 = 1_000_000_000;
 
 const FUNNEL_PORT: u16 = 10000;
 
+pub const PROTOCOL: u32 = 1;
+
 pub fn sync_port() -> u16 {
     std::env::var("FEEDREADER_SYNC_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8790)
 }
@@ -91,6 +93,9 @@ pub fn log_dir() -> PathBuf {
 }
 
 pub fn attach(dir: PathBuf, emit: std::sync::Arc<dyn Fn(Event) + Send + Sync>, background: bool) -> Result<Handle, String> {
+    if serve::running(&dir) && serve::protocol(&dir) != Some(PROTOCOL) {
+        serve::stop(&dir);
+    }
     if let Some(h) = serve::connect(&dir, emit.clone()) {
         return Ok(h);
     }
@@ -211,6 +216,7 @@ pub(crate) enum Internal {
     Pulled(i64, hub::Pulled),
     Content(hub::Content),
     HubOnline(bool, String),
+    HubVersion(String, u64),
     Paired(Result<sat::HubLink, String>),
     Pairing(Client, String),
     Funnel(bool, Result<Option<String>, String>),
@@ -248,6 +254,7 @@ struct Engine {
     changed: tokio::sync::watch::Sender<i64>,
     hub: Option<sat::HubLink>,
     hub_online: bool,
+    hub_mismatch: bool,
     hub_address: String,
     hub_task: Option<tokio::task::JoinHandle<()>>,
     listener: Option<tokio::task::JoinHandle<()>>,
@@ -329,6 +336,7 @@ impl Engine {
             batching: false,
             hub,
             hub_online: false,
+            hub_mismatch: false,
             hub_address: String::new(),
             hub_task: None,
             listener: None,
@@ -409,6 +417,9 @@ impl Engine {
         }
         if self.hub.is_none() && self.store.get("log_seeded").is_none() {
             self.seed_log();
+        }
+        if self.hub.is_none() && self.store.get("folders_reseeded").is_none() {
+            self.reseed_folders();
         }
         match self.hub.clone() {
             Some(link) => self.start_satellite(link),
@@ -571,6 +582,19 @@ impl Engine {
             self.changed.send_replace(seq);
         }
         self.store.put("log_seeded", "1");
+        self.store.put("folders_reseeded", "1");
+    }
+
+    fn reseed_folders(&mut self) {
+        let folders = self.store.folders();
+        for f in &folders {
+            self.local(Command::RenameFolder(f.id.clone(), f.name.clone()));
+        }
+        for feed in self.store.membership_feeds() {
+            let pairs = folders.iter().filter(|f| f.feeds.contains(&feed)).map(|f| (f.id.clone(), f.name.clone())).collect();
+            self.local(Command::Membership(feed, pairs));
+        }
+        self.store.put("folders_reseeded", "1");
     }
 
     fn tick(&mut self) -> i64 {
@@ -720,7 +744,7 @@ impl Engine {
                 }
             }
             Command::Recommend(id, note) => {
-                if fresh(&self.store, format!("rec:{id}")) {
+                if self.store.claim(&format!("rec:{id}"), at, dev, &format!("+{note}")) {
                     if self.store.recommend(id, note, t) {
                         self.publish();
                     }
@@ -728,13 +752,20 @@ impl Engine {
                 }
             }
             Command::Unrecommend(id) => {
-                if fresh(&self.store, format!("rec:{id}")) {
+                if self.store.claim(&format!("rec:{id}"), at, dev, "-") {
                     self.store.unrecommend(id, t);
                     self.publish();
                     self.emit(Event::Recommendations(self.store.recommendations()));
                 }
             }
             Command::SaveLink(url) => {
+                let id = store::entry_id(SAVED, url);
+                if fresh(&self.store, format!("bookmark:{id}")) {
+                    self.store.set_bookmarked(std::slice::from_ref(&id), true, t);
+                }
+                if fresh(&self.store, format!("read:{id}")) {
+                    self.store.set_read(std::slice::from_ref(&id), true, t);
+                }
                 if self.fetches() || change.device == self.device {
                     self.fetch_page(Job::Save(url.clone()), url.clone());
                 }
@@ -792,6 +823,22 @@ impl Engine {
         }
         if let Some((_, v)) = self.store.register(&format!("mode:{feed}")) {
             self.store.set_feed_mode(feed, Mode::parse(&v));
+        }
+    }
+
+    fn pending_recommendations(&mut self, arrived: &[Entry]) {
+        let mut changed = false;
+        for e in arrived {
+            if let Some((at, v)) = self.store.register(&format!("rec:{}", e.id))
+                && let Some(note) = v.strip_prefix('+')
+                && !self.store.recommendations().iter().any(|r| r.entry == e.id)
+            {
+                changed |= self.store.recommend(&e.id, note, at / 1000);
+            }
+        }
+        if changed {
+            self.publish();
+            self.emit(Event::Recommendations(self.store.recommendations()));
         }
     }
 
@@ -1001,6 +1048,7 @@ impl Engine {
                 self.emit(Event::EntriesAdded(ins.refilled));
             }
             self.want_media(ins.images, false);
+            self.pending_recommendations(&ins.added);
             ins.added
         })
     }
@@ -1161,11 +1209,22 @@ impl Engine {
                 if !c.feeds.is_empty() {
                     self.feeds_changed();
                 }
+                self.pending_recommendations(&added);
                 if !added.is_empty() {
                     self.emit(Event::EntriesAdded(added));
                 }
             }
+            Internal::HubVersion(address, protocol) => {
+                if !self.hub_mismatch {
+                    self.hub_mismatch = true;
+                    let advice = if protocol < PROTOCOL as u64 { "Update Feedreader on the hub" } else { "Update Feedreader on this device" };
+                    self.emit(Event::Message(format!("The hub at {address} runs a different version of Feedreader, so syncing is paused. {advice}.")));
+                }
+            }
             Internal::HubOnline(online, address) => {
+                if online {
+                    self.hub_mismatch = false;
+                }
                 if online != self.hub_online || (online && self.hub_address != address) {
                     self.hub_online = online;
                     self.hub_address = address;

@@ -20,6 +20,30 @@ pub fn running(dir: &Path) -> bool {
     UnixStream::connect(socket_path(dir)).is_ok()
 }
 
+fn info_path(dir: &Path) -> PathBuf {
+    dir.join("engine.json")
+}
+
+pub fn protocol(dir: &Path) -> Option<u32> {
+    let bytes = std::fs::read(info_path(dir)).ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    v.get("protocol")?.as_u64().map(|p| p as u32)
+}
+
+pub fn stop(dir: &Path) {
+    let Ok(mut stream) = UnixStream::connect(socket_path(dir)) else { return };
+    if stream.write_all(b"\"Shutdown\"\n").is_err() {
+        return;
+    }
+    drop(stream);
+    for _ in 0..100 {
+        if !running(dir) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+}
+
 type Line = Arc<(Audience, String)>;
 
 pub fn serve(dir: PathBuf) -> Result<(), String> {
@@ -39,6 +63,8 @@ pub fn serve(dir: PathBuf) -> Result<(), String> {
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path).map_err(|e| e.to_string())?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+        let info = serde_json::json!({ "protocol": crate::PROTOCOL, "version": env!("CARGO_PKG_VERSION"), "pid": std::process::id() });
+        std::fs::write(info_path(&dir), info.to_string()).map_err(|e| e.to_string())?;
         eprintln!("feedreader engine listening on {}", path.display());
         tokio::select! {
             r = accept(listener, events, Arc::new(handle)) => r,

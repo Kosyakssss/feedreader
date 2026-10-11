@@ -780,6 +780,13 @@ impl Store {
         pick_folder_id(name, |id| self.register(&format!("folder:{id}")).map(|(_, v)| v.strip_prefix('+').unwrap_or_default().to_string()))
     }
 
+    pub fn membership_feeds(&self) -> Vec<String> {
+        self.db
+            .prepare("select substr(key, 9) from clock where key like 'folders:%' union select feed_id from folder_feeds")
+            .and_then(|mut st| st.query_map([], |r| r.get(0)).map(|rows| rows.filter_map(Result::ok).collect()))
+            .unwrap_or_default()
+    }
+
     pub fn rebuild_folders(&mut self) {
         let tx = self.db.savepoint().unwrap();
         let named: Vec<(String, String)> = tx
@@ -924,9 +931,7 @@ impl Store {
             params![id, title, html],
         ));
         self.set_clean_body(&id, html, now);
-        self.set_bookmarked(std::slice::from_ref(&id), true, now);
-        self.set_read(std::slice::from_ref(&id), true, now);
-        Entry {
+        self.entry(&id).map(|x| x.0).unwrap_or(Entry {
             id,
             feed_id: SAVED.into(),
             url: url.into(),
@@ -936,7 +941,7 @@ impl Store {
             read: true,
             bookmarked: true,
             attachments: Vec::new(),
-        }
+        })
     }
 
     pub fn import_legacy(&mut self, path: &Path) -> Result<(usize, usize), String> {

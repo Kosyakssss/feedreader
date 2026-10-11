@@ -212,7 +212,7 @@ crates/feedreader  the binary: desktop app, headless `serve`, command line
 - `Request`, `Event`, `Command` and `Change` are serde types in the engine crate; that is the contract.
 - App to engine: JSON lines over the engine's Unix socket (or an in-process channel).
 - Satellite to hub: HTTP with bearer tokens. `/v1/sync` pushes a device's changes and long-polls everyone else's since a cursor; `/v1/content` pages fetched entries; `/v1/media` serves cached images; `/v1/pair` exchanges a code for a token. Details and the reasons are in `docs/internals/sync.md`.
-- Version handshake (Open): mismatches should show "Update the engine" or "Update the app".
+- Version handshake: `engine::PROTOCOL` numbers the contract. The engine writes it to `engine.json` and `/v1/health` reports it. An app that finds a running engine speaking another protocol stops it and starts its own; a satellite whose hub speaks another protocol stops syncing and says which side to update.
 
 ### 5.4 Connectivity and pairing
 - The desktop app on the engine's own machine is trusted through the data directory. Every other device pairs once with a one-time link or QR code (Settings, or `feedreader pair`), over the same network or Tailscale. Pairing becomes a long-lived token per device; the hub can forget a device.
@@ -429,7 +429,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 15. **Open.** The ticker board.
 
 ### 10.8 Engine and platform
-16. **Open.** Sync: the version handshake, households, rate limiting on the public listener, the engine-wide TOML file.
+16. **Open.** Sync: households, rate limiting on the public listener, the engine-wide TOML file.
 17. **Partial.** Engine errors: a failed write in the store is recorded, the whole message rolls back, and the failure is logged and shown, followed by a fresh snapshot so no app shows a change that didn't stick; the migration refuses to run if it can't back up; `serve` exits with an error if the engine thread dies, so launchd restarts it. Open: statement preparation still panics on a malformed query (a programming error, 36 places).
 18. **Partial.** Media: images and pruning done; attachments are data shown in every reading mode; unread entries up to 30 days old are prepared in the background (§5.6). Open: attachments cached for offline (limits are Open, §9), favicons, attachments in the public I recommend feed.
 19. **Partial.** Discovery. Open: JSON-LD, h-feed, sitemaps.

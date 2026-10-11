@@ -146,7 +146,7 @@ async fn media(State(hub): State<Hub>, headers: HeaderMap, Query(q): Query<Media
 }
 
 async fn health() -> Response {
-    Json(serde_json::json!({ "app": "feedreader", "version": env!("CARGO_PKG_VERSION"), "pid": std::process::id() })).into_response()
+    Json(serde_json::json!({ "app": "feedreader", "version": env!("CARGO_PKG_VERSION"), "protocol": crate::PROTOCOL, "pid": std::process::id() })).into_response()
 }
 
 fn allowed(host: &str, names: &[String]) -> bool {
