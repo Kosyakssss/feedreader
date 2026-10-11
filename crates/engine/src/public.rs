@@ -1,8 +1,13 @@
-use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
 
 use axum::Router;
-use axum::extract::{Path, State};
-use axum::http::{HeaderName, StatusCode, header};
+use axum::body::Bytes;
+use axum::extract::{ConnectInfo, Path, Request, State};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
+use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use chrono::{DateTime, Utc};
@@ -13,8 +18,19 @@ use crate::store::PublicItem;
 #[derive(Default)]
 pub struct Published {
     pub token: String,
-    pub atom: String,
-    pub html: String,
+    pub atom: Bytes,
+    pub html: Bytes,
+    pub tag: String,
+}
+
+impl Published {
+    pub fn set(&mut self, token: String, atom: String, html: String) {
+        let digest = <sha2::Sha256 as sha2::Digest>::digest(atom.as_bytes());
+        self.tag = digest[..8].iter().map(|b| format!("{b:02x}")).collect();
+        self.atom = atom.into();
+        self.html = html.into();
+        self.token = token;
+    }
 }
 
 pub type Shared = Arc<RwLock<Published>>;
@@ -105,30 +121,81 @@ pub fn page(base: &str, items: &[PublicItem]) -> String {
     s
 }
 
-fn reply(kind: &'static str, body: String) -> Response {
-    let headers = [
-        (header::CONTENT_TYPE, kind),
-        (HeaderName::from_static("x-robots-tag"), "noindex"),
-        (header::CACHE_CONTROL, "no-cache"),
-    ];
-    (headers, body).into_response()
+#[derive(Clone, Copy)]
+enum Doc {
+    Page,
+    Feed,
 }
 
-fn current(shared: &Shared, token: &str, pick: fn(&Published) -> (&'static str, String)) -> Response {
+fn current(shared: &Shared, token: &str, doc: Doc, headers: &HeaderMap) -> Response {
     let p = shared.read().unwrap_or_else(|e| e.into_inner());
     if token != p.token {
         return (StatusCode::NOT_FOUND, "Not found").into_response();
     }
-    let (kind, body) = pick(&p);
-    reply(kind, body)
+    let (kind, body, tag) = match doc {
+        Doc::Page => ("text/html; charset=utf-8", &p.html, format!("\"h{}\"", p.tag)),
+        Doc::Feed => ("application/atom+xml; charset=utf-8", &p.atom, format!("\"a{}\"", p.tag)),
+    };
+    let seen = headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()).is_some_and(|v| v.split(',').any(|t| t.trim() == tag));
+    let tag = HeaderValue::from_str(&tag).unwrap_or(HeaderValue::from_static("\"\""));
+    let common = [(header::ETAG, tag), (HeaderName::from_static("x-robots-tag"), HeaderValue::from_static("noindex")), (header::CACHE_CONTROL, HeaderValue::from_static("no-cache"))];
+    if seen {
+        return (StatusCode::NOT_MODIFIED, common).into_response();
+    }
+    (common, [(header::CONTENT_TYPE, kind)], body.clone()).into_response()
 }
 
-async fn serve_page(State(shared): State<Shared>, Path(token): Path<String>) -> Response {
-    current(&shared, &token, |p| ("text/html; charset=utf-8", p.html.clone()))
+async fn serve_page(State(shared): State<Shared>, Path(token): Path<String>, headers: HeaderMap) -> Response {
+    current(&shared, &token, Doc::Page, &headers)
 }
 
-async fn serve_feed(State(shared): State<Shared>, Path(token): Path<String>) -> Response {
-    current(&shared, &token, |p| ("application/atom+xml; charset=utf-8", p.atom.clone()))
+async fn serve_feed(State(shared): State<Shared>, Path(token): Path<String>, headers: HeaderMap) -> Response {
+    current(&shared, &token, Doc::Feed, &headers)
+}
+
+const BURST: f64 = 20.0;
+const PER_SECOND: f64 = 1.0;
+const CLIENTS: usize = 4096;
+
+#[derive(Clone, Copy)]
+struct Bucket {
+    tokens: f64,
+    at: Instant,
+}
+
+fn take(bucket: Option<Bucket>, now: Instant) -> Result<Bucket, u64> {
+    let tokens = bucket.map_or(BURST, |b| (b.tokens + now.duration_since(b.at).as_secs_f64() * PER_SECOND).min(BURST));
+    if tokens >= 1.0 { Ok(Bucket { tokens: tokens - 1.0, at: now }) } else { Err(((1.0 - tokens) / PER_SECOND).ceil() as u64) }
+}
+
+type Limits = Arc<Mutex<HashMap<IpAddr, Bucket>>>;
+
+fn client(peer: SocketAddr, headers: &HeaderMap) -> IpAddr {
+    let forwarded = || headers.get("x-forwarded-for")?.to_str().ok()?.rsplit(',').next()?.trim().parse().ok();
+    if peer.ip().is_loopback() { forwarded().unwrap_or(peer.ip()) } else { peer.ip() }
+}
+
+async fn limit(State(limits): State<Limits>, ConnectInfo(peer): ConnectInfo<SocketAddr>, request: Request, next: Next) -> Response {
+    let who = client(peer, request.headers());
+    let now = Instant::now();
+    let verdict = {
+        let mut map = limits.lock().unwrap_or_else(|e| e.into_inner());
+        if map.len() >= CLIENTS {
+            map.retain(|_, b| take(Some(*b), now).is_ok_and(|b| b.tokens + 1.0 < BURST));
+        }
+        if map.len() >= CLIENTS {
+            map.clear();
+        }
+        let verdict = take(map.get(&who).copied(), now);
+        if let Ok(b) = verdict {
+            map.insert(who, b);
+        }
+        verdict
+    };
+    match verdict {
+        Ok(_) => next.run(request).await,
+        Err(wait) => (StatusCode::TOO_MANY_REQUESTS, [(header::RETRY_AFTER, wait.to_string())], "Too many requests").into_response(),
+    }
 }
 
 pub async fn serve(listener: std::net::TcpListener, shared: Shared) -> std::io::Result<()> {
@@ -138,6 +205,7 @@ pub async fn serve(listener: std::net::TcpListener, shared: Shared) -> std::io::
         .route("/{token}", get(serve_page))
         .route("/{token}/", get(serve_page))
         .route("/{token}/feed.xml", get(serve_feed))
-        .with_state(shared);
-    axum::serve(listener, app).await
+        .with_state(shared)
+        .layer(from_fn_with_state(Limits::default(), limit));
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await
 }

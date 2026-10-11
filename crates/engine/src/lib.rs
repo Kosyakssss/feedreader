@@ -376,10 +376,8 @@ impl Engine {
         let token = self.store.token();
         let base = self.public_url.clone().unwrap_or_else(|| format!("http://127.0.0.1:{}/{token}/", public_port()));
         let items = self.store.public_items();
-        let mut p = self.published.write().unwrap();
-        p.atom = public::atom(&token, &base, &items);
-        p.html = public::page(&base, &items);
-        p.token = token;
+        let (atom, html) = (public::atom(&token, &base, &items), public::page(&base, &items));
+        self.published.write().unwrap_or_else(|e| e.into_inner()).set(token, atom, html);
     }
 
     fn within(&mut self, work: impl FnOnce(&mut Self)) {

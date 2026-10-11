@@ -219,7 +219,7 @@ crates/feedreader  the binary: desktop app, headless `serve`, command line
 - Routes: the pairing link carries the hub's Tailscale name, LAN address and loopback; Tailscale reaches the hub's port directly. The public listener goes through Tailscale Funnel on its own port so nothing else the machine serves becomes public. Funnel is the only public route in 1.0.
 - Satellites remember every address the hub was reached on and try them in turn. Routes recover after sleep without re-pairing.
 - Private API: exact Host allowlist; bodies capped; tokens never in URLs.
-- Public listener: a separate port on the hub; serves only the I recommend feed, its page and snapshot images. No auth, read-only, its own path prefix.
+- Public listener: a separate port on the hub; serves only the I recommend feed, its page and snapshot images. No auth, read-only, its own path prefix. Answers conditional requests with 304, and limits each client to a burst of 20 requests refilled at one a second.
 
 ### 5.5 Refresh
 - The hub refreshes every 5 minutes (configurable) whenever it runs, apps attached or not, and pushes results. Manual refresh fetches every feed now.
@@ -429,7 +429,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 15. **Open.** The ticker board.
 
 ### 10.8 Engine and platform
-16. **Open.** Sync: households, rate limiting on the public listener, the engine-wide TOML file.
+16. **Open.** Sync: households, the engine-wide TOML file.
 17. **Partial.** Engine errors: a failed write in the store is recorded, the whole message rolls back, and the failure is logged and shown, followed by a fresh snapshot so no app shows a change that didn't stick; the migration refuses to run if it can't back up; `serve` exits with an error if the engine thread dies, so launchd restarts it. Open: statement preparation still panics on a malformed query (a programming error, 36 places).
 18. **Partial.** Media: images and pruning done; attachments are data shown in every reading mode; unread entries up to 30 days old are prepared in the background (§5.6). Open: attachments cached for offline (limits are Open, §9), favicons, attachments in the public I recommend feed.
 19. **Partial.** Discovery. Open: JSON-LD, h-feed, sitemaps.

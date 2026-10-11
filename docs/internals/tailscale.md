@@ -13,3 +13,7 @@ The background engine runs under launchd or systemd, whose `PATH` is minimal (`/
 ## Funnel never prompts
 
 Every command runs with a 20-second limit and is killed after it. `tailscale funnel` can otherwise wait forever for an interactive confirmation, so it runs with `--yes`. Before publishing, the engine checks that `tailscale status --json` reports the backend running and a `funnel` capability for this machine, so a tailnet without Funnel in its access controls gets a clear message instead of a hang.
+
+## Who is asking
+
+Funnel delivers every public request from loopback, so the public listener can't tell readers apart by their address. Tailscale's proxy appends the real client to `X-Forwarded-For`, and the listener trusts the last entry of that header only when the connection comes from loopback; anything earlier in the header is the client's own claim. Each client gets its own rate limit, and anyone connecting directly over the network is limited by their address.
