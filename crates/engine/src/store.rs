@@ -138,6 +138,10 @@ impl Failure {
         }
     }
 
+    fn keep<T>(&self, r: rusqlite::Result<T>) -> Option<T> {
+        r.map_err(|e| self.0.borrow_mut().get_or_insert(e.to_string()).clone()).ok()
+    }
+
     fn take(&self) -> Option<String> {
         self.0.borrow_mut().take()
     }
@@ -377,12 +381,13 @@ impl Store {
         }
     }
 
+    fn rows<T>(&self, sql: &str, params: impl rusqlite::Params, map: impl FnMut(&rusqlite::Row) -> rusqlite::Result<T>) -> Vec<T> {
+        let found = self.db.prepare_cached(sql).and_then(|mut st| st.query_map(params, map).map(|rows| rows.filter_map(Result::ok).collect()));
+        self.failure.keep(found).unwrap_or_default()
+    }
+
     pub fn feeds(&self) -> Vec<Feed> {
-        let mut st = self
-            .db
-            .prepare_cached(&format!("select {FEED_COLS} from feeds where removed_at is null order by position, id"))
-            .unwrap();
-        st.query_map([], feed_row).unwrap().filter_map(Result::ok).collect()
+        self.rows(&format!("select {FEED_COLS} from feeds where removed_at is null order by position, id"), [], feed_row)
     }
 
     pub fn feed(&self, id: &str) -> Option<Feed> {
@@ -401,14 +406,7 @@ impl Store {
 
     #[profiling::function]
     pub fn entries(&self) -> Vec<Entry> {
-        let mut st = self
-            .db
-            .prepare_cached(&format!(
-                "select {ENTRY_COLS} from entries e left join states s on s.entry_id = e.id
-                 order by e.published desc, e.id"
-            ))
-            .unwrap();
-        st.query_map([], entry_row).unwrap().filter_map(Result::ok).collect()
+        self.rows(&format!("select {ENTRY_COLS} from entries e left join states s on s.entry_id = e.id order by e.published desc, e.id"), [], entry_row)
     }
 
     pub fn entry(&self, id: &str) -> Option<(Entry, Option<String>, Option<String>)> {
@@ -458,21 +456,21 @@ impl Store {
 
     #[profiling::function]
     pub fn insert_entries(&mut self, feed: &str, items: Vec<NewEntry>, now: i64) -> Inserted {
-        let tx = self.db.savepoint().unwrap();
         let mut added = Vec::new();
         let mut updated = Vec::new();
         let mut images = Vec::new();
         let mut refilled = Vec::new();
         {
-            let mut insert = tx
-                .prepare_cached(
+            let Some(mut insert) = self.failure.keep(self.db.prepare_cached(
                     "insert or ignore into entries (id, feed_id, source_id, url, title, author, published, first_seen, summary, content, attachments, cseq)
                      values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, (select coalesce(max(cseq), 0) + 1 from entries))",
-                )
-                .unwrap();
-            let mut current = tx.prepare_cached("select title, published from entries where id = ?1").unwrap();
-            let mut fill = tx
-                .prepare_cached(
+            )) else {
+                return Inserted::default();
+            };
+            let Some(mut current) = self.failure.keep(self.db.prepare_cached("select title, published from entries where id = ?1")) else {
+                return Inserted::default();
+            };
+            let Some(mut fill) = self.failure.keep(self.db.prepare_cached(
                     "update entries set content = coalesce(content, ?2), summary = coalesce(summary, ?3), author = coalesce(author, ?4),
                      title = case when title in ('', 'Untitled', 'untitled') then ?5 else title end,
                      published = case when published < 631152000000 then ?6 else published end,
@@ -481,8 +479,9 @@ impl Store {
                        then (select coalesce(max(cseq), 0) + 1 from entries) else cseq end,
                      attachments = coalesce(attachments, ?7)
                      where id = ?1",
-                )
-                .unwrap();
+            )) else {
+                return Inserted::default();
+            };
             for (i, item) in items.into_iter().enumerate() {
                 let source = if item.source_id.is_empty() {
                     if item.url.is_empty() { item.title.clone() } else { item.url.clone() }
@@ -510,12 +509,12 @@ impl Store {
                     ])
                     .unwrap_or(0);
                 if n == 1 {
-                    self.failure.note(tx.execute(
+                    self.failure.note(self.db.execute(
                         "insert into entries_fts (rowid, title, body) select rowid, ?2, ?3 from entries where id = ?1",
                         params![id, item.title, item.content.as_deref().or(item.summary.as_deref()).unwrap_or("")],
                     ));
                     for img in &item.images {
-                        self.failure.note(tx.execute("insert or ignore into entry_media (entry_id, url) values (?1, ?2)", params![id, img]));
+                        self.failure.note(self.db.execute("insert or ignore into entry_media (entry_id, url) values (?1, ?2)", params![id, img]));
                         images.push(img.clone());
                     }
                     added.push(Entry {
@@ -531,13 +530,13 @@ impl Store {
                     });
                 } else {
                     let before: Option<(String, i64)> = current.query_row([&id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
-                    let had: bool = tx.query_row("select attachments is not null from entries where id = ?1", [&id], |r| r.get(0)).unwrap_or(true);
+                    let had: bool = self.db.query_row("select attachments is not null from entries where id = ?1", [&id], |r| r.get(0)).unwrap_or(true);
                     self.failure.note(fill.execute(params![id, item.content, item.summary, item.author, item.title, published, attachments_json(&item.attachments)]));
                     if !had && !item.attachments.is_empty() {
                         refilled.push(id.clone());
                     }
                     if let Some(body) = item.content.as_deref().or(item.summary.as_deref()) {
-                        self.failure.note(tx.execute(
+                        self.failure.note(self.db.execute(
                             "update entries_fts set body = ?2 where rowid = (select rowid from entries where id = ?1) and body = ''",
                             params![id, body],
                         ));
@@ -551,41 +550,32 @@ impl Store {
                 }
             }
         }
-        self.failure.note(tx.commit());
         let refilled = refilled.iter().filter_map(|id| self.entry(id).map(|x| x.0)).collect();
         Inserted { added, updated, images, refilled }
     }
 
     pub fn set_read(&mut self, ids: &[EntryId], read: bool, now: i64) {
-        let tx = self.db.savepoint().unwrap();
-        {
-            let mut st = tx
-                .prepare_cached(
-                    "insert into states (entry_id, read, read_at) values (?1, ?2, ?3)
-                     on conflict(entry_id) do update set read = excluded.read, read_at = excluded.read_at",
-                )
-                .unwrap();
-            for id in ids {
-                self.failure.note(st.execute(params![id, read as i64, now]));
-            }
+        let Some(mut st) = self.failure.keep(self.db.prepare_cached(
+            "insert into states (entry_id, read, read_at) values (?1, ?2, ?3)
+             on conflict(entry_id) do update set read = excluded.read, read_at = excluded.read_at",
+        )) else {
+            return;
+        };
+        for id in ids {
+            self.failure.note(st.execute(params![id, read as i64, now]));
         }
-        self.failure.note(tx.commit());
     }
 
     pub fn set_bookmarked(&mut self, ids: &[EntryId], on: bool, now: i64) {
-        let tx = self.db.savepoint().unwrap();
-        {
-            let mut st = tx
-                .prepare_cached(
-                    "insert into states (entry_id, bookmarked, bookmarked_at) values (?1, ?2, ?3)
-                     on conflict(entry_id) do update set bookmarked = excluded.bookmarked, bookmarked_at = excluded.bookmarked_at",
-                )
-                .unwrap();
-            for id in ids {
-                self.failure.note(st.execute(params![id, on as i64, now]));
-            }
+        let Some(mut st) = self.failure.keep(self.db.prepare_cached(
+            "insert into states (entry_id, bookmarked, bookmarked_at) values (?1, ?2, ?3)
+             on conflict(entry_id) do update set bookmarked = excluded.bookmarked, bookmarked_at = excluded.bookmarked_at",
+        )) else {
+            return;
+        };
+        for id in ids {
+            self.failure.note(st.execute(params![id, on as i64, now]));
         }
-        self.failure.note(tx.commit());
     }
 
     pub fn remove_feed(&self, id: &str, now: i64) {
@@ -597,13 +587,11 @@ impl Store {
     }
 
     pub fn removed_entries(&self, feed: &str) -> Vec<Entry> {
-        let mut st = self
-            .db
-            .prepare_cached(&format!(
-                "select {ENTRY_COLS} from entries e left join states s on s.entry_id = e.id where e.feed_id = ?1 order by e.published desc"
-            ))
-            .unwrap();
-        st.query_map([feed], entry_row).unwrap().filter_map(Result::ok).collect()
+        self.rows(
+            &format!("select {ENTRY_COLS} from entries e left join states s on s.entry_id = e.id where e.feed_id = ?1 order by e.published desc"),
+            [feed],
+            entry_row,
+        )
     }
 
     pub fn rename_feed(&self, id: &str, label: Option<&str>) {
@@ -622,21 +610,14 @@ impl Store {
     #[profiling::function]
     pub fn prune(&mut self, settings: &Settings, now: i64) -> Vec<EntryId> {
         let cutoff = settings.max_age_days.map(|d| now - d as i64 * 86_400_000).unwrap_or(i64::MIN);
-        let mut st = self
-            .db
-            .prepare_cached(
-                "select e.id, e.published, coalesce(s.bookmarked, 0) or exists (select 1 from recommendations r where r.entry_id = e.id and r.removed_at is null)
-                 from entries e
-                 join feeds f on f.id = e.feed_id and f.removed_at is null and f.id <> 'saved'
-                 left join states s on s.entry_id = e.id order by e.published desc, e.id",
-            )
-            .unwrap();
-        let rows: Vec<(String, i64, bool)> = st
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? == 1)))
-            .unwrap()
-            .filter_map(Result::ok)
-            .collect();
-        drop(st);
+        let rows: Vec<(String, i64, bool)> = self.rows(
+            "select e.id, e.published, coalesce(s.bookmarked, 0) or exists (select 1 from recommendations r where r.entry_id = e.id and r.removed_at is null)
+             from entries e
+             join feeds f on f.id = e.feed_id and f.removed_at is null and f.id <> 'saved'
+             left join states s on s.entry_id = e.id order by e.published desc, e.id",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? == 1)),
+        );
         let mut kept = 0u32;
         let mut doomed = Vec::new();
         for (id, published, bookmarked) in rows {
@@ -649,16 +630,14 @@ impl Store {
                 doomed.push(id);
             }
         }
-        let tx = self.db.savepoint().unwrap();
         for id in &doomed {
-            self.failure.note(tx.execute("delete from entries_fts where rowid = (select rowid from entries where id = ?1)", [id]));
-            self.failure.note(tx.execute("delete from entries where id = ?1", [id]));
-            self.failure.note(tx.execute("delete from states where entry_id = ?1", [id]));
-            self.failure.note(tx.execute("delete from bodies where entry_id = ?1", [id]));
-            self.failure.note(tx.execute("delete from extract_failed where entry_id = ?1", [id]));
-            self.failure.note(tx.execute("delete from entry_media where entry_id = ?1", [id]));
+            self.failure.note(self.db.execute("delete from entries_fts where rowid = (select rowid from entries where id = ?1)", [id]));
+            self.failure.note(self.db.execute("delete from entries where id = ?1", [id]));
+            self.failure.note(self.db.execute("delete from states where entry_id = ?1", [id]));
+            self.failure.note(self.db.execute("delete from bodies where entry_id = ?1", [id]));
+            self.failure.note(self.db.execute("delete from extract_failed where entry_id = ?1", [id]));
+            self.failure.note(self.db.execute("delete from entry_media where entry_id = ?1", [id]));
         }
-        self.failure.note(tx.commit());
         doomed
     }
 
@@ -704,12 +683,7 @@ impl Store {
 
     pub fn settings(&self) -> Settings {
         let mut s = Settings::default();
-        let mut st = self.db.prepare("select key, value from settings").unwrap();
-        let rows: Vec<(String, String)> = st
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-            .unwrap()
-            .filter_map(Result::ok)
-            .collect();
+        let rows: Vec<(String, String)> = self.rows("select key, value from settings", [], |r| Ok((r.get(0)?, r.get(1)?)));
         for (k, v) in rows {
             match k.as_str() {
                 "max_entries" => s.max_entries = v.parse().unwrap_or(s.max_entries),
@@ -765,12 +739,10 @@ impl Store {
     }
 
     pub fn folders(&self) -> Vec<Folder> {
-        let mut st = self.db.prepare_cached("select id, name from folders order by position, name collate nocase").unwrap();
-        let list: Vec<(String, String)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().filter_map(Result::ok).collect();
-        let mut members = self.db.prepare_cached("select feed_id from folder_feeds where folder_id = ?1").unwrap();
+        let list: Vec<(String, String)> = self.rows("select id, name from folders order by position, name collate nocase", [], |r| Ok((r.get(0)?, r.get(1)?)));
         list.into_iter()
             .map(|(id, name)| {
-                let feeds = members.query_map([&id], |r| r.get(0)).unwrap().filter_map(Result::ok).collect();
+                let feeds = self.rows("select feed_id from folder_feeds where folder_id = ?1", [&id], |r| r.get(0));
                 Folder { id, name, feeds }
             })
             .collect()
@@ -797,29 +769,29 @@ impl Store {
     }
 
     pub fn rebuild_folders(&mut self) {
-        let tx = self.db.savepoint().unwrap();
-        let named: Vec<(String, String)> = tx
+        let named: Vec<(String, String)> = self
+            .db
             .prepare("select substr(key, 8), substr(value, 2) from clock where key like 'folder:%' and value like '+%' order by key")
             .and_then(|mut st| st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map(|rows| rows.filter_map(Result::ok).collect()))
             .unwrap_or_default();
-        let members: Vec<(String, String)> = tx
+        let members: Vec<(String, String)> = self
+            .db
             .prepare("select substr(key, 9), value from clock where key like 'folders:%' and value is not null")
             .and_then(|mut st| st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map(|rows| rows.filter_map(Result::ok).collect()))
             .unwrap_or_default();
-        self.failure.note(tx.execute("delete from folder_feeds", []));
-        self.failure.note(tx.execute("delete from folders", []));
+        self.failure.note(self.db.execute("delete from folder_feeds", []));
+        self.failure.note(self.db.execute("delete from folders", []));
         for (id, name) in &named {
-            self.failure.note(tx.execute("insert into folders (id, name) values (?1, ?2)", params![id, name]));
+            self.failure.note(self.db.execute("insert into folders (id, name) values (?1, ?2)", params![id, name]));
         }
         for (feed, ids) in members {
             for id in serde_json::from_str::<Vec<String>>(&ids).unwrap_or_default() {
-                self.failure.note(tx.execute(
+                self.failure.note(self.db.execute(
                     "insert or ignore into folder_feeds (folder_id, feed_id) select ?1, ?2 where exists (select 1 from folders where id = ?1)",
                     params![id, feed],
                 ));
             }
         }
-        self.failure.note(tx.commit());
     }
 
     pub fn set_feed_flag(&self, id: &str, column: &str, on: bool) {
@@ -832,17 +804,9 @@ impl Store {
     }
 
     pub fn rules(&self) -> Vec<Rule> {
-        let mut st = self.db.prepare_cached("select id, word, scope from rules order by rowid").unwrap();
-        st.query_map([], |r| {
-            Ok(Rule {
-                id: r.get(0)?,
-                word: r.get(1)?,
-                scope: scope_parse(&r.get::<_, String>(2)?),
-            })
+        self.rows("select id, word, scope from rules order by rowid", [], |r| {
+            Ok(Rule { id: r.get(0)?, word: r.get(1)?, scope: scope_parse(&r.get::<_, String>(2)?) })
         })
-        .unwrap()
-        .filter_map(Result::ok)
-        .collect()
     }
 
     pub fn add_rule(&self, rule: &Rule) {
@@ -857,14 +821,9 @@ impl Store {
     }
 
     pub fn recommendations(&self) -> Vec<Recommendation> {
-        let mut st = self
-            .db
-            .prepare_cached("select entry_id, note, at from recommendations where removed_at is null order by at desc")
-            .unwrap();
-        st.query_map([], |r| Ok(Recommendation { entry: r.get(0)?, note: r.get(1)?, at: r.get(2)? }))
-            .unwrap()
-            .filter_map(Result::ok)
-            .collect()
+        self.rows("select entry_id, note, at from recommendations where removed_at is null order by at desc", [], |r| {
+            Ok(Recommendation { entry: r.get(0)?, note: r.get(1)?, at: r.get(2)? })
+        })
     }
 
     pub fn recommend(&self, id: &str, note: &str, now: i64) -> bool {
@@ -886,30 +845,25 @@ impl Store {
     }
 
     pub fn public_items(&self) -> Vec<PublicItem> {
-        let mut st = self
-            .db
-            .prepare_cached(
-                "select entry_id, note, title, url, source, published, content, at, removed_at from recommendations
-                 where removed_at is null or removed_at > ?1 order by at desc limit 200",
-            )
-            .unwrap();
         let since = crate::now() - 60 * 86_400_000;
-        st.query_map([since], |r| {
-            Ok(PublicItem {
-                entry: r.get(0)?,
-                note: r.get(1)?,
-                title: r.get(2)?,
-                url: r.get(3)?,
-                source: r.get(4)?,
-                published: r.get(5)?,
-                content: r.get(6)?,
-                at: r.get(7)?,
-                removed_at: r.get(8)?,
-            })
-        })
-        .unwrap()
-        .filter_map(Result::ok)
-        .collect()
+        self.rows(
+            "select entry_id, note, title, url, source, published, content, at, removed_at from recommendations
+             where removed_at is null or removed_at > ?1 order by at desc limit 200",
+            [since],
+            |r| {
+                Ok(PublicItem {
+                    entry: r.get(0)?,
+                    note: r.get(1)?,
+                    title: r.get(2)?,
+                    url: r.get(3)?,
+                    source: r.get(4)?,
+                    published: r.get(5)?,
+                    content: r.get(6)?,
+                    at: r.get(7)?,
+                    removed_at: r.get(8)?,
+                })
+            },
+        )
     }
 
     #[profiling::function]
@@ -1115,9 +1069,8 @@ impl Store {
     }
 
     pub fn take_content(&mut self, feeds: &[WireFeed], entries: &[WireEntry]) -> Vec<Entry> {
-        let tx = self.db.savepoint().unwrap();
         for f in feeds {
-            self.failure.note(tx.execute(
+            self.failure.note(self.db.execute(
                 "insert into feeds (id, url, title, site_url, position, last_fetched, error)
                  values (?1, ?2, ?3, ?4, 0, ?5, ?6)
                  on conflict(id) do update set title = excluded.title, site_url = excluded.site_url,
@@ -1127,7 +1080,8 @@ impl Store {
         }
         let mut added = Vec::new();
         for e in entries {
-            let n = tx
+            let n = self
+                .db
                 .execute(
                     "insert into entries (id, feed_id, source_id, url, title, author, published, first_seen, summary, content, attachments, cseq)
                      values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, (select coalesce(max(cseq), 0) + 1 from entries))
@@ -1138,14 +1092,13 @@ impl Store {
                 )
                 .unwrap_or(0);
             if n > 0 {
-                self.failure.note(tx.execute("delete from entries_fts where rowid = (select rowid from entries where id = ?1)", [&e.id]));
-                self.failure.note(tx.execute(
+                self.failure.note(self.db.execute("delete from entries_fts where rowid = (select rowid from entries where id = ?1)", [&e.id]));
+                self.failure.note(self.db.execute(
                     "insert into entries_fts (rowid, title, body) select rowid, ?2, ?3 from entries where id = ?1",
                     params![e.id, e.title, e.content.as_deref().or(e.summary.as_deref()).unwrap_or("")],
                 ));
             }
         }
-        self.failure.note(tx.commit());
         for e in entries {
             if let Some((entry, _, _)) = self.entry(&e.id) {
                 added.push(entry);
@@ -1217,15 +1170,12 @@ impl Store {
     }
 
     pub fn outbox(&self, device: &str, after: i64, limit: usize) -> Vec<(i64, crate::types::Change)> {
-        let mut st = self
-            .db
-            .prepare_cached("select seq, id, device, at, command from changes where seq > ?1 and device = ?2 order by seq limit ?3")
-            .unwrap();
-        st.query_map(params![after, device, limit as i64], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, String>(4)?))
-        })
-        .unwrap()
-        .filter_map(Result::ok)
+        self.rows(
+            "select seq, id, device, at, command from changes where seq > ?1 and device = ?2 order by seq limit ?3",
+            params![after, device, limit as i64],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, String>(4)?)),
+        )
+        .into_iter()
         .filter_map(|(seq, id, device, at, cmd)| serde_json::from_str(&cmd).ok().map(|command| (seq, crate::types::Change { id, device, at, command })))
         .collect()
     }
@@ -1235,6 +1185,7 @@ fn hash(s: &str) -> String {
     Sha256::digest(s.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
 }
 
+#[derive(Default)]
 pub struct Inserted {
     pub added: Vec<Entry>,
     pub updated: Vec<(EntryId, String, i64)>,
@@ -1342,16 +1293,12 @@ impl Store {
     }
 
     pub fn changes_since(&self, seq: i64, skip_device: &str, limit: usize) -> Vec<(i64, crate::types::Change)> {
-        let mut st = self
-            .db
-            .prepare_cached("select seq, id, device, at, command from changes where seq > ?1 and device <> ?2 order by seq limit ?3")
-            .unwrap();
-        st.query_map(params![seq, skip_device, limit as i64], |r| {
-            let cmd: String = r.get(4)?;
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, cmd))
-        })
-        .unwrap()
-        .filter_map(Result::ok)
+        self.rows(
+            "select seq, id, device, at, command from changes where seq > ?1 and device <> ?2 order by seq limit ?3",
+            params![seq, skip_device, limit as i64],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, String>(4)?)),
+        )
+        .into_iter()
         .filter_map(|(seq, id, device, at, cmd)| {
             serde_json::from_str(&cmd).ok().map(|command| (seq, crate::types::Change { id, device, at, command }))
         })
@@ -1455,11 +1402,9 @@ impl Store {
     }
 
     pub fn link_media(&mut self, links: &[(EntryId, String)]) {
-        let tx = self.db.savepoint().unwrap();
         for (entry, url) in links {
-            self.failure.note(tx.execute("insert or ignore into entry_media (entry_id, url) values (?1, ?2)", params![entry, url]));
+            self.failure.note(self.db.execute("insert or ignore into entry_media (entry_id, url) values (?1, ?2)", params![entry, url]));
         }
-        self.failure.note(tx.commit());
     }
 
     #[profiling::function]

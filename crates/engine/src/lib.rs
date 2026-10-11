@@ -1016,7 +1016,7 @@ impl Engine {
                 .map(|(id, url, v)| {
                     let c = client.clone();
                     let host = Url::parse(&url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
-                    let gate = hosts.lock().unwrap().entry(host).or_insert_with(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2))).clone();
+                    let gate = hosts.lock().unwrap_or_else(|e| e.into_inner()).entry(host).or_insert_with(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2))).clone();
                     async move {
                         let _permit = gate.acquire_owned().await;
                         let (r, hint) = fetch_feed(&c, &url, v).await;
