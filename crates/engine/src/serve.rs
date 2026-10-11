@@ -42,7 +42,7 @@ pub fn serve(dir: PathBuf) -> Result<(), String> {
         eprintln!("feedreader engine listening on {}", path.display());
         tokio::select! {
             r = accept(listener, events, Arc::new(handle)) => r,
-            _ = stopped => Ok(()),
+            r = stopped => r.map_err(|_| "The engine stopped unexpectedly".to_string()),
         }
     })
 }

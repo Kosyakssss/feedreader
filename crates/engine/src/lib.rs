@@ -372,7 +372,15 @@ impl Engine {
     fn within(&mut self, work: impl FnOnce(&mut Self)) {
         self.store.begin();
         work(self);
-        self.store.commit();
+        self.saved();
+    }
+
+    fn saved(&mut self) {
+        if let Err(e) = self.store.commit() {
+            eprintln!("couldn't save a change: {e}");
+            self.emit(Event::Message(format!("Couldn't save a change, so it was undone: {e}")));
+            self.snapshot(Audience::All);
+        }
     }
 
     async fn run(mut self, mut rx: UnboundedReceiver<(Client, Request)>) {
@@ -417,7 +425,7 @@ impl Engine {
         }
         self.snapshot(Audience::All);
         self.sync_status();
-        self.store.commit();
+        self.saved();
         loop {
             tokio::select! {
                 r = rx.recv() => match r {

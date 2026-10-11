@@ -248,7 +248,7 @@ crates/feedreader  the binary: desktop app, headless `serve`, command line
 ### 5.9 Engine internals
 - **Actor:** one task owns the database and serializes every write; fetches, extraction and discovery run concurrently and report back to it as internal messages. Each message is one SQLite transaction (`docs/internals/storage.md`).
 - **Storage:** SQLite (bundled), WAL, foreign keys on, busy timeout 5 s, `synchronous = FULL`, STRICT tables, FTS5 for search. Schema versioned with `user_version`; migrations back up the file first.
-- **Errors:** a failed write is reported, never silently dropped (today many store calls discard their result).
+- **Errors:** a failed write is reported, never silently dropped: the message that made it rolls back as a whole.
 - **Secrets:** a secrets folder in the engine's data directory, owner-only (folder 0700, files 0600, atomic writes). Never synced, exported or logged.
 - **Supervision:** launchd `KeepAlive` and systemd `Restart=on-failure`; the desktop app restarts the engine if it dies.
 - **Diagnostics:** one log file per day, 7-day retention, in `~/Library/Logs/feedreader` or `$XDG_STATE_HOME/feedreader`. Never log secrets or tokens. A health endpoint reports pid, uptime, data dir, port and refresh state.
@@ -430,7 +430,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 
 ### 10.8 Engine and platform
 16. **Open.** Sync: the version handshake, households, rate limiting on the public listener, the engine-wide TOML file.
-17. **Open.** Engine errors reported instead of discarded (§5.9).
+17. **Partial.** Engine errors: a failed write in the store is recorded, the whole message rolls back, and the failure is logged and shown, followed by a fresh snapshot so no app shows a change that didn't stick; the migration refuses to run if it can't back up; `serve` exits with an error if the engine thread dies, so launchd restarts it. Open: statement preparation still panics on a malformed query (a programming error, 36 places).
 18. **Partial.** Media: images and pruning done; attachments are data shown in every reading mode; unread entries up to 30 days old are prepared in the background (§5.6). Open: attachments cached for offline (limits are Open, §9), favicons, attachments in the public I recommend feed.
 19. **Partial.** Discovery. Open: JSON-LD, h-feed, sitemaps.
 20. **Partial.** Tabs. Open: reordering by drag, one web view per tab.

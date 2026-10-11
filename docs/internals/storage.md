@@ -13,3 +13,5 @@ Consequences:
 ## One transaction per engine message
 
 The engine actor wraps each request, internal message and refresh tick in one SQLite transaction (`Engine::within`), so a command's state change, its clocks and its change-log row commit together, and a message costs one fsync. With `synchronous = FULL` every autocommitted statement is its own fsync: marking 3000 entries read used to stall the actor for about half a second on a Mac SSD. Store methods that need their own atomic unit use `savepoint()`, which nests inside the message's transaction; `transaction()` would fail there.
+
+A store write that fails doesn't stop the message; it is recorded (`Store::failure`), and `Engine::saved` rolls the whole transaction back instead of committing, logs it, tells the user, and sends every client a fresh snapshot, because events describing the change may already have gone out.
