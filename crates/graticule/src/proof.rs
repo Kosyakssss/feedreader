@@ -123,7 +123,7 @@ impl Proofs {
                 if (w, h) != (now.width, now.height) {
                     Status::Changed((now.width * now.height) as usize)
                 } else {
-                    let changed = proof.chunks_exact(4).zip(now.pixels.chunks_exact(4)).filter(|(a, b)| a != b).count();
+                    let changed = proof.as_chunks::<4>().0.iter().zip(now.pixels.as_chunks::<4>().0).filter(|(a, b)| a != b).count();
                     if changed == 0 {
                         Status::Same
                     } else {
@@ -155,7 +155,7 @@ impl Proofs {
 
 fn diff(proof: &[u8], now: &Render) -> Render {
     let mut pixels = Vec::with_capacity(now.pixels.len());
-    for (a, b) in proof.chunks_exact(4).zip(now.pixels.chunks_exact(4)) {
+    for (a, b) in proof.as_chunks::<4>().0.iter().zip(now.pixels.as_chunks::<4>().0) {
         if a == b {
             pixels.extend(b[..3].iter().map(|c| 255 - (255 - c) / 4));
             pixels.push(255);

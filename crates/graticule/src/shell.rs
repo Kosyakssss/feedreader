@@ -360,11 +360,11 @@ impl<A: App> Running<A> {
 
     fn update_access(&mut self) {
         let Some(access) = self.access.as_mut() else { return };
-        let hits: Vec<Rect> = self.hits.iter().map(|(r, _)| *r).collect();
-        let value = self.app.field().map(|f| f.text.clone());
-        let focused = self.focused.map(|f| f.rect).zip(value);
-        let (text, runs, fields, title) = (&self.text, &self.runs, &self.fields, self.title);
+        let (app, text, runs, fields, title, focused, hits) = (&mut self.app, &self.text, &self.runs, &self.fields, self.title, self.focused, &self.hits);
         access.update_if_active(|| {
+            let hits: Vec<Rect> = hits.iter().map(|(r, _)| *r).collect();
+            let value = app.field().map(|f| f.text.clone());
+            let focused = focused.map(|f| f.rect).zip(value);
             let frame = crate::access::Frame { title, hits: &hits, runs, fields, focused: focused.as_ref().map(|(r, v)| (*r, v.as_str())) };
             crate::access::tree(frame, text)
         });
