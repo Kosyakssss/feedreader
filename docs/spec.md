@@ -285,7 +285,7 @@ Graticule, model DK-01: a graticule is the ruled measuring grid on an instrument
 
 A framework for native apps that feel like the best interfaces of the past, at today's speed: easy and fast by default, close to no-code in code. An app describes its model, its commands and its pages built from components; Graticule does the rest.
 
-The win condition: Graticule builds a TextEdit-class editor and a trading terminal for professionals, each in a small amount of app code, both beautiful and both within budget. Two demo apps hold it to that (§6.9).
+The win condition: Graticule builds a TextEdit-class editor and a trading terminal for professionals, each in a small amount of app code, both beautiful and both within budget.
 
 ### 6.2 What the app writes and what Graticule owns
 - The app supplies: a **model** (plain state, enums), **commands** (id, label, keys, availability, effect), **pages** composed of components and sized in cells, and **effects** as data (send a request, open a URL, copy text).
@@ -328,9 +328,13 @@ The win condition: Graticule builds a TextEdit-class editor and a trading termin
 - **Linux:** Open, verified later on a real machine (a friend's Linux box). Known so far: under Wayland there is no system context menu or global menu bar, so Graticule's own drawn menu is the native one; GNOME needs a drawn title bar; file dialogs through the XDG portal; input methods, clipboard, appearance, fontconfig and AT-SPI are available. To verify: the web pane and extraction under Wayland (wry may need a GTK container there).
 - Qt is not used: it is native only on KDE, heavy to ship, and its Rust bindings need `unsafe`.
 
-### 6.9 The gallery and the demo apps
-- The **gallery** renders every component in every state (hover, focus, selected, disabled, empty, overflowing, narrow) in every style and both appearances, offscreen, as sheets. It is how components are designed one by one with the owner, and how regressions are seen.
-- Two **demo apps** keep Graticule honest at both extremes: a TextEdit-class editor (multi-line editing, find and replace, large documents) and a ticker board (dense live tables, charts, data-driven frames, the tick glow). They may ask for any primitive.
+### 6.9 Tools
+Graticule ships with its own tools, numbered like it.
+- **SP-01 Specimen**: the gallery as an app of its own, built on Graticule. It shows every component in every state (hover, focus, pressed, selected, disabled, empty, overflowing, narrow) in every style, theme, appearance and size, live and clickable, with the grid overlaid on request and paint times beside each sheet. A sheet can be approved; its image is kept as a proof, and later renders that differ from the proof are shown as changes. On its own it shows Graticule's components; an app opens it on its own screens (`feedreader --specimen`). It also renders every sheet offscreen into a page, for review without a window. It is how components are designed one by one with the owner, and how regressions are seen.
+- **EN-01 Engraver**: the picture compiler (§6.5). It turns SVG files into compact shape data at build time and refuses a picture without a label.
+- **SC-01 Scope**: the inspector inside every Graticule app. Turned on, it overlays the grid, the outline and id of each component, what is under the pointer, and the time of each stage of the last frames (input to command, update, paint, GPU) against the budget.
+- **BD-01 Bindery** (**Proposed** name): the packager. It builds a Graticule app into a native app (on macOS a signed `.app` with its command linked), installs it, and installs and updates apps from source, checking for new versions in the background and showing them without notifications. macOS first, Linux and Windows later.
+- **Later.** Two demo apps keep Graticule honest at both extremes: a TextEdit-class editor (multi-line editing, find and replace, large documents) and a ticker board (dense live tables, charts, data-driven frames, the tick glow).
 
 ### 6.10 Performance
 Performance is design.
@@ -396,6 +400,8 @@ Hard-won behavior to keep:
 ## 10. Build plan
 Status: done, partial, open, paused or later. We are restarting the interface on a new foundation; the engine underneath is largely built and keeps its status. Each step is committed when it works.
 
+Order: Graticule and its tools first (§10.2, §10.3, §10.5, §10.6), with a first draft of the design language for the owner to adjust in Specimen; Feedreader is rebuilt on top of them second (§10.4).
+
 ### 10.1 Already built
 - **Done.** Engine core: safe fetcher, parsing, storage, adaptive refresh, discovery (link tags, common paths, YouTube, Medium, Substack, GitHub, Reddit), OPML with folders, retention, import from the old app, rules, the I recommend feed and public listener with Funnel publishing, saved links, full-text index, Defuddle extraction with the headless fallback, undo as engine commands, the background engine and `service install`, sync between hub and satellites with pairing.
 - **Done.** The current interface: list, selection and bulk actions, reader in three modes, tabs with peek and kept, palette, Feeds and Settings pages, help, themes and live `theme.toml`, images and the media cache, the macOS menu bar. It keeps working until each screen is replaced (§10.4).
@@ -403,7 +409,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 ### 10.2 Foundations
 1. **Open.** Design language: grid rules, style tokens, typed values and the component inventory (each component mapped as kept, grounded or skipped), drawn up with the owner from the references (§7).
 2. **Partial.** IBM Plex Mono (variable) and IBM Plex Sans are the fonts, and the cell is whole device pixels with the font size derived from it. Open: character graphics (box drawing, blocks, braille) drawn by Graticule.
-3. **Partial.** The gallery: `feedreader --gallery DIR` renders Feedreader's screens in every line style, both appearances and two window sizes, with paint times, into `DIR/index.html` (default `target/gallery`). Open: sheets of Graticule's components in every state, as the components land.
+3. **Partial.** The gallery, to become Specimen (§6.9): `feedreader --gallery DIR` renders Feedreader's screens in every line style, both appearances and two window sizes, with paint times, into `DIR/index.html` (default `target/gallery`). Open: sheets of Graticule's components in every state, as the components land.
 4. **Partial.** Laws (§5.10), in `crates/engine/src/laws.rs`, `crates/feedreader/src/laws.rs` and `crates/graticule/src/laws.rs`: sync convergence in any order, applying twice, newest wins; outbound safety for IPv4 and IPv4 inside IPv6; identity; parsing never crashes and gives stable ids; retention; counts against what each view lists; undo and redo; nothing moving under the reader when entries arrive or are marked read; any sequence of field edits undoing back to the start and redoing to the end. Writing them fixed lost feed settings and folder renames across devices, undo of pin, hide and rules, and scroll anchoring during refresh. Open: the parsing corpus of real-world feeds, frame budgets.
 
 ### 10.3 Graticule
@@ -423,22 +429,21 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 ### 10.6 Instant
 13. **Partial.** Launch is measured stage by stage (`docs/internals/graticule.md`) and fonts load in parallel with AppKit's startup. Open: stage budgets measured per interaction; memoized components; integer ids; the main thread freed of shaping and waiting; pre-shaping.
 
-### 10.7 Demo apps
-14. **Open.** The editor.
-15. **Open.** The ticker board.
+### 10.7 Tools
+14. **Open.** SP-01 Specimen, EN-01 Engraver, SC-01 Scope and BD-01 Bindery (§6.9). Bindery replaces `scripts/bundle.sh`. The editor and ticker board demo apps are Later.
 
 ### 10.8 Engine and platform
-16. **Open.** Sync: households; refresh limits and the background engine switch in `engine.toml`.
-17. **Done.** Engine errors: a failed write in the store is recorded, the whole message rolls back, and the failure is logged and shown, followed by a fresh snapshot so no app shows a change that didn't stick; the migration refuses to run if it can't back up; `serve` exits with an error if the engine thread dies, so launchd restarts it. Queries that fail to prepare or run are recorded the same way, so nothing in the store panics.
-18. **Partial.** Media: images and pruning done; attachments are data shown in every reading mode, read from RSS enclosures, Media RSS and Atom enclosure links, and published as enclosures in the I recommend feed; unread entries up to 30 days old are prepared in the background (§5.6). Open: attachments cached for offline (limits are Open, §9), favicons.
-19. **Partial.** Discovery. Open: h-feed; JSON-LD for saved links.
-20. **Partial.** Tabs. Open: reordering by drag, one web view per tab.
-21. **Open.** Export bundle, move to another machine. Posts kept as the same entries when a feed changes their ids or links (§5.2). Muted entries in search (§2.9).
-22. **Partial.** Profiling with Tracy. Open: GPU zones.
-23. **Partial.** Packaging: `scripts/bundle.sh` builds and installs Feedreader.app and links the command. Open: the icon, a `feedreader://` handler for pairing and "Open in Feedreader" links, release builds, the install script, the Homebrew tap, updates.
-24. **Open.** Linux, tested on a real machine (§6.8).
-25. **Paused.** Android, started fresh once the desktop is settled.
-26. **Later.** LLM recipes; ad and tracker blocking in Original.
+15. **Open.** Sync: households; refresh limits and the background engine switch in `engine.toml`.
+16. **Done.** Engine errors: a failed write in the store is recorded, the whole message rolls back, and the failure is logged and shown, followed by a fresh snapshot so no app shows a change that didn't stick; the migration refuses to run if it can't back up; `serve` exits with an error if the engine thread dies, so launchd restarts it. Queries that fail to prepare or run are recorded the same way, so nothing in the store panics.
+17. **Partial.** Media: images and pruning done; attachments are data shown in every reading mode, read from RSS enclosures, Media RSS and Atom enclosure links, and published as enclosures in the I recommend feed; unread entries up to 30 days old are prepared in the background (§5.6). Open: attachments cached for offline (limits are Open, §9), favicons.
+18. **Partial.** Discovery. Open: h-feed; JSON-LD for saved links.
+19. **Partial.** Tabs. Open: reordering by drag, one web view per tab.
+20. **Open.** Export bundle, move to another machine. Posts kept as the same entries when a feed changes their ids or links (§5.2). Muted entries in search (§2.9).
+21. **Partial.** Profiling with Tracy. Open: GPU zones.
+22. **Partial.** Packaging: `scripts/bundle.sh` builds and installs Feedreader.app and links the command, until Bindery replaces it (§6.9). Open: the icon, a `feedreader://` handler for pairing and "Open in Feedreader" links, release builds, the install script, the Homebrew tap, updates.
+23. **Open.** Linux, tested on a real machine (§6.8).
+24. **Paused.** Android, started fresh once the desktop is settled.
+25. **Later.** LLM recipes; ad and tracker blocking in Original.
 
 ## 11. References
 - [niri talk on testing and profiling](https://www.youtube.com/watch?v=Kmz8ODolnDg) · [Tracy](https://github.com/wolfpld/tracy) · [profiling crate](https://github.com/aclysma/profiling) · [proptest](https://github.com/proptest-rs/proptest)
