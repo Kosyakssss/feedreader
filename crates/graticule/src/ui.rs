@@ -54,6 +54,7 @@ pub struct Palette {
     pub link: [f32; 4],
     pub danger: [f32; 4],
     pub warn: [f32; 4],
+    pub ok: [f32; 4],
 }
 
 pub const LIGHT: Palette = Palette {
@@ -69,6 +70,7 @@ pub const LIGHT: Palette = Palette {
     link: [0.13, 0.32, 0.66, 1.0],
     danger: [0.72, 0.16, 0.13, 1.0],
     warn: [0.62, 0.42, 0.05, 1.0],
+    ok: [0.13, 0.47, 0.25, 1.0],
 };
 
 pub const DARK: Palette = Palette {
@@ -84,6 +86,7 @@ pub const DARK: Palette = Palette {
     link: [0.541, 0.706, 0.973, 1.0],
     danger: [0.949, 0.545, 0.51, 1.0],
     warn: [0.878, 0.706, 0.353, 1.0],
+    ok: [0.42, 0.78, 0.52, 1.0],
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -265,6 +268,12 @@ impl<'a, H> Scene<'a, H> {
 
     pub fn cells(&mut self, a: Area, s: &str, style: TextStyle, color: [f32; 4]) -> f32 {
         let r = self.rect(a);
+        self.cells_at((r.x, r.y), a.cols, s, style, color)
+    }
+
+    fn cells_at(&mut self, at: (f32, f32), cols: i32, s: &str, style: TextStyle, color: [f32; 4]) -> f32 {
+        let r = Rect::new(at.0, at.1, 0.0, 0.0);
+        let a = Area::new(0, 0, cols, 1);
         let (cw, ch) = (self.m.cell_w, self.m.cell_h);
         let mut run: Option<(usize, i32)> = None;
         let mut col = 0;
@@ -276,7 +285,7 @@ impl<'a, H> Scene<'a, H> {
             }
             if chars::drawn(c) {
                 if let Some((from, at)) = run.take() {
-                    self.text(&s[from..i], style, r.x + at as f32 * cw, r.y, None, color);
+                    self.plain_text(&s[from..i], style, r.x + at as f32 * cw, r.y, None, color);
                 }
                 self.cell(c, Rect::new(r.x + col as f32 * cw, r.y, cw, ch), color);
             } else if run.is_none() {
@@ -285,7 +294,7 @@ impl<'a, H> Scene<'a, H> {
             col += 1;
         }
         if let Some((from, at)) = run {
-            self.text(&s[from..end], style, r.x + at as f32 * cw, r.y, None, color);
+            self.plain_text(&s[from..end], style, r.x + at as f32 * cw, r.y, None, color);
         }
         col as f32 * cw
     }
@@ -401,7 +410,7 @@ impl<'a, H> Scene<'a, H> {
         self.tracks.push((track, id));
     }
 
-    fn clip(&self) -> [f32; 4] {
+    pub fn clip(&self) -> [f32; 4] {
         *self.clips.last().unwrap()
     }
 
@@ -464,6 +473,15 @@ impl<'a, H> Scene<'a, H> {
     }
 
     pub fn text(&mut self, s: &str, style: TextStyle, x: f32, y: f32, limit: Option<f32>, color: [f32; 4]) -> Drawn {
+        if style.face == Face::Mono && s.chars().any(chars::drawn) {
+            let cols = limit.map_or(i32::MAX, |l| (l / self.m.cell_w).floor() as i32);
+            let width = self.cells_at((x, y), cols, s, style, color);
+            return Drawn { key: 0, width, height: self.m.cell_h, underlines: Vec::new() };
+        }
+        self.plain_text(s, style, x, y, limit, color)
+    }
+
+    fn plain_text(&mut self, s: &str, style: TextStyle, x: f32, y: f32, limit: Option<f32>, color: [f32; 4]) -> Drawn {
         let span = SpanStyle { weight: style.weight as u16, ..SpanStyle::plain(style.face) };
         let line = self.m.cell_h;
         self.spans(Block { spans: &[(s, span)], size: style.size, line, wrap: None }, (x, y), limit, &[color])
@@ -659,7 +677,7 @@ impl<'a, H> Scene<'a, H> {
         self.text.measure(s, style, line)
     }
 
-    fn hair(&self) -> f32 {
+    pub fn hair(&self) -> f32 {
         self.m.scale.round().max(1.0)
     }
 

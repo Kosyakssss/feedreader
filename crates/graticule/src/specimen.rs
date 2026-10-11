@@ -18,13 +18,20 @@ pub struct Sheet {
     pub group: &'static str,
     pub name: &'static str,
     pub paint: Paint,
+    pub fills: bool,
 }
 
 impl Sheet {
     pub fn new(group: &'static str, name: &'static str, paint: impl Fn(&mut Scene<Hit>, Area, &Sandbox) + 'static) -> Self {
-        Self { group, name, paint: Box::new(paint) }
+        Self { group, name, paint: Box::new(paint), fills: false }
+    }
+
+    pub fn filling(self) -> Self {
+        Self { fills: true, ..self }
     }
 }
+
+const TALL: i32 = 400;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Hit {
@@ -118,6 +125,7 @@ pub struct Bench {
     pub proofs: Proofs,
     diff: bool,
     variant: Option<Variant>,
+    heights: HashMap<usize, f32>,
     approvals: u32,
     note: Option<String>,
     paint_ms: f32,
@@ -140,6 +148,7 @@ impl Bench {
             proofs: Proofs::new(title),
             diff: false,
             variant: None,
+            heights: HashMap::new(),
             approvals: 0,
             note: None,
             paint_ms: 0.0,
@@ -372,12 +381,31 @@ impl Bench {
                     let r = s.rect(inner);
                     s.image(crate::ui::Rect::new(r.x, r.y, width as f32 * k, height as f32 * k), id);
                 }
-            } else {
+            } else if sheet.fills {
                 let started = Instant::now();
                 s.selectable = true;
                 (sheet.paint)(s, inner, &self.sandbox);
                 s.selectable = false;
                 self.paint_ms = started.elapsed().as_secs_f32() * 1000.0;
+            } else {
+                let height = self.heights.get(&self.current).copied().unwrap_or(0.0);
+                let id = Id::new("specimen.sheet").child(self.current as u64);
+                let mut measured = 0.0;
+                let mut ms = 0.0;
+                let sandbox = &self.sandbox;
+                s.scroll(id, inner, height, |s, body| {
+                    let top = s.rect(body).y;
+                    let from = s.quads.len();
+                    let started = Instant::now();
+                    s.selectable = true;
+                    (sheet.paint)(s, Area { rows: TALL, ..body }, sandbox);
+                    s.selectable = false;
+                    ms = started.elapsed().as_secs_f32() * 1000.0;
+                    let bottom = s.quads[from..].iter().map(|q| q.pos[1] + q.size[1]).fold(top, f32::max);
+                    measured = (bottom - top + s.m.cell_h).ceil();
+                });
+                self.paint_ms = ms;
+                self.heights.insert(self.current, measured);
             }
             s.pop_clip();
             if self.grid {

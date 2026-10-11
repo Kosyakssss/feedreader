@@ -1,7 +1,7 @@
 use crate::ui::Rect;
 
 pub fn drawn(c: char) -> bool {
-    matches!(c as u32, 0x2500..=0x259F | 0x2800..=0x28FF)
+    matches!(c as u32, 0x2500..=0x259F | 0x2800..=0x28FF) || matches!(c, '\u{21E7}' | '\u{2325}' | '\u{2303}')
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -244,6 +244,16 @@ pub fn draw(c: char, r: Rect, pen: &mut Pen) -> Option<Shape> {
         '╱' => format!("M {w} 0 L 0 {h}"),
         '╲' => format!("M 0 0 L {w} {h}"),
         '╳' => format!("M {w} 0 L 0 {h} M 0 0 L {w} {h}"),
+        '\u{21E7}' => {
+            let (l, r, top, mid, bottom) = (w * 0.12, w * 0.88, h * 0.28, h * 0.52, h * 0.74);
+            let (sl, sr) = (w * 0.34, w * 0.66);
+            format!("M {cx} {top} L {r} {mid} L {sr} {mid} L {sr} {bottom} L {sl} {bottom} L {sl} {mid} L {l} {mid} Z")
+        }
+        '\u{2325}' => {
+            let (l, r, top, bottom) = (w * 0.1, w * 0.9, h * 0.34, h * 0.68);
+            format!("M {l} {top} L {} {top} L {} {bottom} L {r} {bottom} M {} {top} L {r} {top}", w * 0.36, w * 0.64, w * 0.62)
+        }
+        '\u{2303}' => format!("M {} {} L {cx} {} L {} {}", w * 0.18, h * 0.5, h * 0.3, w * 0.82, h * 0.5),
         _ => return None,
     };
     Some(Shape::Path(path, Some(t)))

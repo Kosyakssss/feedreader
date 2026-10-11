@@ -1,4 +1,6 @@
+use crate::commands::{Chord, Key};
 use crate::field::Field;
+use crate::kit::{Kind, Tone, Value};
 use crate::grid::Area;
 use crate::specimen::{Hit, Sandbox, Sheet};
 use crate::state::Id;
@@ -14,11 +16,17 @@ pub fn all() -> Vec<Sheet> {
         Sheet::new("Foundations", "Type", type_sheet),
         Sheet::new("Foundations", "Lines", lines),
         Sheet::new("Foundations", "Characters", characters),
+        Sheet::new("Foundations", "Values", values),
+        Sheet::new("Actions", "Button", buttons),
+        Sheet::new("Actions", "Keys and actions", actions),
+        Sheet::new("Actions", "Link", links),
         Sheet::new("Controls", "Checkbox", checkbox),
+        Sheet::new("Controls", "Radio, switch and cycle", choices),
+        Sheet::new("Controls", "Stepper and progress", steppers),
         Sheet::new("Controls", "Field", field),
         Sheet::new("Controls", "Text area", text_area),
-        Sheet::new("Scrolling", "List", list),
-        Sheet::new("Scrolling", "Scroll area", scroll_area),
+        Sheet::new("Scrolling", "List", list).filling(),
+        Sheet::new("Scrolling", "Scroll area", scroll_area).filling(),
     ]
 }
 
@@ -65,6 +73,7 @@ fn ink(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
         ("link", pal.link),
         ("danger", pal.danger),
         ("warn", pal.warn),
+        ("ok", pal.ok),
         ("cursor", pal.cursor),
         ("hover", pal.hover),
         ("selection", pal.selection),
@@ -242,4 +251,154 @@ fn text_area(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
     let r = s.rect(a.at(0, 0, a.cols.min(56), a.rows.min(12)));
     s.text_area(id, r, f, sb.is_focused(id), "write something");
     s.hit(r, Hit::Focus(id, Some(DRAFT)));
+}
+
+fn forced<R>(s: &mut Scene<Hit>, a: Area, hover: bool, press: bool, f: impl FnOnce(&mut Scene<Hit>) -> R) -> R {
+    let (pointer, pressed) = (s.pointer, s.pressed);
+    let r = s.rect(a.at(0, 0, 2, 1));
+    s.pointer = hover.then_some((r.x + r.w / 2.0, r.y + r.h / 2.0));
+    s.pressed = press;
+    let out = f(s);
+    (s.pointer, s.pressed) = (pointer, pressed);
+    out
+}
+
+const STATES: [(&str, bool, bool, bool); 4] = [("normal", false, false, true), ("hover", true, false, true), ("pressed", true, true, true), ("disabled", false, false, false)];
+
+fn state_rows(s: &mut Scene<Hit>, a: &mut Area, title: &str, mut draw: impl FnMut(&mut Scene<Hit>, Area, bool)) {
+    caption(s, a.take_top(1), title);
+    let row = a.take_top(2);
+    let mut col = 0;
+    for (name, hover, press, enabled) in STATES {
+        let cell = row.at(col, 0, 24, 2);
+        caption(s, cell.line(1), name);
+        forced(s, cell.line(0), hover, press, |s| draw(s, cell.line(0), enabled));
+        col += 26;
+    }
+    a.take_top(1);
+}
+
+fn values(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
+    caption(s, a.take_top(1), "Each kind of value has one look everywhere; a badge says what something is, never what to do.");
+    a.take_top(1);
+    let rows: [(&str, Value); 12] = [
+        ("text", Value::Text("Plain facts are plain text")),
+        ("count", Value::Count("1,284")),
+        ("date", Value::Date("2026-10-11")),
+        ("version", Value::Version("v0.1.0")),
+        ("state, ok", Value::State("prod", Tone::Ok)),
+        ("state, neutral", Value::State("hub", Tone::Neutral)),
+        ("state, warn", Value::State("stale", Tone::Warn)),
+        ("state, danger", Value::State("offline", Tone::Danger)),
+        ("product", Value::Product("DK-01")),
+        ("code", Value::Code("is:unread")),
+        ("mode", Value::Mode("rows")),
+        ("error", Value::Error("Couldn't reach the hub")),
+    ];
+    for (name, v) in rows {
+        let row = a.take_top(2);
+        caption(s, row.at(0, 0, 18, 1), name);
+        s.value(row.at(20, 0, row.cols - 20, 1), v);
+    }
+    let row = a.take_top(2);
+    caption(s, row.at(0, 0, 18, 1), "in a line");
+    let mut col = 20;
+    for v in [Value::Product("SP-01"), Value::State("prod", Tone::Ok), Value::Version("v0.1.0"), Value::Date("2026-10-11"), Value::Count("3 feeds")] {
+        col += s.value(row.at(col, 0, row.cols - col, 1), v) + 1;
+    }
+}
+
+fn buttons(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
+    caption(s, a.take_top(1), "What you can act on is boxed, with a hard shadow, so it reads as actionable without hovering.");
+    a.take_top(1);
+    let id = Id::new("sheet.buttons");
+    for (title, kind, label) in [("normal", Kind::Normal, "Refresh"), ("primary", Kind::Primary, "Subscribe"), ("danger", Kind::Danger, "Remove feed")] {
+        state_rows(s, &mut a, title, |s, at, enabled| {
+            s.button(at, label, kind, enabled.then_some(Hit::Bump(id)));
+        });
+    }
+}
+
+fn actions(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
+    caption(s, a.take_top(1), "Key labels name a key; an action is its keys and its label, clickable as a whole.");
+    a.take_top(1);
+    let row = a.take_top(2);
+    let mut col = 0;
+    for chord in [Chord::ch('j'), Chord::ch('/'), Chord::cmd('k'), Chord::cmd_shift('z'), Chord::key(Key::Escape), Chord::key(Key::Enter), Chord::key(Key::Up)] {
+        col += s.key_label(row.at(col, 0, row.cols - col, 1), &chord) + 2;
+    }
+    let id = Id::new("sheet.actions");
+    state_rows(s, &mut a, "an action", |s, at, enabled| {
+        s.action(at, &[Chord::ch('m')], "mark read", enabled.then_some(Hit::Bump(id)));
+    });
+    caption(s, a.take_top(1), "an action bar wraps instead of hiding anything");
+    let bar = a.take_top(3);
+    let items: [(&[Chord], &str); 8] = [
+        (&[Chord::ch('j'), Chord::ch('k')], "next, previous"),
+        (&[Chord::ch('o')], "open"),
+        (&[Chord::ch('m')], "mark read"),
+        (&[Chord::ch('s')], "bookmark"),
+        (&[Chord::ch('x')], "select"),
+        (&[Chord::ch('r')], "refresh"),
+        (&[Chord::ch('/')], "filter"),
+        (&[Chord::ch('?')], "help"),
+    ];
+    let (mut col, mut line) = (0, 0);
+    for (keys, label) in items {
+        let need = keys.iter().map(|k| k.label().chars().count() as i32 + 2).sum::<i32>() + label.len() as i32 + 3;
+        if col + need > bar.cols.min(64) {
+            col = 0;
+            line += 1;
+        }
+        col += s.action(bar.at(col, line, bar.cols - col, 1), keys, label, Some(Hit::Bump(id))) + 3;
+    }
+}
+
+fn links(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
+    caption(s, a.take_top(1), "Links go somewhere; they are underlined in the link ink.");
+    a.take_top(1);
+    let id = Id::new("sheet.links");
+    state_rows(s, &mut a, "a link", |s, at, _| {
+        s.link(at, "usgraphics.com", Hit::Bump(id));
+    });
+}
+
+fn choices(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
+    caption(s, a.take_top(1), "Click to change. A dropdown becomes a value that cycles in place.");
+    a.take_top(1);
+    let radio = Id::new("sheet.radio");
+    caption(s, a.take_top(1), "radio");
+    for (i, label) in ["Follows the system", "Light", "Dark"].into_iter().enumerate() {
+        let on = sb.pick(radio).unwrap_or(0) == i;
+        s.radio(a.take_top(1), label, on, Some(Hit::Pick(radio, i)));
+    }
+    a.take_top(1);
+    caption(s, a.take_top(1), "switch");
+    let sw = Id::new("sheet.switch");
+    s.switch(a.take_top(1), "Publish I recommend", sb.on(sw), Some(Hit::Toggle(sw)));
+    s.switch(a.take_top(1), "Disabled and off", false, None);
+    a.take_top(1);
+    caption(s, a.take_top(1), "cycle");
+    let cy = Id::new("sheet.cycle");
+    let options = ["light", "heavy", "double", "dotted", "ascii"];
+    let i = sb.pick(cy).unwrap_or(0);
+    s.cycle(a.take_top(1), "lines", options[i % options.len()], Some(Hit::Pick(cy, (i + 1) % options.len())));
+    s.cycle(a.take_top(1), "disabled", "fixed", None);
+}
+
+fn steppers(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
+    caption(s, a.take_top(1), "Steppers change a number by one; progress fills from the left.");
+    a.take_top(1);
+    let st = Id::new("sheet.stepper");
+    let n = sb.pick(st).unwrap_or(30);
+    let row = a.take_top(2);
+    caption(s, row.at(0, 0, 18, 1), "refresh every");
+    let used = s.stepper(row.at(20, 0, 20, 1), &format!("{n:>3} min"), (n > 5).then_some(Hit::Pick(st, n.saturating_sub(5))), (n < 240).then_some(Hit::Pick(st, n + 5)));
+    let _ = used;
+    a.take_top(1);
+    for f in [0.0, 0.13, 0.5, 0.87, 1.0] {
+        let row = a.take_top(2);
+        caption(s, row.at(0, 0, 18, 1), &format!("{:.0}%", f * 100.0));
+        s.progress(row.at(20, 0, 40, 1), f);
+    }
 }

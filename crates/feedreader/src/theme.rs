@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use graticule::ui::{DARK, LIGHT, Palette};
 
-const NAMES: &[&str] = &["bg", "ink", "muted", "faint", "rule", "cursor", "hover", "selection", "field", "link", "danger", "warn"];
+const NAMES: &[&str] = &["bg", "ink", "muted", "faint", "rule", "cursor", "hover", "selection", "field", "link", "danger", "warn", "ok"];
 
 fn slot<'a>(p: &'a mut Palette, name: &str) -> Option<&'a mut [f32; 4]> {
     Some(match name {
@@ -18,6 +18,7 @@ fn slot<'a>(p: &'a mut Palette, name: &str) -> Option<&'a mut [f32; 4]> {
         "link" => &mut p.link,
         "danger" => &mut p.danger,
         "warn" => &mut p.warn,
+        "ok" => &mut p.ok,
         _ => return None,
     })
 }
