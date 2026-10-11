@@ -378,6 +378,10 @@ impl View {
     pub fn filters_read(&self) -> bool {
         !matches!(self, View::Bookmarks | View::Recommended)
     }
+
+    pub fn default_filter(&self) -> &'static str {
+        if self.filters_read() { "is:unread " } else { "" }
+    }
 }
 
 impl Model {
@@ -408,7 +412,7 @@ impl Model {
                 row_h: 1.0,
                 ..Default::default()
             },
-            filter: Field::with("is:unread "),
+            filter: Field::with(View::Home.default_filter()),
             focus: Focus::Main,
             reader: None,
             tabs: Vec::new(),
@@ -707,7 +711,7 @@ impl Model {
     }
 
     pub fn show(&mut self, view: View) {
-        self.filter.set(if view.filters_read() { "is:unread " } else { "" });
+        self.filter.set(view.default_filter());
         self.view = view;
         self.go(Page::List);
         self.reset_list();
