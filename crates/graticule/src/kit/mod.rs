@@ -7,7 +7,8 @@ mod nav;
 mod values;
 
 pub use actions::Kind;
-pub use data::{Align, Column, Node};
+pub use data::{Align, Column, Node, Table};
+pub use commands::Found;
 pub use nav::Place;
 pub use values::{Tone, Value};
 

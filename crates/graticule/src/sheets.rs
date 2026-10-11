@@ -1,7 +1,7 @@
 use crate::commands::{Chord, Key};
 use crate::field::Field;
 use crate::commands::{Command, Registry};
-use crate::kit::{Align, Column, Kind, Node, Place, Tone, Value};
+use crate::kit::{Align, Column, Found, Kind, Node, Place, Table, Tone, Value};
 use crate::grid::Area;
 use crate::specimen::{Hit, Sandbox, Sheet};
 use crate::state::Id;
@@ -27,6 +27,7 @@ pub fn all() -> Vec<Sheet> {
         Sheet::new("Data", "Table", table).filling(),
         Sheet::new("Data", "Tree", tree),
         Sheet::new("Commands", "Action bar and help", commands),
+        Sheet::new("Commands", "Palette", palette).filling(),
         Sheet::new("Controls", "Checkbox", checkbox),
         Sheet::new("Controls", "Radio, switch and cycle", choices),
         Sheet::new("Controls", "Stepper and progress", steppers),
@@ -501,7 +502,7 @@ fn table(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
         Column { title: "State", cols: 10, align: Align::Left },
     ];
     let rows = 60;
-    s.table(id, a, &columns, rows, sb.pick(id), |i, j| {
+    s.table(Table { id, columns: &columns, count: rows, cursor: sb.pick(id) }, a, |i, j| {
         let f = FEEDS[i % FEEDS.len()];
         match j {
             0 => Value::Text(f.0),
@@ -581,4 +582,49 @@ fn commands(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
     s.action_bar(a.take_top(3).at(0, 0, 36, 2), demo(), &(), |_| Hit::Bump(id));
     caption(s, a.take_top(1), "help: every command, unavailable ones faint");
     s.help(a.take_top(12), demo(), &(), |_| Hit::Bump(id));
+}
+
+const ITEMS: [(&str, &str); 14] = [
+    ("How the grid works", "entry"),
+    ("Robin's notes", "feed"),
+    ("Release notes 0.1", "entry"),
+    ("Refresh all feeds", "command"),
+    ("Bookmarks", "place"),
+    ("Mark all read in this list", "command"),
+    ("Friends", "folder"),
+    ("Graticule, a framework for native apps", "entry"),
+    ("Remove this feed", "command"),
+    ("I recommend", "place"),
+    ("Settings", "place"),
+    ("The quiet web, again", "entry"),
+    ("Show the grid", "command"),
+    ("Hacker News: Front", "feed"),
+];
+
+fn subsequence(query: &str, label: &str) -> Option<Vec<std::ops::Range<usize>>> {
+    let mut want = query.chars().filter(|c| !c.is_whitespace()).map(|c| c.to_ascii_lowercase()).peekable();
+    let mut out: Vec<std::ops::Range<usize>> = Vec::new();
+    for (i, c) in label.char_indices() {
+        if want.peek().is_some_and(|w| *w == c.to_ascii_lowercase()) {
+            want.next();
+            let end = i + c.len_utf8();
+            match out.last_mut() {
+                Some(last) if last.end == i => last.end = end,
+                _ => out.push(i..end),
+            }
+        }
+    }
+    want.peek().is_none().then_some(out)
+}
+
+fn palette(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
+    caption(s, a.take_top(1), "The palette finds entries, feeds, places and commands by the letters you type, in order.");
+    a.take_top(1);
+    let id = Id::new("sheet.palette");
+    let field = sb.field(id).cloned().unwrap_or_else(|| Field::with("re"));
+    let matches: Vec<(usize, Vec<std::ops::Range<usize>>)> = ITEMS.iter().enumerate().filter_map(|(i, (label, _))| subsequence(&field.text, label).map(|m| (i, m))).collect();
+    let found: Vec<Found> = matches.iter().map(|(i, m)| Found { label: ITEMS[*i].0, detail: ITEMS[*i].1, matched: m }).collect();
+    let r = a.at(0, 0, a.cols.min(80), a.rows.min(16));
+    s.palette(id.named("list"), r, &field, sb.is_focused(id), &found, sb.pick(id.named("cursor")).or(Some(0)), |i| Hit::Pick(id.named("cursor"), i));
+    s.hit(s.rect(r.line(0)), Hit::Focus(id, None));
 }

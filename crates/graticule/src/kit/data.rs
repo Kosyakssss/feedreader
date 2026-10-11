@@ -15,6 +15,13 @@ pub struct Column<'a> {
     pub align: Align,
 }
 
+pub struct Table<'a> {
+    pub id: Id,
+    pub columns: &'a [Column<'a>],
+    pub count: usize,
+    pub cursor: Option<usize>,
+}
+
 pub struct Node<'a> {
     pub label: &'a str,
     pub depth: usize,
@@ -41,7 +48,8 @@ impl<H: Clone> Scene<'_, H> {
         self.value(at.at(key_cols + 1, 0, at.cols - key_cols - 1, 1), value);
     }
 
-    pub fn table<'v>(&mut self, id: Id, at: Area, columns: &[Column], count: usize, cursor: Option<usize>, cell: impl Fn(usize, usize) -> Value<'v>, hit: impl Fn(usize) -> H) {
+    pub fn table<'v>(&mut self, table: Table, at: Area, cell: impl Fn(usize, usize) -> Value<'v>, hit: impl Fn(usize) -> H) {
+        let Table { id, columns, count, cursor } = table;
         let pal = self.palette;
         let mono = self.m.mono();
         let mut body = at;

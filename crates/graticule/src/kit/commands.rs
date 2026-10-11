@@ -1,6 +1,17 @@
+use std::ops::Range;
+
 use crate::commands::Registry;
+use crate::field::Field;
 use crate::grid::Area;
-use crate::ui::Scene;
+use crate::state::Id;
+use crate::text::{Block, Face, SpanStyle};
+use crate::ui::{List, Scene};
+
+pub struct Found<'a> {
+    pub label: &'a str,
+    pub detail: &'a str,
+    pub matched: &'a [Range<usize>],
+}
 
 impl<H: Clone> Scene<'_, H> {
     pub fn action_bar<C: Copy + PartialEq, M>(&mut self, at: Area, reg: &Registry<C, M>, model: &M, hit: impl Fn(C) -> H) -> i32 {
@@ -78,5 +89,44 @@ impl<H: Clone> Scene<'_, H> {
             row += 1;
         }
         row
+    }
+
+    pub fn palette(&mut self, id: Id, at: Area, field: &Field, focused: bool, found: &[Found], cursor: Option<usize>, hit: impl Fn(usize) -> H) {
+        let pal = self.palette;
+        let mut body = at;
+        let input = body.take_top(1);
+        let r = self.rect(input);
+        self.field(r, field, focused, "type to search entries, feeds, places and commands");
+        body.take_top(1);
+        let size = self.m.size;
+        let line = self.m.cell_h;
+        self.list(List { id, count: found.len(), rows: 1, cursor }, body, |i| i as u64, |s, i, row| {
+            let f = &found[i];
+            let r = s.rect(row);
+            if Some(i) == cursor {
+                s.fill(r, pal.cursor);
+            } else {
+                s.hover(r);
+            }
+            let mut spans: Vec<(&str, SpanStyle)> = Vec::new();
+            let mut at = 0;
+            let plain = SpanStyle::plain(Face::Prop);
+            let strong = SpanStyle { weight: 600, color: 1, ..plain };
+            for m in f.matched {
+                if m.start < at || m.end > f.label.len() || !f.label.is_char_boundary(m.start) || !f.label.is_char_boundary(m.end) {
+                    continue;
+                }
+                spans.push((&f.label[at..m.start], plain));
+                spans.push((&f.label[m.clone()], strong));
+                at = m.end;
+            }
+            spans.push((&f.label[at..], plain));
+            let lr = s.rect(row.at(1, 0, row.cols * 2 / 3, 1));
+            s.spans(Block { spans: &spans, size, line, wrap: None }, (lr.x, lr.y), Some(lr.w), &[pal.muted, pal.ink]);
+            let dc = f.detail.chars().count() as i32;
+            let mono = s.m.mono();
+            s.write(row.at(row.cols - dc - 1, 0, dc, 1), f.detail, mono, pal.faint);
+            s.hit(r, hit(i));
+        });
     }
 }
