@@ -1,3 +1,4 @@
+use crate::chars::{self, Pen, Shape};
 use crate::gpu::Quad;
 use crate::field::Field;
 use crate::grid::Area;
@@ -137,6 +138,16 @@ pub struct Scene<'a, H> {
     pub pressed: bool,
     shift: (f32, f32),
     clips: Vec<[f32; 4]>,
+    pen: Vec<Rect>,
+}
+
+pub struct Lines {
+    pub h: char,
+    pub v: char,
+    pub top_left: char,
+    pub top_right: char,
+    pub bottom_left: char,
+    pub bottom_right: char,
 }
 
 pub struct List {
@@ -171,7 +182,75 @@ impl<'a, H> Scene<'a, H> {
             pressed: false,
             shift: (0.0, 0.0),
             clips: vec![[0.0, 0.0, m.width, m.height]],
+            pen: Vec::new(),
         }
+    }
+
+    pub fn lines(&self) -> Lines {
+        let (h, v, [top_left, top_right, bottom_left, bottom_right]) = match self.style {
+            LineStyle::Ascii => ('-', '|', ['+'; 4]),
+            LineStyle::Light => ('─', '│', ['┌', '┐', '└', '┘']),
+            LineStyle::Heavy => ('━', '┃', ['┏', '┓', '┗', '┛']),
+            LineStyle::Double => ('═', '║', ['╔', '╗', '╚', '╝']),
+            LineStyle::Dotted => ('┈', '┊', ['┌', '┐', '└', '┘']),
+        };
+        Lines { h, v, top_left, top_right, bottom_left, bottom_right }
+    }
+
+    pub fn cell(&mut self, c: char, r: Rect, color: [f32; 4]) -> bool {
+        let mut pen = Pen { t: self.hair(), rects: std::mem::take(&mut self.pen), alpha: 1.0 };
+        pen.rects.clear();
+        let drawn = match chars::draw(c, r, &mut pen) {
+            None => false,
+            Some(Shape::Rects) => {
+                let mut color = color;
+                color[3] *= pen.alpha;
+                for q in &pen.rects {
+                    self.fill(*q, color);
+                }
+                true
+            }
+            Some(Shape::Path(path, stroke)) => {
+                let key = {
+                    use std::hash::{Hash, Hasher};
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    (c, r.w.to_bits(), r.h.to_bits(), pen.t.to_bits()).hash(&mut h);
+                    h.finish()
+                };
+                let clip = self.clip();
+                self.text.shape(&mut self.quads, key, &path, stroke, (r.x, r.y), color, clip);
+                true
+            }
+        };
+        self.pen = pen.rects;
+        drawn
+    }
+
+    pub fn cells(&mut self, a: Area, s: &str, style: TextStyle, color: [f32; 4]) -> f32 {
+        let r = self.rect(a);
+        let (cw, ch) = (self.m.cell_w, self.m.cell_h);
+        let mut run: Option<(usize, i32)> = None;
+        let mut col = 0;
+        let mut end = s.len();
+        for (i, c) in s.char_indices() {
+            if col >= a.cols {
+                end = i;
+                break;
+            }
+            if chars::drawn(c) {
+                if let Some((from, at)) = run.take() {
+                    self.text(&s[from..i], style, r.x + at as f32 * cw, r.y, None, color);
+                }
+                self.cell(c, Rect::new(r.x + col as f32 * cw, r.y, cw, ch), color);
+            } else if run.is_none() {
+                run = Some((i, col));
+            }
+            col += 1;
+        }
+        if let Some((from, at)) = run {
+            self.text(&s[from..end], style, r.x + at as f32 * cw, r.y, None, color);
+        }
+        col as f32 * cw
     }
 
     pub fn screen(&self) -> Area {
@@ -188,6 +267,9 @@ impl<'a, H> Scene<'a, H> {
     }
 
     pub fn write(&mut self, a: Area, s: &str, style: TextStyle, color: [f32; 4]) -> f32 {
+        if style.face == Face::Mono && s.chars().any(chars::drawn) {
+            return self.cells(a, s, style, color);
+        }
         let r = self.rect(a);
         self.text(s, style, r.x, r.y, Some(r.w), color).width
     }
@@ -196,31 +278,33 @@ impl<'a, H> Scene<'a, H> {
         if a.cols < 2 || a.rows < 2 {
             return;
         }
-        if self.style == LineStyle::Ascii {
-            let (mono, c) = (self.m.mono(), self.palette.rule);
-            for (col, row) in [(a.col, a.row), (a.right() - 1, a.row), (a.col, a.bottom() - 1), (a.right() - 1, a.bottom() - 1)] {
-                self.write(Area::new(col, row, 1, 1), "+", mono, c);
-            }
-            for col in a.col + 1..a.right() - 1 {
-                self.write(Area::new(col, a.row, 1, 1), "-", mono, c);
-                self.write(Area::new(col, a.bottom() - 1, 1, 1), "-", mono, c);
-            }
-            for row in a.row + 1..a.bottom() - 1 {
-                self.write(Area::new(a.col, row, 1, 1), "|", mono, c);
-                self.write(Area::new(a.right() - 1, row, 1, 1), "|", mono, c);
-            }
-            return;
+        let l = self.lines();
+        let (mono, c) = (self.m.mono(), self.palette.rule);
+        let inner = (a.cols - 2) as usize;
+        let top: String = std::iter::once(l.top_left).chain(std::iter::repeat_n(l.h, inner)).chain(std::iter::once(l.top_right)).collect();
+        let bottom: String = std::iter::once(l.bottom_left).chain(std::iter::repeat_n(l.h, inner)).chain(std::iter::once(l.bottom_right)).collect();
+        let side = l.v.to_string();
+        self.cells(a.line(0), &top, mono, c);
+        self.cells(a.line(a.rows - 1), &bottom, mono, c);
+        for row in 1..a.rows - 1 {
+            self.cells(Area::new(a.col, a.row + row, 1, 1), &side, mono, c);
+            self.cells(Area::new(a.right() - 1, a.row + row, 1, 1), &side, mono, c);
         }
-        let (r, t) = (self.rect(a), self.hair());
-        let (w, h) = (self.m.cell_w, self.m.cell_h);
-        let x0 = (r.x + w / 2.0).floor();
-        let x1 = (r.right() - w / 2.0).floor() + t;
-        let y0 = (r.y + h / 2.0).floor();
-        let y1 = (r.bottom() - h / 2.0).floor() + t;
-        self.hline(r.y, x0, x1);
-        self.hline(r.bottom() - h, x0, x1);
-        self.vline(r.x, y0, y1);
-        self.vline(r.right() - w, y0, y1);
+    }
+
+    pub fn rule(&mut self, a: Area) {
+        let l = self.lines();
+        let line: String = std::iter::repeat_n(l.h, a.cols.max(0) as usize).collect();
+        let (mono, c) = (self.m.mono(), self.palette.rule);
+        self.cells(a.line(0), &line, mono, c);
+    }
+
+    pub fn vrule(&mut self, a: Area) {
+        let v = self.lines().v.to_string();
+        let (mono, c) = (self.m.mono(), self.palette.rule);
+        for row in 0..a.rows {
+            self.cells(Area::new(a.col, a.row + row, 1, 1), &v, mono, c);
+        }
     }
 
     pub fn foreign<G>(&mut self, f: impl FnOnce(&mut Scene<G>)) {

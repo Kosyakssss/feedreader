@@ -12,6 +12,7 @@ pub fn all() -> Vec<Sheet> {
         Sheet::new("Foundations", "Ink", ink),
         Sheet::new("Foundations", "Type", type_sheet),
         Sheet::new("Foundations", "Lines", lines),
+        Sheet::new("Foundations", "Characters", characters),
         Sheet::new("Controls", "Checkbox", checkbox),
         Sheet::new("Controls", "Field", field),
         Sheet::new("Scrolling", "List", list),
@@ -110,15 +111,14 @@ fn type_sheet(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
 fn lines(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
     caption(s, a.take_top(1), "Rules and boxes in the current line style; switch it with \"lines\" above.");
     a.take_top(1);
-    let r = s.rect(a.take_top(1).at(0, 0, a.cols.min(60), 1));
-    s.hline(r.y, r.x, r.right());
+    let rule = a.take_top(1);
+    s.rule(rule.at(0, 0, rule.cols.min(60), 1));
     a.take_top(1);
     let [left, mid, right] = a.take_top(8).columns([1, 1, 1], 2);
     s.frame(left);
     s.frame(mid.at(0, 0, mid.cols, 5));
     s.frame(right.at(0, 0, 6, 3));
-    let r = s.rect(a.take_top(6).at(4, 0, 1, 6));
-    s.vline(r.x, r.y, r.bottom());
+    s.vrule(a.take_top(6).at(4, 0, 1, 6));
 }
 
 fn checkbox(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
@@ -198,4 +198,32 @@ fn scroll_area(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
         let r = s.rect(body);
         s.paragraph(&text, style, s.m.cell_h, r.x, r.y, r.w.min(s.m.cell_w * 72.0), pal.ink);
     });
+}
+
+fn characters(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
+    let pal = s.palette;
+    let mono = s.m.mono();
+    caption(s, a.take_top(1), "Box drawing, blocks and braille are drawn by Graticule, so they meet at cell edges in any font.");
+    a.take_top(1);
+    for (title, from, to) in [("box drawing", 0x2500u32, 0x257F), ("blocks", 0x2580, 0x259F)] {
+        caption(s, a.take_top(1), title);
+        let mut line = String::new();
+        for code in from..=to {
+            line.push(char::from_u32(code).unwrap_or(' '));
+            line.push(' ');
+            if (code - from) % 32 == 31 || code == to {
+                s.write(a.take_top(1), &line, mono, pal.ink);
+                line.clear();
+            }
+        }
+        a.take_top(1);
+    }
+    caption(s, a.take_top(1), "braille, two by four dots per cell");
+    let braille: String = (0x2800u32..0x2840).filter_map(char::from_u32).collect();
+    s.write(a.take_top(1), &braille, mono, pal.ink);
+    a.take_top(1);
+    caption(s, a.take_top(1), "joined, with no gaps between cells");
+    for line in ["┌──┬──┐ ┏━━┳━━┓ ╔══╦══╗ ╭──┬──╮ ▛▀▀▜ ░▒▓█", "├──┼──┤ ┣━━╋━━┫ ╠══╬══╣ │  │  │ ▌  ▐ ▁▂▃▄▅▆▇█", "└──┴──┘ ┗━━┻━━┛ ╚══╩══╝ ╰──┴──╯ ▙▄▄▟ ╱╲╳"] {
+        s.write(a.take_top(1), line, mono, pal.ink);
+    }
 }

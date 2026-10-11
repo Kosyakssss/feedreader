@@ -265,12 +265,9 @@ impl Bench {
             s.hit(r, Hit::Run(cmd));
             x += cols + 3;
         }
-        let r = s.rect(rule);
-        s.hline(r.y, r.x, r.right());
-        let r = s.rect(status_rule);
-        s.hline(r.y, r.x, r.right());
-        let r = s.rect(divider);
-        s.vline(r.x, r.y, r.bottom());
+        s.rule(rule);
+        s.rule(status_rule);
+        s.vrule(divider);
 
         index.take_left(1);
         let rows = self.rows();

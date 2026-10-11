@@ -1,3 +1,4 @@
+pub mod chars;
 pub mod commands;
 pub mod field;
 #[cfg(test)]

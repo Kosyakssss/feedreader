@@ -116,6 +116,7 @@ pub struct Text {
     scale: ScaleContext,
     layouts: HashMap<u64, (Layout<u8>, u64)>,
     glyphs: HashMap<GlyphKey, Option<Slot>>,
+    shapes: HashMap<u64, Option<Slot>>,
     shelf: Shelf,
     pub uploads: Vec<Upload>,
     frame: u64,
@@ -164,6 +165,7 @@ impl Text {
             scale: ScaleContext::new(),
             layouts: HashMap::new(),
             glyphs: HashMap::new(),
+            shapes: HashMap::new(),
             shelf: Shelf { x: 0, y: 0, row: 0 },
             uploads: Vec::new(),
             frame: 0,
@@ -181,6 +183,7 @@ impl Text {
     pub fn clear(&mut self) {
         self.layouts.clear();
         self.glyphs.clear();
+        self.shapes.clear();
         self.shelf = Shelf { x: 0, y: 0, row: 0 };
     }
 
@@ -447,7 +450,11 @@ impl Text {
             .format(Format::Alpha)
             .offset(Vector::new(key.sub as f32 / 4.0, 0.0))
             .render(&mut scaler, key.glyph as u16)?;
-        let (w, h) = (image.placement.width, image.placement.height);
+        self.store(image.placement, image.data)
+    }
+
+    fn store(&mut self, placement: swash::zeno::Placement, data: Vec<u8>) -> Option<Slot> {
+        let (w, h) = (placement.width, placement.height);
         if w == 0 || h == 0 {
             return None;
         }
@@ -455,24 +462,41 @@ impl Text {
             Some(at) => at,
             None => {
                 self.glyphs.clear();
+                self.shapes.clear();
                 self.shelf = Shelf { x: 0, y: 0, row: 0 };
                 self.shelf.alloc(w, h)?
             }
         };
-        self.uploads.push(Upload {
-            x,
-            y,
-            w,
-            h,
-            data: image.data,
-        });
-        Some(Slot {
-            x,
-            y,
-            w,
-            h,
-            left: image.placement.left,
-            top: image.placement.top,
-        })
+        self.uploads.push(Upload { x, y, w, h, data });
+        Some(Slot { x, y, w, h, left: placement.left, top: placement.top })
+    }
+
+    pub fn shape(&mut self, out: &mut Vec<Quad>, key: u64, path: &str, stroke: Option<f32>, at: (f32, f32), color: [f32; 4], clip: [f32; 4]) {
+        let slot = match self.shapes.get(&key) {
+            Some(slot) => *slot,
+            None => {
+                let mut mask = swash::zeno::Mask::new(path);
+                if let Some(w) = stroke {
+                    mask.style(swash::zeno::Stroke::new(w));
+                }
+                let (data, placement) = mask.render();
+                let slot = self.store(placement, data);
+                self.shapes.insert(key, slot);
+                slot
+            }
+        };
+        if let Some(s) = slot {
+            let a = ATLAS as f32;
+            out.push(Quad {
+                pos: [at.0 + s.left as f32, at.1 + s.top as f32],
+                size: [s.w as f32, s.h as f32],
+                uv: [s.x as f32 / a, s.y as f32 / a, s.w as f32 / a, s.h as f32 / a],
+                color,
+                clip,
+                kind: 1,
+                image: 0,
+                pad: [0; 2],
+            });
+        }
     }
 }
