@@ -73,4 +73,4 @@ Feedreader is instrumented for [Tracy](https://github.com/wolfpld/tracy). Start 
 cargo run --release --features profile
 ```
 
-Frames, zones in the view, text and GPU code, and the engine's work show up live. For a quick look without Tracy, the status line shows the paint and GPU time of the last frame and the worst recent one, and `feedreader --snapshot out.png --keys "3 j j"` renders a state offscreen and prints its paint time.
+Frames, zones in the view, text and GPU code, and the engine's work show up live. For a quick look without Tracy, the status line shows the paint and GPU time of the last frame and the worst recent one, and `feedreader --snapshot out.png --keys "3 j j"` renders a state offscreen and prints its paint time. `feedreader --gallery` renders every screen in every line style, light and dark, wide and narrow, into `target/gallery/index.html`.

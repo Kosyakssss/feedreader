@@ -72,7 +72,7 @@ The most common defect is a change that works on the path you tried and is missi
 
 - Tests are laws (spec §5.10): properties over generated inputs and operation sequences (proptest), never tests that restate the code. New laws and new test files need the owner's approval.
 - Use the smallest proof: `cargo build`, `cargo clippy` on the crates you touched, and the laws you touched.
-- Look at the result. `feedreader --snapshot out.png --size WxH --keys "…"` renders any state offscreen and prints paint times; use it at the smallest and largest sizes. Point `FEEDREADER_HOME` at a copy of the data so the owner's library stays untouched.
+- Look at the result. `feedreader --snapshot out.png --size WxH --keys "…"` renders any state offscreen and prints paint times; use it at the smallest and largest sizes. `feedreader --gallery` renders every screen in every style and appearance at once. Point `FEEDREADER_HOME` at a copy of the data so the owner's library stays untouched.
 - Measure. `cargo run --release --features profile` and Tracy show zones, frames and allocations.
 - User-visible changes get one pass in the real window. Ask before using computer use on the owner's screen.
 

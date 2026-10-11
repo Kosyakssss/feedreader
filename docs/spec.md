@@ -404,7 +404,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 ### 10.2 Foundations
 1. **Open.** Design language: grid rules, style tokens, typed values and the component inventory (each component mapped as kept, grounded or skipped), drawn up with the owner from the references (§7).
 2. **Partial.** IBM Plex Mono (variable) and IBM Plex Sans are the fonts, and the cell is whole device pixels with the font size derived from it. Open: character graphics (box drawing, blocks, braille) drawn by Graticule.
-3. **Open.** The gallery.
+3. **Partial.** The gallery: `feedreader --gallery DIR` renders Feedreader's screens in every line style, both appearances and two window sizes, with paint times, into `DIR/index.html` (default `target/gallery`). Open: sheets of Graticule's components in every state, as the components land.
 4. **Partial.** Laws (§5.10), in `crates/engine/src/laws.rs` and `crates/feedreader/src/laws.rs`: sync convergence in any order, applying twice, newest wins; outbound safety for IPv4 and IPv4 inside IPv6; identity; parsing never crashes and gives stable ids; retention; counts against what each view lists; undo and redo; nothing moving under the reader when entries arrive or are marked read. Writing them fixed lost feed settings and folder renames across devices, undo of pin, hide and rules, and scroll anchoring during refresh. Open: add wins over a concurrent remove (§5.2), the parsing corpus of real-world feeds, frame budgets.
 
 ### 10.3 Graticule

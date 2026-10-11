@@ -81,7 +81,7 @@ fn wait_for(rx: &Receiver<Event>, model: &mut Model, timeout: Duration, done: im
     }
 }
 
-fn headless() -> (engine::Handle, Receiver<Event>, Model) {
+fn library() -> (engine::Handle, Receiver<Event>, Event) {
     let (tx, rx) = channel();
     let emit: Arc<dyn Fn(Event) + Send + Sync> = Arc::new(move |e| {
         let _ = tx.send(e);
@@ -93,138 +93,233 @@ fn headless() -> (engine::Handle, Receiver<Event>, Model) {
             std::process::exit(1);
         }
     };
-    let mut model = Model::new(graticule::images::Images::new(|| {}));
-    wait_for(&rx, &mut model, Duration::from_secs(20), |_, e| matches!(e, Event::Snapshot { .. }));
-    (handle, rx, model)
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok(e @ Event::Snapshot { .. }) => return (handle, rx, e),
+            Ok(_) => {}
+            Err(_) => {
+                eprintln!("The engine didn't answer");
+                std::process::exit(1);
+            }
+        }
+    }
 }
 
+fn headless() -> (engine::Handle, Receiver<Event>, Model) {
+    let (handle, rx, snapshot) = library();
+    let mut model = Model::new(Images::new(|| {}));
+    model.event(snapshot);
+    (handle, rx, model)
+}
 
 fn flush(model: &mut Model, engine: &engine::Handle) {
     app::send_all(model, engine);
     model.effects.clear();
 }
 
-fn snapshot(args: &[String]) {
-    let get = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
-    let out = get("--snapshot").unwrap();
-    let (w, h) = get("--size")
-        .and_then(|s| s.split_once('x').map(|(a, b)| (a.parse().unwrap(), b.parse().unwrap())))
-        .unwrap_or((2360u32, 1520u32));
-    let scale: f32 = get("--scale").map(|s| s.parse().unwrap()).unwrap_or(2.0);
-    let (handle, rx, mut model) = headless();
-    let mut screen = Offscreen::new(w, h, scale, BASE_SIZE);
-    let registry = cmds::registry();
-    let pointer = get("--pointer").and_then(|p| p.split_once(',').map(|(a, b)| (a.parse().unwrap(), b.parse().unwrap())));
-    let mut quads = Vec::new();
-    let paint = |model: &mut Model, screen: &mut Offscreen, quads: &mut Vec<graticule::gpu::Quad>| {
+struct Stage {
+    handle: engine::Handle,
+    rx: Receiver<Event>,
+    screen: Offscreen,
+    pointer: Option<(f32, f32)>,
+    quads: Vec<graticule::gpu::Quad>,
+}
+
+impl Stage {
+    fn paint(&mut self, model: &mut Model) -> f32 {
         let started = Instant::now();
         model.images.begin_frame();
         let palette = if model.settings.appearance == engine::Appearance::Dark { DARK } else { LIGHT };
-        let (painted, _) = screen.paint(model.line_style(), palette, pointer, |scene| {
-            view::paint(model, registry, scene, FrameStats::default());
+        let (painted, _) = self.screen.paint(model.line_style(), palette, self.pointer, |scene| {
+            view::paint(model, cmds::registry(), scene, FrameStats::default());
         });
-        *quads = painted;
+        self.quads = painted;
         started.elapsed().as_secs_f32() * 1000.0
-    };
-    paint(&mut model, &mut screen, &mut quads);
-    for k in get("--keys").unwrap_or_default().split(' ').filter(|k| !k.is_empty()) {
-        match k {
-            "wait" => {
-                flush(&mut model, &handle);
-                wait_for(&rx, &mut model, Duration::from_secs(15), |_, e| matches!(e, Event::Body(_) | Event::Discovered(..) | Event::FeedAdded(_) | Event::SearchResults(..)));
-            }
-            "images" => {
-                let deadline = Instant::now() + Duration::from_secs(20);
-                loop {
-                    while let Ok(e) = rx.try_recv() {
-                        model.event(e);
-                    }
-                    paint(&mut model, &mut screen, &mut quads);
-                    flush(&mut model, &handle);
-                    if model.images.pending() == 0 || Instant::now() > deadline {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-            }
-            "refreshed" => {
-                wait_for(&rx, &mut model, Duration::from_secs(60), |_, e| matches!(e, Event::Refresh(s) if !s.running));
-            }
-            _ => {
-                let chord = match k {
-                    "down" => Chord::key(Key::Down),
-                    "pgdn" => Chord::key(Key::PageDown),
-                    "enter" => Chord::key(Key::Enter),
-                    "esc" => Chord::key(Key::Escape),
-                    "undo" => Chord::cmd('z'),
-                    "O" => Chord { key: Key::Char('o'), cmd: false, shift: true },
-                    other if other.starts_with("type:") => {
-                        let t = other.trim_start_matches("type:").replace('_', " ");
-                        match model.focus {
-                            Focus::Filter => {
-                                model.filter.insert(&t);
-                                model.reset_list();
-                            }
-                            Focus::Prompt => {
-                                if let Some(p) = model.prompt.as_mut() {
-                                    p.field.insert(&t);
-                                }
-                            }
-                            Focus::Palette => {
-                                if let Some(p) = model.palette.as_mut() {
-                                    p.field.insert(&t);
-                                }
-                                palette::refresh(&mut model);
-                            }
-                            Focus::Main => {}
-                        }
-                        continue;
-                    }
-                    other if other.starts_with("feed:") => {
-                        let q = other.trim_start_matches("feed:").replace('_', " ").to_lowercase();
-                        if let Some(f) = model.feeds.iter().find(|f| f.name().to_lowercase().contains(&q)) {
-                            let id = f.id.clone();
-                            model.show(model::View::Feed(id));
-                        }
-                        paint(&mut model, &mut screen, &mut quads);
-                        continue;
-                    }
-                    other if other.starts_with("cmd:") => {
-                        let name = other.trim_start_matches("cmd:");
-                        if let Some(c) = registry.commands.iter().find(|c| format!("{:?}", c.id).eq_ignore_ascii_case(name)) {
-                            cmds::exec(&mut model, c.id);
-                        }
-                        flush(&mut model, &handle);
-                        paint(&mut model, &mut screen, &mut quads);
-                        continue;
-                    }
-                    other => Chord::ch(other.chars().next().unwrap()),
-                };
-                if let Some(c) = registry.lookup(&model, &chord) {
-                    cmds::exec(&mut model, c);
-                }
-            }
-        }
+    }
+
+    fn settle(&mut self, model: &mut Model) {
         model.effects.clear();
-        flush(&mut model, &handle);
-        while let Ok(e) = rx.try_recv() {
+        flush(model, &self.handle);
+        while let Ok(e) = self.rx.try_recv() {
             model.event(e);
         }
-        paint(&mut model, &mut screen, &mut quads);
+        self.paint(model);
     }
-    let cold = paint(&mut model, &mut screen, &mut quads);
-    let warm = paint(&mut model, &mut screen, &mut quads);
-    let bg = if model.settings.appearance == engine::Appearance::Dark { DARK.bg } else { LIGHT.bg };
-    let pixels = screen.capture(&quads, bg, &mut model.images);
-    if let Err(e) = screen.save_png(std::path::Path::new(&out), &pixels) {
-        eprintln!("Couldn't write {out}: {e}");
+
+    fn replay(&mut self, model: &mut Model, keys: &str) {
+        let registry = cmds::registry();
+        self.paint(model);
+        for k in keys.split(' ').filter(|k| !k.is_empty()) {
+            match k {
+                "wait" => {
+                    flush(model, &self.handle);
+                    wait_for(&self.rx, model, Duration::from_secs(15), |_, e| {
+                        matches!(e, Event::Body(_) | Event::Discovered(..) | Event::FeedAdded(_) | Event::SearchResults(..))
+                    });
+                }
+                "images" => {
+                    let deadline = Instant::now() + Duration::from_secs(20);
+                    loop {
+                        while let Ok(e) = self.rx.try_recv() {
+                            model.event(e);
+                        }
+                        self.paint(model);
+                        flush(model, &self.handle);
+                        if model.images.pending() == 0 || Instant::now() > deadline {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                }
+                "refreshed" => {
+                    wait_for(&self.rx, model, Duration::from_secs(60), |_, e| matches!(e, Event::Refresh(s) if !s.running));
+                }
+                other if other.starts_with("type:") => {
+                    let t = other.trim_start_matches("type:").replace('_', " ");
+                    match model.focus {
+                        Focus::Filter => {
+                            model.filter.insert(&t);
+                            model.reset_list();
+                        }
+                        Focus::Prompt => {
+                            if let Some(p) = model.prompt.as_mut() {
+                                p.field.insert(&t);
+                            }
+                        }
+                        Focus::Palette => {
+                            if let Some(p) = model.palette.as_mut() {
+                                p.field.insert(&t);
+                            }
+                            palette::refresh(model);
+                        }
+                        Focus::Main => {}
+                    }
+                    continue;
+                }
+                other if other.starts_with("feed:") => {
+                    let q = other.trim_start_matches("feed:").replace('_', " ").to_lowercase();
+                    if let Some(f) = model.feeds.iter().find(|f| f.name().to_lowercase().contains(&q)) {
+                        let id = f.id.clone();
+                        model.show(model::View::Feed(id));
+                    }
+                }
+                other if other.starts_with("cmd:") => {
+                    let name = other.trim_start_matches("cmd:");
+                    if let Some(c) = registry.commands.iter().find(|c| format!("{:?}", c.id).eq_ignore_ascii_case(name)) {
+                        cmds::exec(model, c.id);
+                    }
+                }
+                other => {
+                    let chord = match other {
+                        "down" => Chord::key(Key::Down),
+                        "pgdn" => Chord::key(Key::PageDown),
+                        "enter" => Chord::key(Key::Enter),
+                        "esc" => Chord::key(Key::Escape),
+                        "undo" => Chord::cmd('z'),
+                        "O" => Chord { key: Key::Char('o'), cmd: false, shift: true },
+                        other => Chord::ch(other.chars().next().unwrap_or(' ')),
+                    };
+                    if let Some(c) = registry.lookup(model, &chord) {
+                        cmds::exec(model, c);
+                    }
+                }
+            }
+            self.settle(model);
+        }
     }
-    println!("{out}: {} quads, paint {cold:.2} ms, cached {warm:.2} ms", quads.len());
+
+    fn capture(&mut self, model: &mut Model, out: &std::path::Path) -> Result<(f32, f32), String> {
+        let cold = self.paint(model);
+        let warm = self.paint(model);
+        let bg = if model.settings.appearance == engine::Appearance::Dark { DARK.bg } else { LIGHT.bg };
+        let pixels = self.screen.capture(&self.quads, bg, &mut model.images);
+        self.screen.save_png(out, &pixels)?;
+        Ok((cold, warm))
+    }
+}
+
+fn snapshot(args: &[String]) {
+    let get = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+    let Some(out) = get("--snapshot") else { return };
+    let (w, h) = get("--size")
+        .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
+        .unwrap_or((2360u32, 1520u32));
+    let scale: f32 = get("--scale").and_then(|s| s.parse().ok()).unwrap_or(2.0);
+    let (handle, rx, mut model) = headless();
+    let pointer = get("--pointer").and_then(|p| p.split_once(',').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))));
+    let mut stage = Stage { handle, rx, screen: Offscreen::new(w, h, scale, BASE_SIZE), pointer, quads: Vec::new() };
+    stage.replay(&mut model, &get("--keys").unwrap_or_default());
+    match stage.capture(&mut model, std::path::Path::new(&out)) {
+        Ok((cold, warm)) => println!("{out}: {} quads, paint {cold:.2} ms, cached {warm:.2} ms", stage.quads.len()),
+        Err(e) => eprintln!("Couldn't write {out}: {e}"),
+    }
     if let Some(msg) = &model.message {
         println!("message: {msg}");
     }
 }
 
+const GALLERY_SCREENS: &[(&str, &str)] = &[
+    ("List", "1 h"),
+    ("Selection", "1 h x x x down"),
+    ("Reader", "1 h o wait"),
+    ("Feeds", "3"),
+    ("Settings", "4"),
+    ("Help", "?"),
+    ("Palette", "cmd:palette type:the wait"),
+    ("Prompt", "3 a type:example.com"),
+];
+
+const GALLERY_SIZES: &[(&str, u32, u32)] = &[("wide", 1400, 900), ("narrow", 720, 720)];
+
+fn gallery(args: &[String]) {
+    let dir = args.iter().position(|a| a == "--gallery").and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(|| "target/gallery".into());
+    let dir = std::path::PathBuf::from(dir);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        eprintln!("Couldn't create {}: {e}", dir.display());
+        return;
+    }
+    let (handle, rx, snapshot) = library();
+    let mut stage = Stage { handle, rx, screen: Offscreen::new(GALLERY_SIZES[0].1, GALLERY_SIZES[0].2, 1.0, BASE_SIZE), pointer: None, quads: Vec::new() };
+    let mut html = String::from(GALLERY_HEAD);
+    for (screen, keys) in GALLERY_SCREENS {
+        html.push_str(&format!("<h2>{screen}</h2><table><tr><th></th>"));
+        for (size, _, _) in GALLERY_SIZES {
+            for appearance in ["light", "dark"] {
+                html.push_str(&format!("<th>{size} \u{00B7} {appearance}</th>"));
+            }
+        }
+        html.push_str("</tr>");
+        for lines in engine::Lines::ALL {
+            html.push_str(&format!("<tr><th>{}</th>", lines.name()));
+            for (size, w, h) in GALLERY_SIZES {
+                stage.screen = Offscreen::new(*w, *h, 1.0, BASE_SIZE);
+                for appearance in [engine::Appearance::Light, engine::Appearance::Dark] {
+                    let mut model = Model::new(Images::new(|| {}));
+                    model.event(snapshot.clone());
+                    model.settings.lines = lines;
+                    model.settings.appearance = appearance;
+                    stage.replay(&mut model, keys);
+                    let file = format!("{}-{}-{size}-{}.png", screen.to_lowercase(), lines.name(), appearance.name());
+                    match stage.capture(&mut model, &dir.join(&file)) {
+                        Ok((cold, _)) => html.push_str(&format!("<td><a href=\"{file}\"><img src=\"{file}\"></a><br>{cold:.2} ms</td>")),
+                        Err(e) => html.push_str(&format!("<td>{e}</td>")),
+                    }
+                }
+            }
+            html.push_str("</tr>");
+        }
+        html.push_str("</table>");
+        println!("{screen}");
+    }
+    html.push_str("</body></html>");
+    match std::fs::write(dir.join("index.html"), html) {
+        Ok(()) => println!("{}", dir.join("index.html").display()),
+        Err(e) => eprintln!("Couldn't write the gallery: {e}"),
+    }
+}
+
+const GALLERY_HEAD: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>Feedreader gallery</title><style>body{font:13px/1.5 ui-monospace,monospace;margin:2rem;background:#f9f9f7;color:#1a1a1c}h1,h2{font-size:13px;font-weight:600;letter-spacing:.04em;border-bottom:1px solid #b8b8ba;padding-bottom:.3rem;margin-top:2.5rem}table{border-collapse:collapse}th{font-weight:400;color:#737377;text-align:left;padding:.3rem .6rem;vertical-align:top}td{padding:.3rem .6rem;vertical-align:top;color:#737377}img{width:340px;border:1px solid #b8b8ba;display:block}</style></head><body><h1>FEEDREADER \u{00B7} GALLERY</h1>";
 
 struct Probe {
     url: String,
@@ -439,6 +534,10 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--snapshot") {
         snapshot(&args);
+        return;
+    }
+    if args.iter().any(|a| a == "--gallery") {
+        gallery(&args);
         return;
     }
     if cli(&args) {
