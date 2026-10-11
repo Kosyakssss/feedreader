@@ -65,7 +65,6 @@ fn qr_text(text: &str) -> String {
     out
 }
 
-
 fn wait_for(rx: &Receiver<Event>, model: &mut Model, timeout: Duration, done: impl Fn(&Model, &Event) -> bool) -> bool {
     let deadline = Instant::now() + timeout;
     loop {
@@ -340,13 +339,8 @@ struct Probe {
 
 static NO_COMMANDS: Registry<(), ()> = Registry { commands: Vec::new() };
 
-impl graticule::shell::App for Probe {
-    type Model = ();
-    type Command = ();
-    type Hit = ();
-    type Wake = app::Wake;
-
-    fn new(waker: Waker<app::Wake>, _: &mut Ctx) -> Result<Self, String> {
+impl Probe {
+    pub fn start(waker: Waker<app::Wake>, _: &mut Ctx) -> Result<Self, String> {
         let args: Vec<String> = std::env::args().collect();
         let url = args.get(2).cloned().unwrap_or_default();
         let (tx, rx) = channel();
@@ -362,6 +356,14 @@ impl graticule::shell::App for Probe {
         engine.send(Request::Probe(url.clone()));
         Ok(Probe { url, engine, events: rx, waker, extractor: extract::Extractor::new(), images: Images::new(|| {}), done: false })
     }
+}
+
+impl graticule::shell::App for Probe {
+    type Model = ();
+    type Command = ();
+    type Hit = ();
+    type Wake = app::Wake;
+
 
     fn model(&self) -> &() {
         &()
@@ -470,7 +472,7 @@ fn cli(args: &[String]) -> bool {
                 return true;
             };
             let config = Config { title: "Feedreader", size: (400.0, 300.0), min_size: (100.0, 100.0), font_size: BASE_SIZE, visible: false };
-            if let Err(e) = graticule::shell::run::<Probe>(config) {
+            if let Err(e) = graticule::shell::run(config, Probe::start) {
                 eprintln!("Couldn't extract {url}: {e}");
             }
             true
@@ -533,7 +535,6 @@ fn cli(args: &[String]) -> bool {
     }
 }
 
-
 fn main() {
     #[cfg(feature = "profile")]
     tracy_client::Client::start();
@@ -551,7 +552,7 @@ fn main() {
         return;
     }
     let config = Config { title: "Feedreader", size: (1180.0, 760.0), min_size: (380.0, 300.0), font_size: BASE_SIZE, visible: true };
-    if let Err(e) = graticule::shell::run::<app::Feed>(config) {
+    if let Err(e) = graticule::shell::run(config, app::Feed::start) {
         eprintln!("{e}");
         std::process::exit(1);
     }

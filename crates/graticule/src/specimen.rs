@@ -7,7 +7,7 @@ use crate::commands::{Chord, Command, Key, Registry};
 use crate::field::Field;
 use crate::grid::Area;
 use crate::images::Images;
-use crate::shell::{self, App, Config, Ctx, Cursor, Effect, FrameStats, Offscreen, Painted, Waker};
+use crate::shell::{self, App, Config, Ctx, Cursor, Effect, FrameStats, Offscreen, Painted};
 use crate::state::{Id, Scrolling, State};
 use crate::ui::{DARK, LIGHT, LineStyle, List, Palette, Scene};
 
@@ -384,10 +384,6 @@ impl App for Runner {
     type Hit = Hit;
     type Wake = ();
 
-    fn new(_: Waker<()>, _: &mut Ctx) -> Result<Self, String> {
-        Err("Specimen starts through specimen::main".into())
-    }
-
     fn model(&self) -> &Bench {
         &self.bench
     }
@@ -444,7 +440,7 @@ pub fn main(title: &'static str, sheets: impl Fn() -> Vec<Sheet> + 'static) {
     let result = if let Some(out) = arg("--snapshot") {
         snapshot(title, sheets(), &args, Path::new(&out))
     } else {
-        shell::run_with::<Runner>(
+        shell::run(
             Config { title, size: (1280.0, 820.0), min_size: (640.0, 400.0), font_size: 13.0, visible: true },
             move |_, _| Ok(Runner { bench: Bench::new(title, sheets()), images: Images::new(|| {}) }),
         )

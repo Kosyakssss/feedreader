@@ -185,13 +185,8 @@ impl Feed {
     }
 }
 
-impl graticule::shell::App for Feed {
-    type Model = Model;
-    type Command = Cmd;
-    type Hit = Hit;
-    type Wake = Wake;
-
-    fn new(waker: Waker<Wake>, _: &mut Ctx) -> Result<Self, String> {
+impl Feed {
+    pub fn start(waker: Waker<Wake>, _: &mut Ctx) -> Result<Self, String> {
         let (tx, rx) = channel();
         let engine_waker = waker.clone();
         let emit: Arc<dyn Fn(Event) + Send + Sync> = Arc::new(move |e| {
@@ -223,6 +218,14 @@ impl graticule::shell::App for Feed {
         feed.model.attached = feed.engine.attached();
         Ok(feed)
     }
+}
+
+impl graticule::shell::App for Feed {
+    type Model = Model;
+    type Command = Cmd;
+    type Hit = Hit;
+    type Wake = Wake;
+
 
     fn model(&self) -> &Model {
         &self.model

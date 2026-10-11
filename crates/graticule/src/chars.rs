@@ -50,22 +50,30 @@ pub struct Pen {
     pub alpha: f32,
 }
 
-fn lines(w: W, t: f32) -> Vec<(f32, f32)> {
+struct Strokes([(f32, f32); 2], usize);
+
+impl Strokes {
+    fn all(&self) -> &[(f32, f32)] {
+        &self.0[..self.1]
+    }
+}
+
+fn lines(w: W, t: f32) -> Strokes {
     let span = |a: f32, b: f32| ((a * t).floor(), (b * t).floor().max((a * t).floor() + 1.0));
     match w {
-        W::None => vec![],
-        W::Light => vec![span(0.0, 1.0)],
-        W::Heavy => vec![span(-0.5, 1.5)],
-        W::Double => vec![span(-2.0, -1.0), span(1.0, 2.0)],
+        W::None => Strokes([(0.0, 0.0); 2], 0),
+        W::Light => Strokes([span(0.0, 1.0); 2], 1),
+        W::Heavy => Strokes([span(-0.5, 1.5); 2], 1),
+        W::Double => Strokes([span(-2.0, -1.0), span(1.0, 2.0)], 2),
     }
 }
 
 fn lo(w: W, t: f32) -> Option<f32> {
-    lines(w, t).first().map(|l| l.0)
+    lines(w, t).all().first().map(|l| l.0)
 }
 
 fn hi(w: W, t: f32) -> Option<f32> {
-    lines(w, t).last().map(|l| l.1)
+    lines(w, t).all().last().map(|l| l.1)
 }
 
 fn inner(line: (f32, f32), own: W, neg: W, pos: W, t: f32, forward: bool) -> f32 {
@@ -96,7 +104,7 @@ fn box_lines(c: char, r: Rect, pen: &mut Pen) -> bool {
     let cy = (r.y + (r.h / 2.0).floor()).floor();
     for (w, horizontal, forward) in [(right, true, true), (left, true, false), (down, false, true), (up, false, false)] {
         let (neg, pos) = if horizontal { (up, down) } else { (left, right) };
-        for line in lines(w, t) {
+        for &line in lines(w, t).all() {
             let at = inner(line, w, neg, pos, t, forward);
             let rect = match (horizontal, forward) {
                 (true, true) => Rect::new(cx + at, cy + line.0, r.right() - cx - at, line.1 - line.0),

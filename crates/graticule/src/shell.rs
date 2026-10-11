@@ -151,7 +151,6 @@ pub trait App: Sized + 'static {
     type Hit: Clone + 'static;
     type Wake: Send + 'static;
 
-    fn new(waker: Waker<Self::Wake>, cx: &mut Ctx) -> Result<Self, String>;
     fn model(&self) -> &Self::Model;
     fn registry(&self) -> &'static Registry<Self::Command, Self::Model>;
     fn exec(&mut self, command: Self::Command, state: &State);
@@ -218,11 +217,7 @@ pub fn open_external(target: &str) {
 
 type Make<A> = Box<dyn FnOnce(Waker<<A as App>::Wake>, &mut Ctx) -> Result<A, String>>;
 
-pub fn run<A: App>(config: Config) -> Result<(), String> {
-    run_with(config, A::new)
-}
-
-pub fn run_with<A: App>(config: Config, make: impl FnOnce(Waker<A::Wake>, &mut Ctx) -> Result<A, String> + 'static) -> Result<(), String> {
+pub fn run<A: App>(config: Config, make: impl FnOnce(Waker<A::Wake>, &mut Ctx) -> Result<A, String> + 'static) -> Result<(), String> {
     let fonts = std::thread::Builder::new().name("fonts".into()).spawn(Text::new).ok();
     let event_loop = EventLoop::<Signal<A::Wake>>::with_user_event().build().map_err(|e| e.to_string())?;
     event_loop.set_control_flow(ControlFlow::Wait);
