@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
 use engine::{Event, Request};
-use graticule::commands::Registry;
+use graticule::commands::{Chord, Registry};
 use graticule::field::Field;
 use graticule::images::Images;
 use graticule::shell::{Ctx, Cursor, Effect, FrameStats, Painted, Waker, Web};
@@ -548,6 +548,48 @@ impl graticule::shell::App for Feed {
 
     fn chosen(&mut self, id: u32, path: Option<PathBuf>) {
         cmds::chosen(&mut self.model, id, path);
+    }
+
+    fn context(&mut self, hit: Option<Hit>, _: &mut Ctx) -> Vec<(u32, String, Option<Chord>)> {
+        let m = &mut self.model;
+        match hit {
+            Some(Hit::Row(row) | Hit::Check(row) | Hit::ReadToggle(row) | Hit::BookmarkToggle(row)) if m.reader.is_none() => {
+                if let Some(&i) = m.list.visible.get(row)
+                    && !m.list.selected.contains(&m.entries[i].id)
+                {
+                    m.list.selected.clear();
+                }
+                m.list.cursor = row;
+            }
+            Some(Hit::Feed(row)) => {
+                m.feeds_page.cursor = row;
+                m.armed = None;
+            }
+            Some(Hit::Setting(i)) => m.settings_page.cursor = i,
+            Some(Hit::Tab(n) | Hit::CloseTab(n)) => m.activate(n),
+            Some(Hit::Area(Scroll::Reader) | Hit::Link(_) | Hit::Media(_) | Hit::Play(..)) if m.reader.is_some() => {}
+            _ => return Vec::new(),
+        }
+        cmds::registry()
+            .commands
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.rank < 2 && !cmds::global(c.id) && (c.available)(m))
+            .map(|(i, c)| {
+                let label = (c.label)(m);
+                let mut chars = label.chars();
+                let label = chars.next().map(|f| f.to_uppercase().chain(chars).collect()).unwrap_or(label);
+                (i as u32, label, c.keys.first().copied())
+            })
+            .collect()
+    }
+
+    fn context_chosen(&mut self, id: u32) {
+        if let Some(c) = cmds::registry().commands.get(id as usize)
+            && (c.available)(&self.model)
+        {
+            cmds::exec(&mut self.model, c.id);
+        }
     }
 
     fn web_closed(&mut self) {

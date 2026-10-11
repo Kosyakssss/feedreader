@@ -63,7 +63,7 @@ The most common defect is a change that works on the path you tried and is missi
 - Complexity belongs at the edges. Engine decisions are pure functions over state; the view is a pure function of the model.
 - Engine features are methods on the engine; transports stay thin. A request handler, HTTP route or CLI command decodes input, calls one engine method and maps errors.
 - State is enums, not flags that can contradict each other.
-- Inferred types over annotations. No `unsafe` anywhere; the workspace forbids it. When a platform API needs it, use a crate that wraps it safely. The only approved exception is the native context menu on macOS (spec §6.8); any other one needs the owner's sign-off first, with proof that no safe route exists.
+- Inferred types over annotations. No `unsafe` anywhere; the workspace denies it. When a platform API needs it, use a crate that wraps it safely. The only approved exception is the native context menu on macOS, explained in `docs/internals/unsafe.md`; any other one needs the owner's sign-off first, with proof that no safe route exists.
 - No code comments, of any kind (owner's rule). Names and types carry the meaning; reasons that cross components go in `docs/internals/`.
 - Do not invent keyboard shortcuts. Only the ones in the spec are fixed; new commands are clickable labels until the owner assigns keys.
 - If a rule here fights the task in front of you, say so plainly and get the owner's sign-off before breaking it.

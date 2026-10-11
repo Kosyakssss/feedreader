@@ -9,7 +9,7 @@ Every decision below is the owner's unless marked **Proposed** (engineering choi
 - One Rust codebase: Graticule, the engine, and the apps built on them. No web app, no Electron, no JavaScript runtime of our own. JavaScript runs only inside the system web view, for pages and for Defuddle.
 - We are building a framework and an app at the same time. Feedreader proves Graticule; Graticule makes Feedreader easy, fast and beautiful by default. Graticule gains whatever primitives a good app needs, not only what Feedreader needs today.
 - The previous TypeScript app is retired. Its data imports once (Settings or `feedreader import`); its behavior and polish (selection, keyboard, refresh, speed) are the floor.
-- No `unsafe` in our code; the workspace forbids it. The only exception allowed so far is the native context menu on macOS (§6.8), and every exception is justified explicitly to the owner before it lands: why no safe route exists, philosophically and architecturally.
+- No `unsafe` in our code; the workspace denies it, with one approved exception (`docs/internals/unsafe.md`). The only exception allowed so far is the native context menu on macOS (§6.8), and every exception is justified explicitly to the owner before it lands: why no safe route exists, philosophically and architecturally.
 - Tests are laws (§5.10). Everything else is verified by running the app and looking at the gallery.
 
 ## 1. Product
@@ -409,7 +409,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 
 ### 10.3 Graticule
 5. **Partial.** The shell lives in Graticule (`graticule::shell`): the event loop, keys to commands, editing of the focused field, IME, clipboard, hit testing, hover, cursors, clicks and drags, the wheel, the web pane, the menu bar, file drops and effects as data; apps implement `graticule::shell::App`, and `Offscreen` renders the same way for snapshots. Open: interaction state (scroll offsets, drags) kept by Graticule instead of the app's model, so the view stops writing into the model.
-6. **Open.** Registry-driven components: action bar (grouped, no hiding), help as a drawn tree, palette, context menus (macOS, the one `unsafe`), menu bar.
+6. **Partial.** Registry-driven components. Done: native context menus on macOS, built from the commands available for what was right-clicked, with their shortcuts (the one `unsafe`, `docs/internals/unsafe.md`). Open: the action bar grouped by subject with nothing hidden, help as a drawn tree, the palette and menu bar as Graticule components, context menus on Linux.
 7. **Partial.** Native file dialogs: Graticule's `Effect::Choose` shows the platform's picker (`rfd`) and hands the path back through `App::chosen`; import, export and the old app's library use it instead of typed paths. Open: selection on by default; fields with native behavior.
 8. **Open.** Components, one at a time with gallery sheets: entry row, list with scrollbar and position, find field with tokens, places strip, tab strip with the new tab, spec sheet, table, tree, confirm row and message line, badges, article. The find field's behavior is done: tokens shared with the palette (`find.rs`), `is:unread` shown by default, the Unread/All toggle and `h`/`l` retired.
 9. **Open.** Accessibility with AccessKit, fed from the same pass that paints.

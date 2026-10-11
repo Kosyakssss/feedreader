@@ -172,6 +172,10 @@ pub trait App: Sized + 'static {
     }
     fn press(&mut self, _: Option<Self::Hit>, _: &mut Ctx) {}
     fn middle(&mut self, _: Option<Self::Hit>, _: &mut Ctx) {}
+    fn context(&mut self, _: Option<Self::Hit>, _: &mut Ctx) -> Vec<(u32, String, Option<Chord>)> {
+        Vec::new()
+    }
+    fn context_chosen(&mut self, _: u32) {}
     fn drag(&mut self, _: Option<Self::Hit>, _: &mut Ctx) -> Option<bool> {
         None
     }
@@ -543,6 +547,20 @@ impl<A: App> Running<A> {
         self.app.middle(hit, &mut cx);
     }
 
+    fn context(&mut self) {
+        let hit = self.hit_at(self.mouse.0, self.mouse.1);
+        let mut cx = cx!(self);
+        let items = self.app.context(hit, &mut cx);
+        if items.is_empty() {
+            return;
+        }
+        self.settle();
+        self.render();
+        if let Some(id) = menu::popup(&self.window, &items, (self.mouse.0 as f64, self.mouse.1 as f64)) {
+            self.app.context_chosen(id);
+        }
+    }
+
     #[profiling::function]
     fn wheel(&mut self, dx: f32, dy: f32) -> bool {
         let (x, y) = self.mouse;
@@ -750,6 +768,10 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             }
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Middle, .. } => {
                 r.middle();
+                true
+            }
+            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Right, .. } => {
+                r.context();
                 true
             }
             WindowEvent::MouseInput { state: ElementState::Released, button: MouseButton::Left, .. } => {

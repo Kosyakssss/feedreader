@@ -308,6 +308,29 @@ fn build() -> Registry<Cmd, Model> {
     }
 }
 
+pub fn global(cmd: Cmd) -> bool {
+    matches!(
+        cmd,
+        Cmd::More
+            | Cmd::Palette
+            | Cmd::Help
+            | Cmd::Engineering
+            | Cmd::Undo
+            | Cmd::Redo
+            | Cmd::Refresh
+            | Cmd::Home
+            | Cmd::Bookmarks
+            | Cmd::Feeds
+            | Cmd::Settings
+            | Cmd::QuitCompletely
+            | Cmd::RestartEngine
+            | Cmd::ReopenTab
+            | Cmd::NextTab
+            | Cmd::PreviousTab
+            | Cmd::Filter
+    )
+}
+
 fn rank(cmd: Cmd) -> u8 {
     match cmd {
         Cmd::Yes
