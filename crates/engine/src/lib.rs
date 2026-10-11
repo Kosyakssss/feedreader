@@ -416,6 +416,7 @@ impl Engine {
             }
         }
         self.snapshot(Audience::All);
+        self.sync_status();
         self.store.commit();
         loop {
             tokio::select! {

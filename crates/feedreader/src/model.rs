@@ -26,6 +26,7 @@ pub enum Page {
     Feeds,
     Settings,
     Help,
+    Engineering,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

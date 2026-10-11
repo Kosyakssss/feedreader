@@ -85,6 +85,7 @@ pub enum Cmd {
     QuitCompletely,
     RestartEngine,
     ForgetDevice,
+    Engineering,
 }
 
 fn idle(m: &Model) -> bool {
@@ -298,6 +299,7 @@ fn build() -> Registry<Cmd, Model> {
             c(Cmd::Bookmarks, vec![ch('2')], |_| "bookmarks".into(), idle),
             c(Cmd::Feeds, vec![ch('3')], |_| "feeds".into(), idle),
             c(Cmd::Settings, vec![ch('4')], |_| "settings".into(), idle),
+            c(Cmd::Engineering, vec![], |_| "engineering".into(), idle),
             c(Cmd::Help, vec![ch('?')], |m| if m.page == Page::Help && m.reader.is_none() { "close help".into() } else { "help".into() }, idle),
             c(Cmd::Undo, vec![Chord::cmd('z')], |_| "undo".into(), |m| m.can_undo() && m.focus == Focus::Main),
             c(Cmd::Redo, vec![Chord::cmd_shift('z')], |_| "redo".into(), |m| m.can_redo() && m.focus == Focus::Main),
@@ -423,6 +425,7 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
         Cmd::Bookmarks => m.show(View::Bookmarks),
         Cmd::Feeds => m.go(Page::Feeds),
         Cmd::Settings => m.go(Page::Settings),
+        Cmd::Engineering => m.go(Page::Engineering),
         Cmd::Help => {
             let page = if m.page == Page::Help { Page::List } else { Page::Help };
             m.go(page);
@@ -456,6 +459,7 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
                 Page::Feeds => (m.feeds_order.len(), &mut m.feeds_page),
                 Page::Settings => (crate::model::settings_rows(m).len(), &mut m.settings_page),
                 Page::Help => (registry().commands.len() + 8, &mut m.help),
+                Page::Engineering => return,
             };
             let rows = page_rows(s.view_h, s.row_h);
             s.cursor = step(s.cursor, len, rows, cmd);

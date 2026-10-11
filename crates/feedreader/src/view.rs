@@ -216,12 +216,12 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
             Hit::Page(Page::Feeds),
         ));
     }
-    let mut perf = Part::info(
-        format!("paint {:.1} ms (max {:.1}) gpu {:.1} (max {:.1})", stats.paint, stats.max_paint, stats.gpu, stats.max_gpu),
-        pal.faint,
-    );
-    perf.optional = true;
-    parts.push(perf);
+    let role = match &m.sync {
+        Some(engine::SyncStatus::Satellite { .. }) => "SATELLITE",
+        Some(engine::SyncStatus::Hub { .. }) => "HUB",
+        None => "ENGINE",
+    };
+    parts.push(Part::button(String::new(), format!("{role} v{}", env!("CARGO_PKG_VERSION")), pal.muted, Hit::Page(Page::Engineering)));
     let rows = layout_parts(s, &parts, cw, mt.width - cw, cw * 3.0);
     let top = draw_parts(s, &parts, &rows, 0.0);
     s.hline(top, 0.0, mt.width);
@@ -346,6 +346,7 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
         Page::Feeds => paint_feeds(m, s, main),
         Page::Settings => paint_settings(m, s, main),
         Page::Help => paint_help(m, reg, s, main),
+        Page::Engineering => paint_engineering(m, s, main, stats),
     }
     out
 }
@@ -1010,6 +1011,82 @@ fn paint_settings(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
         Some(main.w - cw * 2.0),
         pal.faint,
     );
+    s.pop_clip();
+}
+
+fn engineering_rows(m: &Model, stats: FrameStats) -> Vec<(&'static str, Vec<(&'static str, String)>)> {
+    let entries = m.entries.len();
+    let unread = m.entries.iter().filter(|e| !e.read).count();
+    let role = match &m.sync {
+        Some(engine::SyncStatus::Hub { devices }) => format!("hub for {} paired {}", devices.len(), if devices.len() == 1 { "device" } else { "devices" }),
+        Some(engine::SyncStatus::Satellite { online: true, address }) => format!("satellite, connected to {address}"),
+        Some(engine::SyncStatus::Satellite { online: false, address }) => format!("satellite, {address} unreachable"),
+        None => "starting".into(),
+    };
+    let publish = match (m.settings.publish, m.public_url.as_deref()) {
+        (true, Some(u)) if u.starts_with("https://") => format!("published at {u}"),
+        (true, _) => "on, but Tailscale Funnel isn't serving it".into(),
+        (false, Some(u)) => format!("local only, {u}"),
+        (false, None) => "not available".into(),
+    };
+    let refresh = &m.refresh;
+    vec![
+        (
+            "SOFTWARE",
+            vec![
+                ("Feedreader", format!("v{}", env!("CARGO_PKG_VERSION"))),
+                ("Graticule", "DK-01".into()),
+                ("Engine", if m.attached { "background process".into() } else { "inside this app".into() }),
+                ("Role", role),
+                ("Data folder", m.data_dir.clone()),
+                ("Sync port", engine::sync_port().to_string()),
+                ("Public port", engine::public_port().to_string()),
+                ("I recommend", publish),
+            ],
+        ),
+        (
+            "LIBRARY",
+            vec![
+                ("Feeds", format!("{} subscribed, {} failing", m.subscriptions().count(), m.failing())),
+                ("Entries", format!("{entries} kept, {unread} unread")),
+                ("Folders", m.folders.len().to_string()),
+                ("Refresh", if refresh.running { format!("running, {}/{}", refresh.completed, refresh.total) } else { format!("every {} minutes", m.settings.refresh_minutes) }),
+                ("Last run", refresh.finished_at.map(full_date).unwrap_or_else(|| "not yet".into())),
+                ("Next run", refresh.next_at.map(full_date).unwrap_or_else(|| "not scheduled".into())),
+            ],
+        ),
+        (
+            "FRAMES",
+            vec![
+                ("Paint, last", format!("{:.2} ms", stats.paint)),
+                ("Paint, worst of 240", format!("{:.2} ms", stats.max_paint)),
+                ("GPU, last", format!("{:.2} ms", stats.gpu)),
+                ("GPU, worst of 240", format!("{:.2} ms", stats.max_gpu)),
+                ("Budget", "1 ms from input to GPU".into()),
+            ],
+        ),
+    ]
+}
+
+#[profiling::function]
+fn paint_engineering(m: &mut Model, s: &mut Scene<Hit>, main: Rect, stats: FrameStats) {
+    let mt = s.m;
+    let (cw, ch) = (mt.cell_w, mt.cell_h);
+    let pal = s.palette;
+    let mono = mt.mono();
+    s.push_clip(main);
+    s.text("ENGINEERING \u{00B7} THE RUNNING SYSTEM", mono, main.x + cw, main.y, None, pal.ink);
+    let mut y = main.y + ch * 2.0;
+    for (section, rows) in engineering_rows(m, stats) {
+        s.text(section, mono, main.x + cw, y, None, pal.faint);
+        y += ch;
+        for (label, value) in rows {
+            s.text(label, mt.prop(400.0), main.x + cw, y, Some(cw * 24.0), pal.ink);
+            s.text(&value, mono, main.x + cw * 26.0, y, Some(main.w - cw * 28.0), pal.muted);
+            y += ch;
+        }
+        y += ch;
+    }
     s.pop_clip();
 }
 

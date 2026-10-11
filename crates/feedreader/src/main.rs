@@ -267,6 +267,7 @@ const GALLERY_SCREENS: &[(&str, &str)] = &[
     ("Feeds", "3"),
     ("Settings", "4"),
     ("Help", "?"),
+    ("Engineering", "cmd:engineering"),
     ("Palette", "cmd:palette type:the wait"),
     ("Prompt", "3 a type:example.com"),
 ];

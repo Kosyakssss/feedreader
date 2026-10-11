@@ -415,7 +415,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 9. **Open.** Accessibility with AccessKit, fed from the same pass that paints.
 
 ### 10.4 Feedreader on Graticule
-10. **Open.** Screen by screen, each reviewed in the gallery and once in the real window: Home and the list; the reader; the new tab (replacing add feed and save link); Feeds; Settings; Help; the Engineering page; narrow layouts (after studying opencode v2). The old view code goes as each screen lands.
+10. **Open.** Screen by screen, each reviewed in the gallery and once in the real window: Home and the list; the reader; the new tab (replacing add feed and save link); Feeds; Settings; Help; the Engineering page; narrow layouts (after studying opencode v2). The old view code goes as each screen lands. Done so far: the Engineering page, opened from the role-and-version stamp in the status line, which replaced the frame times there.
 
 ### 10.5 Graphics
 11. **Open.** Pictures: build-time SVG, atlas caching, required labels.
