@@ -87,3 +87,38 @@ pub async fn published(public: u16, local: u16) -> bool {
 pub async fn unpublish(public: u16) -> Result<(), String> {
     run(&["funnel", &format!("--https={public}"), "off"]).await.map(|_| ())
 }
+
+pub async fn reachable(url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|e| e.to_string())?;
+    let host = parsed.host_str().ok_or("the public link has no host")?.to_string();
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let mut ask = url::Url::parse("https://cloudflare-dns.com/dns-query").map_err(|e| e.to_string())?;
+    ask.query_pairs_mut().append_pair("name", &host).append_pair("type", "A");
+    let answer: serde_json::Value = crate::net::client()
+        .get(ask)
+        .header("accept", "application/dns-json")
+        .send()
+        .await
+        .map_err(|e| format!("couldn't ask public DNS for {host}: {e}"))?
+        .bytes()
+        .await
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .ok_or("public DNS gave an unreadable answer")?;
+    let ip: std::net::IpAddr = answer
+        .get("Answer")
+        .and_then(|a| a.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|r| r.get("type").and_then(|t| t.as_u64()) == Some(1))
+        .find_map(|r| r.get("data")?.as_str()?.parse().ok())
+        .ok_or_else(|| format!("public DNS has no address for {host} yet"))?;
+    let client = reqwest::Client::builder()
+        .resolve(&host, std::net::SocketAddr::new(ip, port))
+        .no_proxy()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let status = client.get(url).send().await.map_err(|e| format!("couldn't reach {host} through {ip}: {e}"))?.status();
+    if status.is_success() { Ok(()) } else { Err(format!("{host} answered {status} from the internet")) }
+}

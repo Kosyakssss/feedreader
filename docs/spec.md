@@ -45,7 +45,7 @@ Windows is not a target for Feedreader 1.0; whether Graticule supports it is Ope
 
 ### 2.3 Discovery
 - Every place that offers "add feed" (a new tab, Original tabs, links inside entries, saved links) finds **all** feeds a site offers and shows them: title, type (all posts, category, comments), last post date, a preview of recent items, and optional "add to folder".
-- Ladder: `<link rel=alternate>`; common paths (`/feed`, `/rss`, `/rss.xml`, `/atom.xml`, `/index.xml`, `/feed.json`); platform URL patterns (WordPress, Ghost, Substack, Medium, YouTube channel or handle → `feeds/videos.xml?channel_id=`); JSON-LD and h-feed; sitemaps; LLM recipes (§2.10). Scheme-less input works.
+- Ladder: `<link rel=alternate>`; common paths (`/feed`, `/rss`, `/rss.xml`, `/atom.xml`, `/index.xml`, `/feed.json`); platform URL patterns (WordPress, Ghost, Substack, Medium, YouTube channel or handle → `feeds/videos.xml?channel_id=`); h-feed (a feed marked up in the page's own HTML); LLM recipes (§2.10). JSON-LD, the article description some pages embed, isn't a feed but gives saved links their title, author and date. Sitemaps list a site's pages for search engines and aren't feeds, so they're out. Scheme-less input works.
 - A discovered feed is validated with a real fetch and parse before saving. Knowing where a platform keeps its feed is discovery only; what it finds is an ordinary feed.
 
 ### 2.4 Reading
@@ -84,11 +84,11 @@ Windows is not a target for Feedreader 1.0; whether Graticule supports it is Ope
 - The same URL in a browser shows a read-only HTML page rendered by the engine, with "Open in Feedreader" (subscribes) and "Follow in any feed reader".
 - Friends' feeds are ordinary subscriptions: they show in Home and can be pinned or foldered. You don't see who follows you.
 - The I recommend place lists what you recommended, with remove and copy link.
-- Recommending works on any device, offline too; it publishes when the command reaches the hub. Public route: Tailscale Funnel.
+- Recommending works on any device, offline too; it publishes when the command reaches the hub. Public route: Tailscale Funnel. The hub checks the link from the internet after publishing and hourly, and shows whether it is reachable next to the publish setting.
 
 ### 2.9 Find, search and the command palette
 - Every list has a find field. It takes words and the filter tokens `is:unread`, `is:read`, `is:bookmarked`, `in:folder` and `from:feed`. The field starts empty, so every list shows everything until you narrow it; `/` puts the caret in it from the list or from an open entry. While it has focus, the command line shows what can come next: the token prefixes on an empty field, then the values for the prefix being typed (`is:` lists unread, read and bookmarked; `in:` and `from:` list matching folders and feeds), each clickable to complete it, and any mistake in the filter. The separate Unread/All toggle is retired.
-- The palette is fzf-like over entries (titles and full text), feeds, folders and places, with the same tokens. Backed by SQLite FTS5 on every engine.
+- The palette is fzf-like over entries (titles and full text), feeds, folders and places, with the same tokens. Backed by SQLite FTS5 on every engine. Search finds entries hidden by mute rules too, marked as muted, since searching is looking on purpose; merged copies show once, as in lists.
 - Cmd-K on desktop opens the palette; it also runs every command in the registry by name. Nothing equivalent on phones.
 
 ### 2.10 Sites without feeds: LLM recipes (Later)
@@ -200,11 +200,12 @@ crates/feedreader  the binary: desktop app, headless `serve`, command line
 - Every change to user state is a **command**. The engine applies it to state tables and appends it to the **change log** with the next sequence number, in one SQLite transaction. State tables are the truth; the log is for catch-up and live pushes (not full event sourcing).
 - Satellites apply commands locally first and queue them in an **outbox**, each with an idempotency id; the hub assigns the sequence number and pushes to other devices.
 - What a device keeps: all user state; content for unread entries, bookmarks and open tabs (bodies, images and attachments); read entries of the last 3 days. Older content is paged from the hub on demand.
+- When a feed changes its entry ids or links (a new guid scheme, an added fragment, a moved site), the posts it already delivered are recognized by their normalized link or, failing that, by title and published date within the feed, and kept as the same entries instead of arriving twice.
 - Ids are the same on every engine: the feed id derives from the normalized feed URL and stays fixed if the feed later moves; the entry id is `feedId:urlencode(sourceId)`, with `sourceId` = guid, else URL, else title.
 - Entries can update (edited, late bodies, images) without touching state.
 - Ordering key: published time, falling back to first-seen, tie-broken by id. Stable under updates and identical on hub and satellites.
 - Commands that keep an entry around (bookmark, recommend, open in a tab) carry a small snapshot (title, link, feed, dates) so other devices can show it before fetching it.
-- Merge: every synced value is a last-write-wins register by hybrid logical clocks, including subscriptions, a feed's folder list and folders themselves; a value can arrive before the row it belongs to and is applied when the row appears (`docs/internals/sync.md`). Add-wins sets for subscriptions and folder membership are Open: the simpler registers converge today, and the laws hold for them. For tabs, closing wins over a concurrent scroll update.
+- Merge: every synced value is a last-write-wins register by hybrid logical clocks, including subscriptions, a feed's folder list and folders themselves; a value can arrive before the row it belongs to and is applied when the row appears (`docs/internals/sync.md`). Concurrent changes resolve to the newest one, subscriptions and folder membership included: if one device removes a feed from a folder while another, offline, adds it, whichever change was made later wins. For tabs, closing wins over a concurrent scroll update.
 - Undo: every mutating command has an inverse; clients build undo from it. Unsubscribe is a soft delete kept for the 24-hour undo window. Undoing a recommendation after a friend fetched it appends a tombstone.
 - Catch-up: a persistent, monotonically increasing revision; reconnecting devices request changes since N, with a full snapshot if N is too old.
 
@@ -391,8 +392,6 @@ Hard-won behavior to keep:
 7. License: AGPL-3.0 or MIT. Copyright on AI-written code is unsettled.
 8. Windows support for Graticule.
 9. The Linux story (§6.8), after testing on a real machine.
-10. A feed that changes its entry links (for example by adding a fragment) shows old posts twice, since merging only hides copies from different feeds.
-11. Whether muted and merged entries appear in palette search.
 
 ## 10. Build plan
 Status: done, partial, open, paused or later. We are restarting the interface on a new foundation; the engine underneath is largely built and keeps its status. Each step is committed when it works.
@@ -405,7 +404,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 1. **Open.** Design language: grid rules, style tokens, typed values and the component inventory (each component mapped as kept, grounded or skipped), drawn up with the owner from the references (§7).
 2. **Partial.** IBM Plex Mono (variable) and IBM Plex Sans are the fonts, and the cell is whole device pixels with the font size derived from it. Open: character graphics (box drawing, blocks, braille) drawn by Graticule.
 3. **Partial.** The gallery: `feedreader --gallery DIR` renders Feedreader's screens in every line style, both appearances and two window sizes, with paint times, into `DIR/index.html` (default `target/gallery`). Open: sheets of Graticule's components in every state, as the components land.
-4. **Partial.** Laws (§5.10), in `crates/engine/src/laws.rs`, `crates/feedreader/src/laws.rs` and `crates/graticule/src/laws.rs`: sync convergence in any order, applying twice, newest wins; outbound safety for IPv4 and IPv4 inside IPv6; identity; parsing never crashes and gives stable ids; retention; counts against what each view lists; undo and redo; nothing moving under the reader when entries arrive or are marked read; any sequence of field edits undoing back to the start and redoing to the end. Writing them fixed lost feed settings and folder renames across devices, undo of pin, hide and rules, and scroll anchoring during refresh. Open: add wins over a concurrent remove (§5.2), the parsing corpus of real-world feeds, frame budgets.
+4. **Partial.** Laws (§5.10), in `crates/engine/src/laws.rs`, `crates/feedreader/src/laws.rs` and `crates/graticule/src/laws.rs`: sync convergence in any order, applying twice, newest wins; outbound safety for IPv4 and IPv4 inside IPv6; identity; parsing never crashes and gives stable ids; retention; counts against what each view lists; undo and redo; nothing moving under the reader when entries arrive or are marked read; any sequence of field edits undoing back to the start and redoing to the end. Writing them fixed lost feed settings and folder renames across devices, undo of pin, hide and rules, and scroll anchoring during refresh. Open: the parsing corpus of real-world feeds, frame budgets.
 
 ### 10.3 Graticule
 5. **Partial.** The shell lives in Graticule (`graticule::shell`): the event loop, keys to commands, editing of the focused field, IME, clipboard, hit testing, hover, cursors, clicks and drags, the wheel, the web pane, the menu bar, file drops and effects as data; apps implement `graticule::shell::App`, and `Offscreen` renders the same way for snapshots. Open: interaction state (scroll offsets, drags) kept by Graticule instead of the app's model, so the view stops writing into the model.
@@ -432,9 +431,9 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 16. **Open.** Sync: households; refresh limits and the background engine switch in `engine.toml`.
 17. **Done.** Engine errors: a failed write in the store is recorded, the whole message rolls back, and the failure is logged and shown, followed by a fresh snapshot so no app shows a change that didn't stick; the migration refuses to run if it can't back up; `serve` exits with an error if the engine thread dies, so launchd restarts it. Queries that fail to prepare or run are recorded the same way, so nothing in the store panics.
 18. **Partial.** Media: images and pruning done; attachments are data shown in every reading mode, read from RSS enclosures, Media RSS and Atom enclosure links, and published as enclosures in the I recommend feed; unread entries up to 30 days old are prepared in the background (§5.6). Open: attachments cached for offline (limits are Open, §9), favicons.
-19. **Partial.** Discovery. Open: JSON-LD, h-feed, sitemaps.
+19. **Partial.** Discovery. Open: h-feed; JSON-LD for saved links.
 20. **Partial.** Tabs. Open: reordering by drag, one web view per tab.
-21. **Open.** Export bundle, move to another machine.
+21. **Open.** Export bundle, move to another machine. Posts kept as the same entries when a feed changes their ids or links (§5.2). Muted entries in search (§2.9).
 22. **Partial.** Profiling with Tracy. Open: GPU zones.
 23. **Partial.** Packaging: `scripts/bundle.sh` builds and installs Feedreader.app and links the command. Open: the icon, a `feedreader://` handler for pairing and "Open in Feedreader" links, release builds, the install script, the Homebrew tap, updates.
 24. **Open.** Linux, tested on a real machine (§6.8).

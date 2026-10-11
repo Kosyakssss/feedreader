@@ -322,6 +322,7 @@ pub struct Model {
     pub recommendations: Vec<Recommendation>,
     pub recommended: HashMap<EntryId, String>,
     pub public_url: Option<String>,
+    pub outside: engine::Outside,
     pub hidden: HashSet<EntryId>,
     link_keys: HashMap<EntryId, String>,
     pub unread_by_folder: HashMap<String, usize>,
@@ -394,6 +395,7 @@ impl Model {
             recommendations: Vec::new(),
             recommended: HashMap::new(),
             public_url: None,
+            outside: engine::Outside::Unchecked,
             hidden: HashSet::new(),
             link_keys: HashMap::new(),
             unread_by_folder: HashMap::new(),
@@ -750,6 +752,7 @@ impl Model {
                 rules,
                 recommendations,
                 public_url,
+                outside,
                 tabs,
             } => {
                 let mark = self.mark();
@@ -766,6 +769,7 @@ impl Model {
                 self.rules = rules;
                 self.set_recommendations(recommendations);
                 self.public_url = public_url;
+                self.outside = outside;
                 self.reindex_feeds();
                 self.reindex_entries();
                 self.sort_feeds();
@@ -790,6 +794,7 @@ impl Model {
                 self.rebuild();
             }
             Event::PublicUrl(url) => self.public_url = url,
+            Event::Outside(outside) => self.outside = outside,
             Event::SearchResults(q, ids) => crate::palette::results(self, q, ids),
             Event::Feeds(feeds) => {
                 self.feeds = feeds;

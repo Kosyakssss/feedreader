@@ -898,7 +898,7 @@ fn setting_row(m: &Model, s: Setting) -> (&'static str, String) {
         Setting::Publish => (
             "Publish I recommend on the internet",
             match (st.publish, m.public_url.as_deref().is_some_and(|u| u.starts_with("https://"))) {
-                (true, true) => "on, through Tailscale Funnel".into(),
+                (true, true) => format!("on, through Tailscale Funnel; {}", outside(&m.outside)),
                 (true, false) => "on, but Tailscale Funnel isn't serving it".into(),
                 (false, _) => "off; only this computer can read it".into(),
             },
@@ -1024,6 +1024,15 @@ fn paint_settings(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
     s.pop_clip();
 }
 
+fn outside(o: &engine::Outside) -> String {
+    match o {
+        engine::Outside::Unchecked => "not checked from the internet yet".into(),
+        engine::Outside::Checking => "checking from the internet".into(),
+        engine::Outside::Reachable(at) => format!("reachable from the internet, checked {}", when(*at)),
+        engine::Outside::Unreachable(at, e) => format!("not reachable from the internet at {}: {e}", when(*at)),
+    }
+}
+
 fn engineering_rows(m: &Model, stats: FrameStats) -> Vec<(&'static str, Vec<(&'static str, String)>)> {
     let entries = m.entries.len();
     let unread = m.entries.iter().filter(|e| !e.read).count();
@@ -1034,7 +1043,7 @@ fn engineering_rows(m: &Model, stats: FrameStats) -> Vec<(&'static str, Vec<(&'s
         None => "starting".into(),
     };
     let publish = match (m.settings.publish, m.public_url.as_deref()) {
-        (true, Some(u)) if u.starts_with("https://") => format!("published at {u}"),
+        (true, Some(u)) if u.starts_with("https://") => format!("published at {u}; {}", outside(&m.outside)),
         (true, _) => "on, but Tailscale Funnel isn't serving it".into(),
         (false, Some(u)) => format!("local only, {u}"),
         (false, None) => "not available".into(),

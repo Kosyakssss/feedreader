@@ -29,7 +29,7 @@ pub use types::*;
 use parse::ParsedFeed;
 use store::Store;
 
-pub const PROTOCOL: u32 = 2;
+pub const PROTOCOL: u32 = 3;
 
 fn lan_ip() -> Option<std::net::IpAddr> {
     let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
@@ -215,6 +215,7 @@ pub(crate) enum Internal {
     Paired(Result<sat::HubLink, String>),
     Pairing(Client, String),
     Funnel(Funnel),
+    Outside(u64, u32, Result<(), String>),
     Page(Job, Result<(String, String), String>),
     MediaFetched(String, Result<(String, String, i64), String>),
     Offer(String, Result<Vec<Candidate>, String>),
@@ -244,6 +245,8 @@ struct Engine {
     itx: Option<UnboundedSender<Internal>>,
     published: public::Shared,
     public_url: Option<String>,
+    outside: Outside,
+    checks: u64,
     extractors: Vec<Client>,
     prefetching: Option<EntryId>,
     media_inflight: HashSet<String>,
@@ -327,6 +330,8 @@ impl Engine {
             itx: None,
             published: Default::default(),
             public_url: None,
+            outside: Outside::Unchecked,
+            checks: 0,
             extractors: Vec::new(),
             prefetching: None,
             media_inflight: HashSet::new(),
@@ -366,6 +371,7 @@ impl Engine {
             rules: self.store.rules(),
             recommendations: self.store.recommendations(),
             public_url: self.public_url.clone(),
+            outside: self.outside.clone(),
             tabs: self.store.tabs(),
         }, to);
     }
@@ -897,6 +903,23 @@ impl Engine {
         });
     }
 
+    fn check_outside(&mut self, after: Duration, tries: u32) {
+        self.checks += 1;
+        let Some(url) = self.public_url.clone().filter(|u| u.starts_with("https://")) else { return };
+        let check = self.checks;
+        self.spawn(async move {
+            tokio::time::sleep(after).await;
+            Internal::Outside(check, tries, tailscale::reachable(&url).await)
+        });
+    }
+
+    fn set_outside(&mut self, outside: Outside) {
+        if self.outside != outside {
+            self.outside = outside.clone();
+            self.emit(Event::Outside(outside));
+        }
+    }
+
     fn fetches(&self) -> bool {
         self.hub.is_none() || self.reach != Reach::Online
     }
@@ -1201,6 +1224,28 @@ impl Engine {
                 }
                 self.publish();
                 self.emit(Event::PublicUrl(self.public_url.clone()));
+                if self.public_url.as_deref().is_some_and(|u| u.starts_with("https://")) {
+                    self.set_outside(Outside::Checking);
+                    self.check_outside(Duration::ZERO, 20);
+                } else {
+                    self.checks += 1;
+                    self.set_outside(Outside::Unchecked);
+                }
+            }
+            Internal::Outside(check, tries, result) => {
+                if check == self.checks {
+                    match result {
+                        Ok(()) => {
+                            self.set_outside(Outside::Reachable(now()));
+                            self.check_outside(Duration::from_secs(3600), 2);
+                        }
+                        Err(_) if tries > 0 => self.check_outside(Duration::from_secs(30), tries - 1),
+                        Err(e) => {
+                            self.set_outside(Outside::Unreachable(now(), e));
+                            self.check_outside(Duration::from_secs(3600), 2);
+                        }
+                    }
+                }
             }
             Internal::Ask(sat::Ask::Outbox { reply }) => {
                 let pushed: i64 = self.store.get("sync_pushed").and_then(|v| v.parse().ok()).unwrap_or(0);

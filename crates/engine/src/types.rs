@@ -409,6 +409,15 @@ pub enum Request {
     Search(String),
 }
 
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum Outside {
+    #[default]
+    Unchecked,
+    Checking,
+    Reachable(i64),
+    Unreachable(i64, String),
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Event {
     Snapshot {
@@ -421,12 +430,14 @@ pub enum Event {
         rules: Vec<Rule>,
         recommendations: Vec<Recommendation>,
         public_url: Option<String>,
+        outside: Outside,
         tabs: Vec<TabState>,
     },
     Folders(Vec<Folder>),
     Rules(Vec<Rule>),
     Recommendations(Vec<Recommendation>),
     PublicUrl(Option<String>),
+    Outside(Outside),
     SearchResults(String, Vec<EntryId>),
     Feeds(Vec<Feed>),
     EntriesAdded(Vec<Entry>),

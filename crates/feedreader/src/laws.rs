@@ -18,6 +18,7 @@ fn snapshot(feeds: Vec<Feed>, entries: Vec<Entry>, folders: Vec<Folder>, rules: 
         rules,
         recommendations: Vec::new(),
         public_url: None,
+        outside: Default::default(),
         tabs: Vec::new(),
     }
 }
