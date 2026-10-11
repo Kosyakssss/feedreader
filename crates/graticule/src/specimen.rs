@@ -144,7 +144,7 @@ impl Bench {
             appearance: Appearance::System,
             grid: false,
             frame: Frame::Fit,
-            scrolling: Scrolling::Rows,
+            scrolling: Scrolling::Smooth,
             sandbox: Sandbox::default(),
             proofs: Proofs::new(title),
             diff: false,

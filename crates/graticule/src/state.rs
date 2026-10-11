@@ -31,8 +31,8 @@ impl Id {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Scrolling {
     #[default]
-    Rows,
     Smooth,
+    Rows,
 }
 
 #[derive(Clone, Copy, Debug, Default)]

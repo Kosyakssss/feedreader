@@ -12,6 +12,26 @@ use swash::zeno::{Format, Vector};
 use crate::gpu::{ATLAS, Quad};
 
 const MONO: &[&[u8]] = &[include_bytes!("../assets/fonts/IBMPlexMono-Var.ttf"), include_bytes!("../assets/fonts/IBMPlexMono-VarItalic.ttf")];
+const BUNDLED: [&[u8]; 2] = [MONO[0], SANS[0]];
+
+fn contexts(system_fonts: bool) -> (FontContext, String, String) {
+    let mut fonts = FontContext { collection: parley::fontique::Collection::new(parley::fontique::CollectionOptions { shared: false, system_fonts }), source_cache: Default::default() };
+    let mut register = |files: &[&[u8]]| {
+        let mut name = String::new();
+        for file in files {
+            for (family, _) in fonts.collection.register_fonts(parley::fontique::Blob::from(file.to_vec()), None) {
+                if name.is_empty() {
+                    name = fonts.collection.family_name(family).unwrap_or_default().to_string();
+                }
+            }
+        }
+        name
+    };
+    let mono = register(MONO);
+    let sans = register(SANS);
+    (fonts, mono, sans)
+}
+
 const SANS: &[&[u8]] = &[
     include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf"),
     include_bytes!("../assets/fonts/IBMPlexSans-Italic.ttf"),
@@ -125,10 +145,19 @@ impl Shelf {
     }
 }
 
+enum Fallback {
+    Off,
+    Loading(std::sync::mpsc::Receiver<FontContext>),
+    Loaded,
+}
+
 pub struct Text {
     fonts: FontContext,
     mono: String,
     sans: String,
+    fallback: Fallback,
+    covered: HashMap<char, bool>,
+    wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
     layouts_cx: LayoutContext<u8>,
     scale: ScaleContext,
     layouts: HashMap<u64, (Layout<u8>, String, u64)>,
@@ -182,24 +211,14 @@ impl Default for Text {
 
 impl Text {
     pub fn new() -> Self {
-        let mut fonts = FontContext::new();
-        let mut register = |files: &[&[u8]]| {
-            let mut name = String::new();
-            for file in files {
-                for (family, _) in fonts.collection.register_fonts(parley::fontique::Blob::from(file.to_vec()), None) {
-                    if name.is_empty() {
-                        name = fonts.collection.family_name(family).unwrap_or_default().to_string();
-                    }
-                }
-            }
-            name
-        };
-        let mono = register(MONO);
-        let sans = register(SANS);
+        let (fonts, mono, sans) = contexts(false);
         Self {
             fonts,
             mono,
             sans,
+            fallback: Fallback::Off,
+            covered: HashMap::new(),
+            wake: None,
             layouts_cx: LayoutContext::new(),
             scale: ScaleContext::new(),
             layouts: HashMap::new(),
@@ -211,8 +230,54 @@ impl Text {
         }
     }
 
+    pub fn set_wake(&mut self, wake: impl Fn() + Send + Sync + 'static) {
+        self.wake = Some(std::sync::Arc::new(wake));
+    }
+
+    fn covers(&mut self, text: &str) -> bool {
+        text.chars().all(|c| {
+            c.is_ascii() || crate::chars::drawn(c) || *self.covered.entry(c).or_insert_with(|| BUNDLED.iter().any(|f| swash::FontRef::from_index(f, 0).is_some_and(|f| f.charmap().map(c) != 0)))
+        })
+    }
+
+    fn need_fallback(&mut self, spans: &[(&str, SpanStyle)]) {
+        if !matches!(self.fallback, Fallback::Off) || spans.iter().all(|(t, _)| self.covers(t)) {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let wake = self.wake.clone();
+        let started = std::thread::Builder::new().name("font fallback".into()).spawn(move || {
+            let _ = tx.send(contexts(true).0);
+            if let Some(w) = wake {
+                w();
+            }
+        });
+        if started.is_ok() {
+            self.fallback = Fallback::Loading(rx);
+        }
+    }
+
+    pub fn wait_for_fallback(&mut self) {
+        if let Fallback::Loading(rx) = &self.fallback
+            && let Ok(fonts) = rx.recv()
+        {
+            self.use_fallback(fonts);
+        }
+    }
+
+    fn use_fallback(&mut self, fonts: FontContext) {
+        self.fonts = fonts;
+        self.fallback = Fallback::Loaded;
+        self.layouts.clear();
+    }
+
     pub fn begin_frame(&mut self) {
         self.frame += 1;
+        if let Fallback::Loading(rx) = &self.fallback
+            && let Ok(fonts) = rx.try_recv()
+        {
+            self.use_fallback(fonts);
+        }
         if self.layouts.len() > 8000 {
             let frame = self.frame;
             self.layouts.retain(|_, (_, _, used)| frame - *used < 120);
@@ -245,6 +310,9 @@ impl Text {
 
     fn layout_at(&mut self, key: u64, spans: &[(&str, SpanStyle)], size: f32, line: f32, wrap: Option<f32>) -> &Layout<u8> {
         let frame = self.frame;
+        if !self.layouts.contains_key(&key) {
+            self.need_fallback(spans);
+        }
         let fonts = &mut self.fonts;
         let cx = &mut self.layouts_cx;
         let (mono, sans) = (self.mono.as_str(), self.sans.as_str());

@@ -79,6 +79,11 @@ pub(super) fn type_sheet(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
         let line = s.m.cell_h;
         s.spans(Block { spans: &[("The quick brown fox jumps over the lazy dog 0123456789", span)], size, line, wrap: None }, (r.x, r.y), Some(r.w), &[pal.ink]);
     }
+    let row = a.take_top(2);
+    caption(s, row.at(0, 0, 24, 1), "other scripts");
+    let r = s.rect(row.at(26, 0, row.cols - 26, 1));
+    let style = s.m.prop(400.0);
+    s.text("Привет · Γειά σου · 你好 · مرحبا · שלום · नमस्ते", style, r.x, r.y, Some(r.w), pal.ink);
     a.take_top(1);
     caption(s, a.take_top(1), "Prose wraps inside its box:");
     let r = s.rect(a.at(0, 0, a.cols.min(72), a.rows));

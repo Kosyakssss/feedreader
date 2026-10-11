@@ -227,11 +227,10 @@ pub fn open_external(target: &str) {
 type Make<A> = Box<dyn FnOnce(Waker<<A as App>::Wake>, &mut Ctx) -> Result<A, String>>;
 
 pub fn run<A: App>(config: Config, make: impl FnOnce(Waker<A::Wake>, &mut Ctx) -> Result<A, String> + 'static) -> Result<(), String> {
-    let fonts = std::thread::Builder::new().name("fonts".into()).spawn(Text::new).ok();
     let event_loop = EventLoop::<Signal<A::Wake>>::with_user_event().build().map_err(|e| e.to_string())?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let proxy = event_loop.create_proxy();
-    let mut shell = Shell::<A> { config, proxy, running: None, failed: None, fonts, make: Some(Box::new(make)) };
+    let mut shell = Shell::<A> { config, proxy, running: None, failed: None, make: Some(Box::new(make)) };
     event_loop.run_app(&mut shell).map_err(|e| e.to_string())?;
     match shell.failed {
         Some(e) => Err(e),
@@ -244,7 +243,6 @@ struct Shell<A: App> {
     proxy: EventLoopProxy<Signal<A::Wake>>,
     running: Option<Running<A>>,
     failed: Option<String>,
-    fonts: Option<std::thread::JoinHandle<Text>>,
     make: Option<Make<A>>,
 }
 
@@ -807,7 +805,11 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
         }
         let size = window.inner_size();
         let gpu = Gpu::new(Some(window.clone()), (size.width, size.height));
-        let mut text = self.fonts.take().and_then(|t| t.join().ok()).unwrap_or_default();
+        let mut text = Text::new();
+        let redraw = self.proxy.clone();
+        text.set_wake(move || {
+            let _ = redraw.send_event(Signal::Images);
+        });
         let font_size = self.config.font_size;
         let metrics = metrics(&mut text, font_size, window.scale_factor() as f32, size.width, size.height);
         let system_dark = window.theme() == Some(winit::window::Theme::Dark);
@@ -1079,6 +1081,7 @@ impl Offscreen {
 
     pub fn paint<H>(&mut self, style: LineStyle, palette: Palette, pointer: Option<(f32, f32)>, f: impl FnOnce(&mut Scene<H>)) -> (Vec<Quad>, f32) {
         let started = Instant::now();
+        self.text.wait_for_fallback();
         self.text.begin_frame();
         self.state.begin_frame();
         let mut scene = Scene::new(&mut self.text, &mut self.state, self.metrics, style, palette);

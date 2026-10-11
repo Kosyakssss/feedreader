@@ -14,7 +14,11 @@ A key reaches the focused field before the command registry, and only keys the f
 
 ## Launch
 
-On an M1 with a warm cache, a window shows its first frame about 160 ms after the process starts: about 15 ms before `main`, about 75 ms for AppKit to finish launching, about 40 ms to create the window, 5 ms for the GPU surface and about 20 ms for the app to attach to the engine, take its snapshot and paint. Loading the fonts takes about 35 ms, so it runs on its own thread from the start of `run` and is joined when the window exists, which hides it behind AppKit's startup.
+On an M1 with a warm cache, a window shows its first frame about 160 ms after the process starts: about 15 ms before `main`, about 75 ms for AppKit to finish launching, about 40 ms to create the window, 5 ms for the GPU surface and about 20 ms for the app to attach to the engine, take its snapshot and paint.
+
+## Fonts are the bundled ones, the system's only as a fallback
+
+IBM Plex Mono and Sans are compiled into the binary, and the text system starts with only them: registering them takes 0.3 ms and a first line of text 0.03 ms. Letting fontique scan the system's fonts cost about 35 ms at start and 6 ms on the first line, and let the system choose fonts for anything, so a different Mac could paint differently. A character none of the bundled fonts has (Chinese, Arabic, Hebrew, Devanagari, emoji) makes the text system load the system's fonts once on a thread of its own; the window repaints when they arrive, and from then on those characters come from the system while everything Plex covers still comes from Plex. Offscreen renders wait for that load, so snapshots are the same every time.
 
 ## Context menus open at the mouse
 
@@ -22,7 +26,7 @@ muda converts a position given to `show_context_menu_for_nsview` as if the view 
 
 ## Scroll positions belong to Graticule and follow an item
 
-Lists and scroll areas keep their scroll state in `graticule::state::State`, keyed by an `Id` the app chooses, so painting never writes into the app's model. A list's position is the item at the top (by the key the app gives each item) plus an offset into it, not a pixel distance from the start. When items arrive above, move or disappear, the list finds the same item again and keeps it where it was, so nothing moves under the reader. The position is only recomputed from the total when it falls out of range; recomputing every frame drifts the offset by float rounding. Commands that need the layout (a page down that moves a cursor) read it from the state handed to `App::exec`. With `Scrolling::Rows` (the default) the wheel and the scrollbar move by whole rows like a terminal; `Scrolling::Smooth` follows the trackpad by the pixel.
+Lists and scroll areas keep their scroll state in `graticule::state::State`, keyed by an `Id` the app chooses, so painting never writes into the app's model. A list's position is the item at the top (by the key the app gives each item) plus an offset into it, not a pixel distance from the start. When items arrive above, move or disappear, the list finds the same item again and keeps it where it was, so nothing moves under the reader. The position is only recomputed from the total when it falls out of range; recomputing every frame drifts the offset by float rounding. Commands that need the layout (a page down that moves a cursor) read it from the state handed to `App::exec`. With `Scrolling::Smooth` (the default) the wheel and the scrollbar follow the trackpad by the pixel; `Scrolling::Rows` moves by whole rows like a terminal.
 
 ## Character graphics are drawn, not taken from the font
 
