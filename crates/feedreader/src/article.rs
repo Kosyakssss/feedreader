@@ -92,7 +92,7 @@ pub fn attachments(s: &mut Scene<Hit>, list: &[engine::Attachment], x: f32, y: f
         let w = s.measure(&label, mt.mono()).min(width);
         let r = Rect::new(x - cw * 0.5, row, w + cw, ch);
         s.hover(r);
-        s.spans(&[(label.as_str(), style)], mt.size, ch, x, row, None, Some(width), &colors);
+        s.spans(graticule::text::Block { spans: &[(label.as_str(), style)], size: mt.size, line: ch, wrap: None }, (x, row), Some(width), &colors);
         s.hit(r, if a.class() == "file" { Hit::Media(a.url.clone()) } else { Hit::Play(a.url.clone(), a.class().to_string()) });
         row += ch;
     }
@@ -223,7 +223,7 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
     s.hit(track, Hit::Track(track, Scroll::Reader));
     s.push_clip(Rect::new(area.x, area.y, area.w - cw * 2.5, area.h));
     let mut y = area.y - scroll + ch * 0.5;
-    s.spans(&[(header.title.as_str(), title_style)], title_size, title_line, x0, y, Some(width), None, &colors);
+    s.spans(graticule::text::Block { spans: &[(header.title.as_str(), title_style)], size: title_size, line: title_line, wrap: Some(width) }, (x0, y), None, &colors);
     y += title_h;
     s.text(&header.meta, mono, x0, y, Some(width), pal.muted);
     y += ch;
@@ -233,11 +233,11 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
     s.hline(y, area.x - cw * 0.5, area.right());
     y += ch;
     if let Some(n) = &r.note {
-        s.paragraph(n, mt.prop(400.0), ch, x0, y, width, pal.warn);
+        s.paragraph(n, mt.prop(400.0), ch, (x0, y), width, pal.warn);
         y += note_h;
     }
     if let Some((t, c)) = &status {
-        s.paragraph(t, mt.prop(400.0), line, x0, y, width, *c);
+        s.paragraph(t, mt.prop(400.0), line, (x0, y), width, *c);
         y += status_h;
     }
     let ordered = r.ordered();
@@ -271,7 +271,7 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
                     if *quote {
                         s.vline(x0, y, y + h);
                     }
-                    let drawn = s.spans(&spans, *size, *line, g.x, y, Some(g.w), None, &colors);
+                    let drawn = s.spans(graticule::text::Block { spans: &spans, size: *size, line: *line, wrap: Some(g.w) }, (g.x, y), None, &colors);
                     for (rect, range) in drawn.underlines {
                         if let Some((_, url)) = p.links.iter().find(|(lr, _)| lr.start <= range.start && range.start < lr.end) {
                             let r = Rect::new(rect[0], rect[1], rect[2], rect[3]);
@@ -304,7 +304,7 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
                             s.fill(Rect::new(g.x + rc[0], g.y + rc[1], rc[2], rc[3]), col);
                         }
                     }
-                    s.spans(&spans, mt.size, ch, g.x, g.y, Some(g.w), None, &colors);
+                    s.spans(graticule::text::Block { spans: &spans, size: mt.size, line: ch, wrap: Some(g.w) }, (g.x, g.y), None, &colors);
                 }
                 geom.push(g);
             }
@@ -318,7 +318,7 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
                     let w = s.measure(text, mono).min(width);
                     let r = Rect::new(x0 - cw * 0.5, y, w + cw, ch);
                     s.hover(r);
-                    s.spans(&[(text.as_str(), st)], mt.size, ch, x0, y, None, Some(width), &colors);
+                    s.spans(graticule::text::Block { spans: &[(text.as_str(), st)], size: mt.size, line: ch, wrap: None }, (x0, y), Some(width), &colors);
                     s.hit(r, if kind == "embed" { Hit::Media(src.clone()) } else { Hit::Play(src.clone(), kind.clone()) });
                 }
             }
@@ -333,7 +333,7 @@ pub fn paint(m: &mut Model, s: &mut Scene<Hit>, area: Rect, header: Header) {
                             let name = if alt.trim().is_empty() { src.rsplit('/').next().unwrap_or(src) } else { alt.as_str() };
                             let text = format!("[image] {name}");
                             let st = SpanStyle { underline: true, color: 3, ..SpanStyle::plain(Face::Mono) };
-                            s.spans(&[(text.as_str(), st)], mt.size, ch, x0, y, None, Some(width), &colors);
+                            s.spans(graticule::text::Block { spans: &[(text.as_str(), st)], size: mt.size, line: ch, wrap: None }, (x0, y), Some(width), &colors);
                         }
                         _ => {
                             s.fill(r, pal.field);

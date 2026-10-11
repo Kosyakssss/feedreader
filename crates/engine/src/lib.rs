@@ -245,6 +245,7 @@ struct Engine {
     itx: Option<UnboundedSender<Internal>>,
     published: public::Shared,
     public_url: Option<String>,
+    public_bound: bool,
     outside: Outside,
     checks: u64,
     extractors: Vec<Client>,
@@ -330,6 +331,7 @@ impl Engine {
             itx: None,
             published: Default::default(),
             public_url: None,
+            public_bound: false,
             outside: Outside::Unchecked,
             checks: 0,
             extractors: Vec::new(),
@@ -414,6 +416,7 @@ impl Engine {
                     }
                 });
                 self.public_url = Some(format!("http://127.0.0.1:{port}/{}/", self.store.token()));
+                self.public_bound = true;
             }
             Err(e) => {
                 eprintln!("public listener on port {port}: {e}");
@@ -884,6 +887,13 @@ impl Engine {
 
     fn funnel(&mut self, on: bool) {
         let (port, funnel) = (self.config.public_port, self.config.funnel_port);
+        if !self.public_bound {
+            if on {
+                self.emit(Event::Message(format!("Couldn't publish: another program holds port {port}, so Tailscale Funnel would serve it instead of this engine.")));
+            }
+            return;
+        }
+        let ours = self.store.get("funnel_dir").as_deref() == Some(&*self.dir.to_string_lossy());
         let token = self.store.token();
         self.spawn(async move {
             let outcome = if on {
@@ -891,7 +901,7 @@ impl Engine {
                     Ok(node) => Funnel::Public(format!("https://{}:{funnel}/{token}/", node.name), node.key_expiry),
                     Err(e) => Funnel::Failed(true, e),
                 }
-            } else if tailscale::published(funnel, port).await {
+            } else if ours && tailscale::published(funnel, port).await {
                 match tailscale::unpublish(funnel).await {
                     Ok(()) => Funnel::Private,
                     Err(e) => Funnel::Failed(false, e),
@@ -1203,6 +1213,7 @@ impl Engine {
                 let message = match outcome {
                     Funnel::Public(url, expiry) => {
                         self.public_url = Some(url.clone());
+                        self.store.put("funnel_dir", &self.dir.to_string_lossy());
                         let warning = expiry
                             .and_then(chrono::DateTime::from_timestamp_millis)
                             .map(|d| {
@@ -1214,7 +1225,10 @@ impl Engine {
                             .unwrap_or_default();
                         Some(format!("Your I recommend feed is public at {url}.{warning}"))
                     }
-                    Funnel::Private => Some("Your I recommend feed is no longer public.".into()),
+                    Funnel::Private => {
+                        self.store.put("funnel_dir", "");
+                        Some("Your I recommend feed is no longer public.".into())
+                    }
                     Funnel::Unchanged => None,
                     Funnel::Failed(true, e) => Some(format!("Couldn't publish through Tailscale Funnel: {e}")),
                     Funnel::Failed(false, e) => Some(format!("Couldn't stop Tailscale Funnel: {e}")),

@@ -1,7 +1,7 @@
 use crate::grid::Area;
 use crate::specimen::{Hit, Sandbox, Sheet};
 use crate::state::Id;
-use crate::text::{Face, SpanStyle, TextStyle};
+use crate::text::{Block, Face, SpanStyle, TextStyle};
 use crate::ui::{List, Scene};
 
 const PROSE: &str = "A graticule is the grid ruled on an instrument's screen, so that what it shows can be read against it. Everything here sits on one: boxes, rules, columns and controls start and end on cell edges, and text in either face shares a baseline on a row. Proportional text flows inside its box; only the box is on the grid.";
@@ -100,12 +100,12 @@ fn type_sheet(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
         let r = s.rect(row.at(26, 0, row.cols - 26, 1));
         let span = SpanStyle { weight: weight as u16, italic, ..SpanStyle::plain(face) };
         let line = s.m.cell_h;
-        s.spans(&[("The quick brown fox jumps over the lazy dog 0123456789", span)], size, line, r.x, r.y, None, Some(r.w), &[pal.ink]);
+        s.spans(Block { spans: &[("The quick brown fox jumps over the lazy dog 0123456789", span)], size, line, wrap: None }, (r.x, r.y), Some(r.w), &[pal.ink]);
     }
     a.take_top(1);
     caption(s, a.take_top(1), "Prose wraps inside its box:");
     let r = s.rect(a.at(0, 0, a.cols.min(72), a.rows));
-    s.paragraph(PROSE, TextStyle { face: Face::Prop, size, weight: 400.0 }, s.m.cell_h, r.x, r.y, r.w, pal.ink);
+    s.paragraph(PROSE, TextStyle { face: Face::Prop, size, weight: 400.0 }, s.m.cell_h, (r.x, r.y), r.w, pal.ink);
 }
 
 fn lines(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
@@ -196,7 +196,7 @@ fn scroll_area(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
     let height = s.text.height(&[(&text, span)], size, s.m.cell_h, width.min(s.m.cell_w * 72.0));
     s.scroll(Id::new("sheet.scroll"), a, height, |s, body| {
         let r = s.rect(body);
-        s.paragraph(&text, style, s.m.cell_h, r.x, r.y, r.w.min(s.m.cell_w * 72.0), pal.ink);
+        s.paragraph(&text, style, s.m.cell_h, (r.x, r.y), r.w.min(s.m.cell_w * 72.0), pal.ink);
     });
 }
 

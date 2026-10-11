@@ -128,6 +128,14 @@ pub struct Drawn {
     pub underlines: Vec<([f32; 4], Range<usize>)>,
 }
 
+#[derive(Clone, Copy)]
+pub struct Block<'a> {
+    pub spans: &'a [(&'a str, SpanStyle)],
+    pub size: f32,
+    pub line: f32,
+    pub wrap: Option<f32>,
+}
+
 pub struct Paint<'a> {
     pub origin: (f32, f32),
     pub limit: Option<f32>,
@@ -272,48 +280,8 @@ impl Text {
     }
 
     #[profiling::function]
-    pub fn draw(
-        &mut self,
-        out: &mut Vec<Quad>,
-        text: &str,
-        style: TextStyle,
-        line: f32,
-        origin: (f32, f32),
-        limit: Option<f32>,
-        wrap: Option<f32>,
-        color: [f32; 4],
-        clip: [f32; 4],
-    ) -> Drawn {
-        let span = SpanStyle {
-            weight: style.weight as u16,
-            ..SpanStyle::plain(style.face)
-        };
-        let colors = [color];
-        self.draw_spans(
-            out,
-            &[(text, span)],
-            style.size,
-            line,
-            wrap,
-            Paint {
-                origin,
-                limit,
-                colors: &colors,
-                clip,
-            },
-        )
-    }
-
-    #[profiling::function]
-    pub fn draw_spans(
-        &mut self,
-        out: &mut Vec<Quad>,
-        spans: &[(&str, SpanStyle)],
-        size: f32,
-        line: f32,
-        wrap: Option<f32>,
-        p: Paint,
-    ) -> Drawn {
+    pub fn draw_spans(&mut self, out: &mut Vec<Quad>, block: Block, p: Paint) -> Drawn {
+        let Block { spans, size, line, wrap } = block;
         let ellipsis = match p.limit {
             Some(_) => {
                 let first = spans.first().map(|s| s.1).unwrap_or(SpanStyle::plain(Face::Prop));
@@ -417,10 +385,7 @@ impl Text {
             let first = spans.first().map(|s| s.1).unwrap_or(SpanStyle::plain(Face::Prop));
             self.draw_spans(
                 out,
-                &[("\u{2026}", first)],
-                size,
-                line,
-                None,
+                Block { spans: &[("\u{2026}", first)], size, line, wrap: None },
                 Paint {
                     origin: (p.origin.0 + end, p.origin.1),
                     limit: None,
@@ -471,7 +436,7 @@ impl Text {
         Some(Slot { x, y, w, h, left: placement.left, top: placement.top })
     }
 
-    pub fn shape(&mut self, out: &mut Vec<Quad>, key: u64, path: &str, stroke: Option<f32>, at: (f32, f32), color: [f32; 4], clip: [f32; 4]) {
+    pub fn shape(&mut self, out: &mut Vec<Quad>, key: u64, path: &str, stroke: Option<f32>, p: Paint) {
         let slot = match self.shapes.get(&key) {
             Some(slot) => *slot,
             None => {
@@ -488,11 +453,11 @@ impl Text {
         if let Some(s) = slot {
             let a = ATLAS as f32;
             out.push(Quad {
-                pos: [at.0 + s.left as f32, at.1 + s.top as f32],
+                pos: [p.origin.0 + s.left as f32, p.origin.1 + s.top as f32],
                 size: [s.w as f32, s.h as f32],
                 uv: [s.x as f32 / a, s.y as f32 / a, s.w as f32 / a, s.h as f32 / a],
-                color,
-                clip,
+                color: p.colors.first().copied().unwrap_or([1.0; 4]),
+                clip: p.clip,
                 kind: 1,
                 image: 0,
                 pad: [0; 2],

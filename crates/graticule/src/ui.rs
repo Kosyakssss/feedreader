@@ -3,7 +3,7 @@ use crate::gpu::Quad;
 use crate::field::Field;
 use crate::grid::Area;
 use crate::state::{Id, Layout, State};
-use crate::text::{Drawn, Face, Paint, SpanStyle, Text, TextStyle};
+use crate::text::{Block, Drawn, Face, Paint, SpanStyle, Text, TextStyle};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
@@ -218,7 +218,7 @@ impl<'a, H> Scene<'a, H> {
                     h.finish()
                 };
                 let clip = self.clip();
-                self.text.shape(&mut self.quads, key, &path, stroke, (r.x, r.y), color, clip);
+                self.text.shape(&mut self.quads, key, &path, stroke, Paint { origin: (r.x, r.y), limit: None, colors: &[color], clip });
                 true
             }
         };
@@ -426,61 +426,20 @@ impl<'a, H> Scene<'a, H> {
         });
     }
 
-    pub fn text(
-        &mut self,
-        s: &str,
-        style: TextStyle,
-        x: f32,
-        y: f32,
-        limit: Option<f32>,
-        color: [f32; 4],
-    ) -> Drawn {
-        let clip = self.clip();
+    pub fn text(&mut self, s: &str, style: TextStyle, x: f32, y: f32, limit: Option<f32>, color: [f32; 4]) -> Drawn {
+        let span = SpanStyle { weight: style.weight as u16, ..SpanStyle::plain(style.face) };
         let line = self.m.cell_h;
-        self.text
-            .draw(&mut self.quads, s, style, line, (x, y), limit, None, color, clip)
+        self.spans(Block { spans: &[(s, span)], size: style.size, line, wrap: None }, (x, y), limit, &[color])
     }
 
-    pub fn paragraph(
-        &mut self,
-        s: &str,
-        style: TextStyle,
-        line: f32,
-        x: f32,
-        y: f32,
-        width: f32,
-        color: [f32; 4],
-    ) -> Drawn {
-        let clip = self.clip();
-        self.text
-            .draw(&mut self.quads, s, style, line, (x, y), None, Some(width), color, clip)
+    pub fn paragraph(&mut self, s: &str, style: TextStyle, line: f32, at: (f32, f32), width: f32, color: [f32; 4]) -> Drawn {
+        let span = SpanStyle { weight: style.weight as u16, ..SpanStyle::plain(style.face) };
+        self.spans(Block { spans: &[(s, span)], size: style.size, line, wrap: Some(width) }, at, None, &[color])
     }
 
-    pub fn spans(
-        &mut self,
-        spans: &[(&str, SpanStyle)],
-        size: f32,
-        line: f32,
-        x: f32,
-        y: f32,
-        wrap: Option<f32>,
-        limit: Option<f32>,
-        colors: &[[f32; 4]],
-    ) -> Drawn {
+    pub fn spans(&mut self, block: Block, at: (f32, f32), limit: Option<f32>, colors: &[[f32; 4]]) -> Drawn {
         let clip = self.clip();
-        self.text.draw_spans(
-            &mut self.quads,
-            spans,
-            size,
-            line,
-            wrap,
-            Paint {
-                origin: (x, y),
-                limit,
-                colors,
-                clip,
-            },
-        )
+        self.text.draw_spans(&mut self.quads, block, Paint { origin: at, limit, colors, clip })
     }
 
     pub fn field(&mut self, r: Rect, f: &Field, focused: bool, placeholder: &str) {

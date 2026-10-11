@@ -20,7 +20,7 @@ Funnel delivers every public request from loopback, so the public listener can't
 
 ## The setting is the intent, Funnel follows it
 
-The publish setting says whether the feed should be public; the Funnel mapping is outside state that can drift from it (a failed `funnel off`, a change made while the engine was stopped). At start a hub with publishing on publishes again, and one with publishing off removes the mapping, but only if Funnel is serving the configured Funnel port to our own public listener, so a user's other `tailscale serve` or `funnel` setups are never touched.
+The publish setting says whether the feed should be public; the Funnel mapping is outside state that can drift from it (a failed `funnel off`, a change made while the engine was stopped). At start a hub with publishing on publishes again, and one with publishing off removes the mapping, but only one it made itself: the engine records its data folder when it publishes and removes a mapping only if that record matches and Funnel serves the configured Funnel port to the public port, so a user's other `tailscale serve` or `funnel` setups are never touched. An engine that couldn't bind the public port leaves Funnel alone entirely, since that port belongs to another program, often another engine; a scratch copy of a library (`FEEDREADER_HOME`) started next to the real engine once took the real feed offline this way.
 
 ## Requirements and expiry
 
