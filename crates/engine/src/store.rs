@@ -133,13 +133,14 @@ struct Failure(std::cell::RefCell<Option<String>>);
 
 impl Failure {
     fn note<T>(&self, r: rusqlite::Result<T>) {
-        if let Err(e) = r {
-            self.0.borrow_mut().get_or_insert(e.to_string());
-        }
+        self.keep(r);
     }
 
     fn keep<T>(&self, r: rusqlite::Result<T>) -> Option<T> {
-        r.map_err(|e| self.0.borrow_mut().get_or_insert(e.to_string()).clone()).ok()
+        r.inspect_err(|e| {
+            self.0.borrow_mut().get_or_insert(e.to_string());
+        })
+        .ok()
     }
 
     fn take(&self) -> Option<String> {
@@ -462,8 +463,8 @@ impl Store {
         let mut refilled = Vec::new();
         {
             let Some(mut insert) = self.failure.keep(self.db.prepare_cached(
-                    "insert or ignore into entries (id, feed_id, source_id, url, title, author, published, first_seen, summary, content, attachments, cseq)
-                     values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, (select coalesce(max(cseq), 0) + 1 from entries))",
+                "insert or ignore into entries (id, feed_id, source_id, url, title, author, published, first_seen, summary, content, attachments, cseq)
+                 values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, (select coalesce(max(cseq), 0) + 1 from entries))",
             )) else {
                 return Inserted::default();
             };
@@ -471,14 +472,14 @@ impl Store {
                 return Inserted::default();
             };
             let Some(mut fill) = self.failure.keep(self.db.prepare_cached(
-                    "update entries set content = coalesce(content, ?2), summary = coalesce(summary, ?3), author = coalesce(author, ?4),
-                     title = case when title in ('', 'Untitled', 'untitled') then ?5 else title end,
-                     published = case when published < 631152000000 then ?6 else published end,
-                     cseq = case when content is null and ?2 is not null or title in ('', 'Untitled', 'untitled') or published < 631152000000
-                       or attachments is null and ?7 is not null
-                       then (select coalesce(max(cseq), 0) + 1 from entries) else cseq end,
-                     attachments = coalesce(attachments, ?7)
-                     where id = ?1",
+                "update entries set content = coalesce(content, ?2), summary = coalesce(summary, ?3), author = coalesce(author, ?4),
+                 title = case when title in ('', 'Untitled', 'untitled') then ?5 else title end,
+                 published = case when published < 631152000000 then ?6 else published end,
+                 cseq = case when content is null and ?2 is not null or title in ('', 'Untitled', 'untitled') or published < 631152000000
+                   or attachments is null and ?7 is not null
+                   then (select coalesce(max(cseq), 0) + 1 from entries) else cseq end,
+                 attachments = coalesce(attachments, ?7)
+                 where id = ?1",
             )) else {
                 return Inserted::default();
             };
