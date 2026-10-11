@@ -232,7 +232,7 @@ impl graticule::shell::App for Feed {
         cmds::registry()
     }
 
-    fn exec(&mut self, command: Cmd) {
+    fn exec(&mut self, command: Cmd, _: &graticule::state::State) {
         cmds::exec(&mut self.model, command);
     }
 

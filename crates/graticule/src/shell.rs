@@ -17,6 +17,7 @@ use crate::ui::Focused;
 use crate::gpu::{Gpu, Quad};
 use crate::images::Images;
 use crate::menu;
+use crate::state::{Id, State};
 use crate::text::{Face, Text, TextStyle};
 use crate::ui::{LineStyle, Metrics, Palette, Rect, Scene};
 
@@ -153,7 +154,7 @@ pub trait App: Sized + 'static {
     fn new(waker: Waker<Self::Wake>, cx: &mut Ctx) -> Result<Self, String>;
     fn model(&self) -> &Self::Model;
     fn registry(&self) -> &'static Registry<Self::Command, Self::Model>;
-    fn exec(&mut self, command: Self::Command);
+    fn exec(&mut self, command: Self::Command, state: &State);
     fn images(&mut self) -> &mut Images;
     fn style(&self, system_dark: bool) -> (LineStyle, Palette);
     fn paint(&mut self, scene: &mut Scene<Self::Hit>, stats: FrameStats) -> Painted;
@@ -215,12 +216,18 @@ pub fn open_external(target: &str) {
     let _ = std::process::Command::new(opener).arg(target).spawn();
 }
 
+type Make<A> = Box<dyn FnOnce(Waker<<A as App>::Wake>, &mut Ctx) -> Result<A, String>>;
+
 pub fn run<A: App>(config: Config) -> Result<(), String> {
+    run_with(config, A::new)
+}
+
+pub fn run_with<A: App>(config: Config, make: impl FnOnce(Waker<A::Wake>, &mut Ctx) -> Result<A, String> + 'static) -> Result<(), String> {
     let fonts = std::thread::Builder::new().name("fonts".into()).spawn(Text::new).ok();
     let event_loop = EventLoop::<Signal<A::Wake>>::with_user_event().build().map_err(|e| e.to_string())?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let proxy = event_loop.create_proxy();
-    let mut shell = Shell::<A> { config, proxy, running: None, failed: None, fonts };
+    let mut shell = Shell::<A> { config, proxy, running: None, failed: None, fonts, make: Some(Box::new(make)) };
     event_loop.run_app(&mut shell).map_err(|e| e.to_string())?;
     match shell.failed {
         Some(e) => Err(e),
@@ -234,6 +241,7 @@ struct Shell<A: App> {
     running: Option<Running<A>>,
     failed: Option<String>,
     fonts: Option<std::thread::JoinHandle<Text>>,
+    make: Option<Make<A>>,
 }
 
 struct Running<A: App> {
@@ -244,6 +252,10 @@ struct Running<A: App> {
     metrics: Metrics,
     font_size: f32,
     hits: Vec<(Rect, A::Hit)>,
+    state: State,
+    scrollables: Vec<(Rect, Id)>,
+    tracks: Vec<(Rect, Id)>,
+    thumb: Option<(Id, Rect, f32)>,
     web: Option<wry::WebView>,
     web_key: Option<String>,
     web_visible: bool,
@@ -300,11 +312,15 @@ impl<A: App> Running<A> {
         self.app.images().begin_frame();
         let stats = FrameStats::from(&self.frames);
         let (style, palette) = self.app.style(self.system_dark);
-        let mut scene = Scene::new(&mut self.text, self.metrics, style, palette);
+        self.state.begin_frame();
+        let mut scene = Scene::new(&mut self.text, &mut self.state, self.metrics, style, palette);
         scene.pointer = self.pointer_inside.then_some(self.mouse);
+        scene.pressed = self.left_down;
         let painted = self.app.paint(&mut scene, stats);
         let quads = std::mem::take(&mut scene.quads);
         self.hits = std::mem::take(&mut scene.hits);
+        self.scrollables = std::mem::take(&mut scene.scrollables);
+        self.tracks = std::mem::take(&mut scene.tracks);
         self.focused = scene.focused.take();
         self.fields = std::mem::take(&mut scene.fields);
         drop(scene);
@@ -513,7 +529,7 @@ impl<A: App> Running<A> {
         let shift_matters = m.primary || !matches!(key, Key::Char(c) if !c.is_ascii_alphabetic());
         let chord = Chord { key: plain, cmd: m.primary, shift: m.shift && shift_matters };
         if let Some(c) = self.app.registry().lookup(self.app.model(), &chord) {
-            self.app.exec(c);
+            self.app.exec(c, &self.state);
             return true;
         }
         false
@@ -527,6 +543,17 @@ impl<A: App> Running<A> {
             let _ = w.focus_parent();
         }
         let (x, y) = self.mouse;
+        if let Some(&(track, id)) = self.tracks.iter().rev().find(|(r, _)| r.contains(x, y)) {
+            self.left_down = true;
+            let min = self.metrics.cell_h;
+            if let Some(s) = self.state.scroll(id) {
+                let (top, h) = s.thumb(track.h, min);
+                let grab = if y >= track.y + top && y < track.y + top + h { y - track.y - top } else { h / 2.0 };
+                self.thumb = Some((id, track, grab));
+                self.drag_thumb();
+            }
+            return;
+        }
         let now = Instant::now();
         let double = self.last_click.is_some_and(|(t, px, py)| now - t < Duration::from_millis(400) && (px - x).abs() < 6.0 && (py - y).abs() < 6.0);
         self.last_click = Some((now, x, y));
@@ -576,9 +603,24 @@ impl<A: App> Running<A> {
         }
     }
 
+    fn drag_thumb(&mut self) {
+        let Some((id, track, grab)) = self.thumb else { return };
+        let min = self.metrics.cell_h;
+        let s = self.state.scroll_mut(id);
+        let (_, h) = s.thumb(track.h, min);
+        let room = (track.h - h).max(1.0);
+        let at = ((self.mouse.1 - track.y - grab) / room).clamp(0.0, 1.0) * s.max();
+        let step = self.state.step(self.metrics.cell_h);
+        let at = step.map_or(at, |st| (at / st).round() * st);
+        self.state.scroll_to(id, at);
+    }
+
     #[profiling::function]
     fn wheel(&mut self, dx: f32, dy: f32) -> bool {
         let (x, y) = self.mouse;
+        if let Some(&(_, id)) = self.scrollables.iter().rev().find(|(r, _)| r.contains(x, y)) {
+            return self.state.wheel(id, dy, self.metrics.cell_h);
+        }
         let under: Vec<&A::Hit> = self.hits.iter().rev().filter(|(r, _)| r.contains(x, y)).map(|(_, h)| h).collect();
         let mut cx = Ctx {
             window: &self.window,
@@ -592,6 +634,10 @@ impl<A: App> Running<A> {
     }
 
     fn moved(&mut self) -> bool {
+        if self.left_down && self.thumb.is_some() {
+            self.drag_thumb();
+            return true;
+        }
         if self.left_down && self.selecting {
             let (x, y) = self.mouse;
             if let Some(at) = self.caret_at(x, y)
@@ -654,7 +700,8 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             mods: Mods::default(),
             clicks: 0,
         };
-        let app = match A::new(waker, &mut cx) {
+        let Some(make) = self.make.take() else { return };
+        let app = match make(waker, &mut cx) {
             Ok(app) => app,
             Err(e) => {
                 if self.config.visible {
@@ -673,6 +720,10 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             metrics,
             font_size,
             hits: Vec::new(),
+            state: State::default(),
+            scrollables: Vec::new(),
+            tracks: Vec::new(),
+            thumb: None,
             web: None,
             web_key: None,
             web_visible: false,
@@ -808,7 +859,7 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
                 r.left_down = false;
                 r.selecting = false;
                 r.app.release();
-                false
+                r.thumb.take().is_some()
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let (dx, dy) = match delta {
@@ -837,6 +888,7 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
 pub struct Offscreen {
     gpu: Gpu,
     pub text: Text,
+    pub state: State,
     pub metrics: Metrics,
     width: u32,
     height: u32,
@@ -846,13 +898,14 @@ impl Offscreen {
     pub fn new(width: u32, height: u32, scale: f32, font_size: f32) -> Self {
         let mut text = Text::new();
         let metrics = metrics(&mut text, font_size, scale, width, height);
-        Self { gpu: Gpu::new(None, (width, height)), text, metrics, width, height }
+        Self { gpu: Gpu::new(None, (width, height)), text, state: State::default(), metrics, width, height }
     }
 
     pub fn paint<H>(&mut self, style: LineStyle, palette: Palette, pointer: Option<(f32, f32)>, f: impl FnOnce(&mut Scene<H>)) -> (Vec<Quad>, f32) {
         let started = Instant::now();
         self.text.begin_frame();
-        let mut scene = Scene::new(&mut self.text, self.metrics, style, palette);
+        self.state.begin_frame();
+        let mut scene = Scene::new(&mut self.text, &mut self.state, self.metrics, style, palette);
         scene.pointer = pointer;
         f(&mut scene);
         let quads = std::mem::take(&mut scene.quads);

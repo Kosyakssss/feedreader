@@ -1,5 +1,7 @@
 use crate::gpu::Quad;
 use crate::field::Field;
+use crate::grid::Area;
+use crate::state::{Id, Layout, State};
 use crate::text::{Drawn, Face, Paint, SpanStyle, Text, TextStyle};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -122,6 +124,7 @@ impl Metrics {
 pub struct Scene<'a, H> {
     pub quads: Vec<Quad>,
     pub text: &'a mut Text,
+    pub state: &'a mut State,
     pub m: Metrics,
     pub style: LineStyle,
     pub palette: Palette,
@@ -129,7 +132,18 @@ pub struct Scene<'a, H> {
     pub pointer: Option<(f32, f32)>,
     pub focused: Option<Focused>,
     pub fields: Vec<Rect>,
+    pub scrollables: Vec<(Rect, Id)>,
+    pub tracks: Vec<(Rect, Id)>,
+    pub pressed: bool,
+    shift: (f32, f32),
     clips: Vec<[f32; 4]>,
+}
+
+pub struct List {
+    pub id: Id,
+    pub count: usize,
+    pub rows: i32,
+    pub cursor: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -140,10 +154,11 @@ pub struct Focused {
 }
 
 impl<'a, H> Scene<'a, H> {
-    pub fn new(text: &'a mut Text, m: Metrics, style: LineStyle, palette: Palette) -> Self {
+    pub fn new(text: &'a mut Text, state: &'a mut State, m: Metrics, style: LineStyle, palette: Palette) -> Self {
         Self {
             quads: Vec::with_capacity(8192),
             text,
+            state,
             m,
             style,
             palette,
@@ -151,8 +166,118 @@ impl<'a, H> Scene<'a, H> {
             pointer: None,
             focused: None,
             fields: Vec::new(),
+            scrollables: Vec::new(),
+            tracks: Vec::new(),
+            pressed: false,
+            shift: (0.0, 0.0),
             clips: vec![[0.0, 0.0, m.width, m.height]],
         }
+    }
+
+    pub fn screen(&self) -> Area {
+        Area::new(0, 0, self.m.cols() as i32, self.m.rows() as i32)
+    }
+
+    pub fn rect(&self, a: Area) -> Rect {
+        Rect::new(
+            a.col as f32 * self.m.cell_w + self.shift.0,
+            a.row as f32 * self.m.cell_h + self.shift.1,
+            a.cols.max(0) as f32 * self.m.cell_w,
+            a.rows.max(0) as f32 * self.m.cell_h,
+        )
+    }
+
+    pub fn write(&mut self, a: Area, s: &str, style: TextStyle, color: [f32; 4]) -> f32 {
+        let r = self.rect(a);
+        self.text(s, style, r.x, r.y, Some(r.w), color).width
+    }
+
+    pub fn frame(&mut self, a: Area) {
+        if a.cols < 2 || a.rows < 2 {
+            return;
+        }
+        if self.style == LineStyle::Ascii {
+            let (mono, c) = (self.m.mono(), self.palette.rule);
+            for (col, row) in [(a.col, a.row), (a.right() - 1, a.row), (a.col, a.bottom() - 1), (a.right() - 1, a.bottom() - 1)] {
+                self.write(Area::new(col, row, 1, 1), "+", mono, c);
+            }
+            for col in a.col + 1..a.right() - 1 {
+                self.write(Area::new(col, a.row, 1, 1), "-", mono, c);
+                self.write(Area::new(col, a.bottom() - 1, 1, 1), "-", mono, c);
+            }
+            for row in a.row + 1..a.bottom() - 1 {
+                self.write(Area::new(a.col, row, 1, 1), "|", mono, c);
+                self.write(Area::new(a.right() - 1, row, 1, 1), "|", mono, c);
+            }
+            return;
+        }
+        let (r, t) = (self.rect(a), self.hair());
+        let (w, h) = (self.m.cell_w, self.m.cell_h);
+        let x0 = (r.x + w / 2.0).floor();
+        let x1 = (r.right() - w / 2.0).floor() + t;
+        let y0 = (r.y + h / 2.0).floor();
+        let y1 = (r.bottom() - h / 2.0).floor() + t;
+        self.hline(r.y, x0, x1);
+        self.hline(r.bottom() - h, x0, x1);
+        self.vline(r.x, y0, y1);
+        self.vline(r.right() - w, y0, y1);
+    }
+
+    pub fn foreign<G>(&mut self, f: impl FnOnce(&mut Scene<G>)) {
+        let clip = self.clip();
+        let mut sub = Scene::new(&mut *self.text, &mut *self.state, self.m, self.style, self.palette);
+        sub.clips = vec![clip];
+        sub.shift = self.shift;
+        f(&mut sub);
+        let quads = std::mem::take(&mut sub.quads);
+        drop(sub);
+        self.quads.extend(quads);
+    }
+
+    pub fn list(&mut self, list: List, area: Area, key: impl Fn(usize) -> u64, mut item: impl FnMut(&mut Self, usize, Area)) {
+        let mut body = area;
+        let bar = body.take_right(2);
+        let rect = self.rect(body);
+        let step = self.state.step(self.m.cell_h);
+        let height = list.rows.max(1) as f32 * self.m.cell_h;
+        let s = self.state.scroll_mut(list.id);
+        s.layout(Layout { count: list.count, item: height, view: rect.h, cursor: list.cursor, step }, &key);
+        let s = *s;
+        self.scrollables.push((rect, list.id));
+        self.push_clip(rect);
+        let shift = self.shift;
+        self.shift.1 -= s.offset;
+        for i in s.visible() {
+            let a = Area::new(body.col, body.row + (i - s.top) as i32 * list.rows.max(1), body.cols, list.rows.max(1));
+            item(self, i, a);
+        }
+        self.shift = shift;
+        self.pop_clip();
+        let track = self.rect(bar);
+        self.scrollbar(track, s.total(), s.content());
+        self.tracks.push((track, list.id));
+    }
+
+    pub fn scroll(&mut self, id: Id, area: Area, content: f32, f: impl FnOnce(&mut Self, Area)) {
+        let mut body = area;
+        let bar = body.take_right(2);
+        let rect = self.rect(body);
+        let s = self.state.scroll_mut(id);
+        s.item = content.max(0.0);
+        s.count = 1;
+        s.view = rect.h;
+        s.set_total(s.total());
+        let s = *s;
+        self.scrollables.push((rect, id));
+        self.push_clip(rect);
+        let shift = self.shift;
+        self.shift.1 -= s.total();
+        f(self, body);
+        self.shift = shift;
+        self.pop_clip();
+        let track = self.rect(bar);
+        self.scrollbar(track, s.total(), s.content());
+        self.tracks.push((track, id));
     }
 
     fn clip(&self) -> [f32; 4] {
@@ -438,6 +563,10 @@ impl<'a, H> Scene<'a, H> {
         let ink = if self.hovered(track) { self.palette.ink } else { self.palette.muted };
         let t = self.hair();
         let mid = (track.x + track.w / 2.0).floor();
+        if content <= view && self.style != LineStyle::Ascii {
+            self.vline(track.x + (track.w - self.m.cell_w) / 2.0, track.y, track.bottom());
+            return;
+        }
         let thumb_w = (track.w * 0.4).round().max(t * 3.0);
         let thumb_x = (track.x + (track.w - thumb_w) / 2.0).round();
         match self.style {

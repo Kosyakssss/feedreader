@@ -371,7 +371,7 @@ impl graticule::shell::App for Probe {
         &NO_COMMANDS
     }
 
-    fn exec(&mut self, _: ()) {}
+    fn exec(&mut self, _: (), _: &graticule::state::State) {}
 
     fn images(&mut self) -> &mut Images {
         &mut self.images

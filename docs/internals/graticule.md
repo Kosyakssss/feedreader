@@ -19,3 +19,7 @@ On an M1 with a warm cache, a window shows its first frame about 160 ms after th
 ## Context menus open at the mouse
 
 muda converts a position given to `show_context_menu_for_nsview` as if the view were unflipped, but winit's view is flipped, so menus opened upside down relative to the click. The shell passes no position, and muda uses the mouse location in screen coordinates.
+
+## Scroll positions belong to Graticule and follow an item
+
+Lists and scroll areas keep their scroll state in `graticule::state::State`, keyed by an `Id` the app chooses, so painting never writes into the app's model. A list's position is the item at the top (by the key the app gives each item) plus an offset into it, not a pixel distance from the start. When items arrive above, move or disappear, the list finds the same item again and keeps it where it was, so nothing moves under the reader. The position is only recomputed from the total when it falls out of range; recomputing every frame drifts the offset by float rounding. Commands that need the layout (a page down that moves a cursor) read it from the state handed to `App::exec`. With `Scrolling::Rows` (the default) the wheel and the scrollbar move by whole rows like a terminal; `Scrolling::Smooth` follows the trackpad by the pixel.
