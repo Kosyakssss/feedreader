@@ -434,14 +434,14 @@ Order: Graticule and its tools first (§10.2, §10.3, §10.5, §10.6), with a fi
 10. **Open.** Screen by screen, each reviewed in the gallery and once in the real window: Home and the list; the reader; the new tab (replacing add feed and save link); Feeds; Settings; Help; the Engineering page; narrow layouts (after studying opencode v2). The old view code goes as each screen lands. Done so far: the Engineering page, opened from the role-and-version stamp in the status line, which replaced the frame times there.
 
 ### 10.5 Graphics
-11. **Open.** Pictures: build-time SVG, atlas caching, required labels.
+11. **Done.** Pictures: EN-01 Engraver (`crates/engraver`) compiles a folder of SVGs in a build script into static shape data, each picture needing a `<title>` for its label; `Scene::picture` rasterizes each layer once per size into the atlas in its semantic ink, shows the label in the ASCII style and adds an image to the accessibility tree. Graticule's own are in `crates/graticule/pictures`.
 12. **Open.** Canvas: shapes, weights, hit testing, ASCII rendering, live frames; charts on top (a posting-frequency sparkline per feed on the Feeds page, the pairing QR code).
 
 ### 10.6 Instant
 13. **Partial.** Launch is measured stage by stage (`docs/internals/graticule.md`) and fonts load in parallel with AppKit's startup. Open: stage budgets measured per interaction; memoized components; integer ids; the main thread freed of shaping and waiting; pre-shaping.
 
 ### 10.7 Tools
-14. **Partial.** SP-01 Specimen (`cargo run -p graticule --bin specimen`): sheets grouped in an index, live and clickable, switched between line styles, appearances, frames (fit, narrow, wide) and scrolling modes, with the grid overlay and paint times; approving a sheet keeps a proof in the data folder (`GRATICULE_PROOFS` overrides it), and a sheet that renders differently says how many pixels changed and shows them; `--out DIR` renders every sheet in every style and appearance into a page; `--snapshot` renders the window offscreen, `--drag` selects and `--access` prints the accessibility tree. Open: Feedreader's screens as sheets (`feedreader --specimen`, replacing `--gallery`). Open: EN-01 Engraver, SC-01 Scope and BD-01 Bindery (§6.9); Bindery replaces `scripts/bundle.sh`. The editor and ticker board demo apps are Later.
+14. **Partial.** SP-01 Specimen (`cargo run -p graticule --bin specimen`): sheets grouped in an index, live and clickable, switched between line styles, appearances, frames (fit, narrow, wide) and scrolling modes, with the grid overlay and paint times; approving a sheet keeps a proof in the data folder (`GRATICULE_PROOFS` overrides it), and a sheet that renders differently says how many pixels changed and shows them; `--out DIR` renders every sheet in every style and appearance into a page; `--snapshot` renders the window offscreen, `--drag` selects and `--access` prints the accessibility tree. Open: Feedreader's screens as sheets (`feedreader --specimen`, replacing `--gallery`). EN-01 Engraver is done (§10.5). Open: SC-01 Scope and BD-01 Bindery (§6.9); Bindery replaces `scripts/bundle.sh`. The editor and ticker board demo apps are Later.
 
 ### 10.8 Engine and platform
 15. **Open.** Sync: households; refresh limits and the background engine switch in `engine.toml`.

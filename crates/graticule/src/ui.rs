@@ -3,7 +3,7 @@ use crate::gpu::Quad;
 use crate::field::Field;
 use crate::grid::Area;
 use crate::state::{Id, Layout, Selected, Spot, State};
-use crate::text::{Block, Drawn, Face, Paint, SpanStyle, Text, TextStyle};
+use crate::text::{Block, Drawn, Face, Outline, Paint, SpanStyle, Text, TextStyle};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
@@ -141,6 +141,7 @@ pub struct Scene<'a, H> {
     pub pressed: bool,
     pub selectable: bool,
     pub runs: Vec<Run>,
+    pub pictures: Vec<(Rect, &'static str)>,
     shift: (f32, f32),
     clips: Vec<[f32; 4]>,
     pen: Vec<Rect>,
@@ -220,6 +221,7 @@ impl<'a, H> Scene<'a, H> {
             pressed: false,
             selectable: true,
             runs: Vec::new(),
+            pictures: Vec::new(),
             shift: (0.0, 0.0),
             clips: vec![[0.0, 0.0, m.width, m.height]],
             pen: Vec::new(),
@@ -258,7 +260,7 @@ impl<'a, H> Scene<'a, H> {
                     h.finish()
                 };
                 let clip = self.clip();
-                self.text.shape(&mut self.quads, key, &path, stroke, Paint { origin: (r.x, r.y), limit: None, colors: &[color], clip });
+                self.text.shape(&mut self.quads, key, Outline { path: &path, stroke, even_odd: false, scale: 1.0 }, Paint { origin: (r.x, r.y), limit: None, colors: &[color], clip });
                 true
             }
         };

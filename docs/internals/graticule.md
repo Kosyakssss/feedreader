@@ -43,3 +43,7 @@ Every app gets an AccessKit tree without describing one: the shell builds it aft
 ## Proofs are rendered offscreen at a fixed size
 
 A proof is a sheet rendered by its own offscreen GPU device at scale 2, 100 columns (or the frame's width) by 40 rows, with an empty sandbox, so it doesn't depend on the window's size, what was clicked or the paint time in the header. Approving writes it as a PNG under the platform data folder (`Graticule/Specimen/<app>/`), one file per sheet, line style, appearance and width; it isn't committed, since a round of approvals would add megabytes of images to the history. Checking renders the sheet again and compares pixels exactly; a difference also writes a `.diff.png` with the changed pixels in red over a faded copy, which the window shows on request.
+
+## Pictures map colors to inks at build time
+
+Engraver doesn't keep an SVG's colors: each fill and stroke takes the semantic ink nearest its color in the light palette (black and near-black are ink, greys are muted, faint or rule, blue is link, red danger, amber warn, green ok, white the background), so a picture follows the theme and the appearance like text does. Draw pictures in those colors to get the ink you mean. Paths are flattened with their transforms at build time; stroke widths stay in picture units, since zeno strokes before it scales. Text and embedded images in an SVG are dropped: a picture with words in it should be text instead.

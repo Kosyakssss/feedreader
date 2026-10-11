@@ -42,12 +42,12 @@ impl<H: Clone> Scene<'_, H> {
         let ring = format!("M {} {} m {} 0 a {r} {r} 0 1 0 {} 0 a {r} {r} 0 1 0 {} 0", 0.0, d / 2.0, 0.0, d, -d, r = d / 2.0 - t / 2.0);
         let key = (d.to_bits() as u64) << 8 | 1;
         let clip = self.clip();
-        self.text.shape(&mut self.quads, key, &ring, Some(t), crate::text::Paint { origin: (cx - d / 2.0, cy - d / 2.0), limit: None, colors: &[ink], clip });
+        self.text.shape(&mut self.quads, key, crate::text::Outline { path: &ring, stroke: Some(t), even_odd: false, scale: 1.0 }, crate::text::Paint { origin: (cx - d / 2.0, cy - d / 2.0), limit: None, colors: &[ink], clip });
         if on {
             let dot = (d * 0.5).round();
             let path = format!("M 0 {h} a {h} {h} 0 1 0 {dot} 0 a {h} {h} 0 1 0 {} 0", -dot, h = dot / 2.0);
             let key = (dot.to_bits() as u64) << 8 | 2;
-            self.text.shape(&mut self.quads, key, &path, None, crate::text::Paint { origin: (cx - dot / 2.0, cy - dot / 2.0), limit: None, colors: &[ink], clip });
+            self.text.shape(&mut self.quads, key, crate::text::Outline { path: &path, stroke: None, even_odd: false, scale: 1.0 }, crate::text::Paint { origin: (cx - dot / 2.0, cy - dot / 2.0), limit: None, colors: &[ink], clip });
         }
         cols
     }

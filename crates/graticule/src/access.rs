@@ -7,6 +7,7 @@ pub const ROOT: NodeId = NodeId(1);
 const HIT: u64 = 2 << 32;
 const RUN: u64 = 3 << 32;
 const FIELD: u64 = 4 << 32;
+const PICTURE: u64 = 5 << 32;
 
 pub fn hit_of(id: NodeId) -> Option<usize> {
     (id.0 & !0xffff_ffff == HIT).then_some((id.0 & 0xffff_ffff) as usize)
@@ -21,6 +22,7 @@ pub struct Frame<'a> {
     pub hits: &'a [Rect],
     pub runs: &'a [Run],
     pub fields: &'a [Rect],
+    pub pictures: &'a [(Rect, &'static str)],
     pub focused: Option<(Rect, &'a str)>,
 }
 
@@ -61,6 +63,14 @@ pub fn tree(f: Frame, text: &Text) -> TreeUpdate {
         node.set_bounds(bounds(f.hits[h]));
         node.add_action(Action::Click);
         nodes.push((id, node));
+    }
+    for (i, (r, label)) in f.pictures.iter().enumerate() {
+        let id = NodeId(PICTURE + i as u64);
+        let mut node = Node::new(Role::Image);
+        node.set_label(*label);
+        node.set_bounds(bounds(*r));
+        nodes.push((id, node));
+        children.push(id);
     }
     let mut focus = ROOT;
     for (i, r) in f.fields.iter().enumerate() {

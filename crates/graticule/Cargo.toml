@@ -26,6 +26,9 @@ wry = "0.57.0"
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.21.2", default-features = false }
 
+[build-dependencies]
+engraver = { path = "../engraver" }
+
 [features]
 profile = ["profiling/profile-with-tracy"]
 

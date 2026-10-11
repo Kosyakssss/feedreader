@@ -9,6 +9,7 @@ pub mod grid;
 pub mod images;
 pub mod kit;
 mod menu;
+pub mod picture;
 pub mod proof;
 pub mod sheets;
 pub mod shell;

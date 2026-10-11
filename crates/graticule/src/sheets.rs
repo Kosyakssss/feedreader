@@ -18,6 +18,7 @@ pub fn all() -> Vec<Sheet> {
         Sheet::new("Foundations", "Lines", lines),
         Sheet::new("Foundations", "Characters", characters),
         Sheet::new("Foundations", "Values", values),
+        Sheet::new("Foundations", "Pictures", pictures),
         Sheet::new("Actions", "Button", buttons),
         Sheet::new("Actions", "Keys and actions", actions),
         Sheet::new("Actions", "Link", links),
@@ -628,4 +629,29 @@ fn palette(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
     let p = Palette { id: id.named("list"), field: &field, focused: sb.is_focused(id), found: &found, cursor: sb.pick(id.named("cursor")).or(Some(0)) };
     s.palette(p, r, |i| Hit::Pick(id.named("cursor"), i));
     s.hit(s.rect(r.line(0)), Hit::Focus(id, None));
+}
+
+fn pictures(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
+    caption(s, a.take_top(1), "Pictures are SVG compiled by EN-01 Engraver into shapes in semantic ink; each has a label, shown in the ASCII style.");
+    a.take_top(1);
+    let all: [&'static crate::picture::Picture; 4] = [&crate::picture::GRATICULE, &crate::picture::FEED, &crate::picture::FOLDER, &crate::picture::WARNING];
+    for (rows, cols) in [(1, 2), (2, 4), (4, 8), (8, 16)] {
+        caption(s, a.take_top(1), &format!("{rows} rows"));
+        let row = a.take_top(rows);
+        let mut col = 0;
+        for p in all {
+            s.picture(row.at(col, 0, cols, rows), p);
+            col += cols + 2;
+        }
+        a.take_top(1);
+    }
+    let row = a.take_top(1);
+    let mut col = 0;
+    for p in all {
+        let mono = s.m.mono();
+        let muted = s.palette.muted;
+        let w = p.label.len() as i32;
+        s.write(row.at(col, 0, w, 1), p.label, mono, muted);
+        col += 18;
+    }
 }

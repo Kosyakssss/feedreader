@@ -137,6 +137,13 @@ pub struct Block<'a> {
     pub wrap: Option<f32>,
 }
 
+pub struct Outline<'a> {
+    pub path: &'a str,
+    pub stroke: Option<f32>,
+    pub even_odd: bool,
+    pub scale: f32,
+}
+
 pub struct Paint<'a> {
     pub origin: (f32, f32),
     pub limit: Option<f32>,
@@ -491,13 +498,22 @@ impl Text {
         Some(Slot { x, y, w, h, left: placement.left, top: placement.top })
     }
 
-    pub fn shape(&mut self, out: &mut Vec<Quad>, key: u64, path: &str, stroke: Option<f32>, p: Paint) {
+    pub fn shape(&mut self, out: &mut Vec<Quad>, key: u64, o: Outline, p: Paint) {
         let slot = match self.shapes.get(&key) {
             Some(slot) => *slot,
             None => {
-                let mut mask = swash::zeno::Mask::new(path);
-                if let Some(w) = stroke {
-                    mask.style(swash::zeno::Stroke::new(w));
+                let mut mask = swash::zeno::Mask::new(o.path);
+                match o.stroke {
+                    Some(w) => {
+                        mask.style(swash::zeno::Stroke::new(w));
+                    }
+                    None if o.even_odd => {
+                        mask.style(swash::zeno::Fill::EvenOdd);
+                    }
+                    None => {}
+                }
+                if o.scale != 1.0 {
+                    mask.transform(Some(swash::zeno::Transform::scale(o.scale, o.scale)));
                 }
                 let (data, placement) = mask.render();
                 let slot = self.store(placement, data);

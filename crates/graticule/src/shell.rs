@@ -260,6 +260,7 @@ struct Running<A: App> {
     tracks: Vec<(Rect, Id)>,
     thumb: Option<(Id, Rect, f32)>,
     runs: Vec<Run>,
+    pictures: Vec<(Rect, &'static str)>,
     picking: bool,
     web: Option<wry::WebView>,
     web_key: Option<String>,
@@ -326,6 +327,7 @@ impl<A: App> Running<A> {
         let painted = self.app.paint(&mut scene, stats);
         scene.finish();
         self.runs = std::mem::take(&mut scene.runs);
+        self.pictures = std::mem::take(&mut scene.pictures);
         let quads = std::mem::take(&mut scene.quads);
         self.hits = std::mem::take(&mut scene.hits);
         self.scrollables = std::mem::take(&mut scene.scrollables);
@@ -360,12 +362,12 @@ impl<A: App> Running<A> {
 
     fn update_access(&mut self) {
         let Some(access) = self.access.as_mut() else { return };
-        let (app, text, runs, fields, title, focused, hits) = (&mut self.app, &self.text, &self.runs, &self.fields, self.title, self.focused, &self.hits);
+        let (app, text, runs, fields, title, focused, hits, pictures) = (&mut self.app, &self.text, &self.runs, &self.fields, self.title, self.focused, &self.hits, &self.pictures);
         access.update_if_active(|| {
             let hits: Vec<Rect> = hits.iter().map(|(r, _)| *r).collect();
             let value = app.field().map(|f| f.text.clone());
             let focused = focused.map(|f| f.rect).zip(value);
-            let frame = crate::access::Frame { title, hits: &hits, runs, fields, focused: focused.as_ref().map(|(r, v)| (*r, v.as_str())) };
+            let frame = crate::access::Frame { title, hits: &hits, runs, fields, pictures, focused: focused.as_ref().map(|(r, v)| (*r, v.as_str())) };
             crate::access::tree(frame, text)
         });
     }
@@ -833,6 +835,7 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             tracks: Vec::new(),
             thumb: None,
             runs: Vec::new(),
+            pictures: Vec::new(),
             picking: false,
             web: None,
             web_key: None,
@@ -1024,6 +1027,7 @@ pub struct Offscreen {
     pub text: Text,
     pub state: State,
     pub runs: Vec<Run>,
+    pub pictures: Vec<(Rect, &'static str)>,
     pub hits: Vec<Rect>,
     pub fields: Vec<Rect>,
     pub metrics: Metrics,
@@ -1037,7 +1041,7 @@ impl Offscreen {
     pub fn new(width: u32, height: u32, scale: f32, font_size: f32) -> Self {
         let mut text = Text::new();
         let metrics = metrics(&mut text, font_size, scale, width, height);
-        Self { gpu: Gpu::new(None, (width, height)), text, state: State::default(), runs: Vec::new(), hits: Vec::new(), fields: Vec::new(), metrics, width, height, scale, font_size }
+        Self { gpu: Gpu::new(None, (width, height)), text, state: State::default(), runs: Vec::new(), pictures: Vec::new(), hits: Vec::new(), fields: Vec::new(), metrics, width, height, scale, font_size }
     }
 
     pub fn paint<H>(&mut self, style: LineStyle, palette: Palette, pointer: Option<(f32, f32)>, f: impl FnOnce(&mut Scene<H>)) -> (Vec<Quad>, f32) {
@@ -1049,6 +1053,7 @@ impl Offscreen {
         f(&mut scene);
         scene.finish();
         self.runs = std::mem::take(&mut scene.runs);
+        self.pictures = std::mem::take(&mut scene.pictures);
         self.hits = scene.hits.iter().map(|(r, _)| *r).collect();
         self.fields = std::mem::take(&mut scene.fields);
         let quads = std::mem::take(&mut scene.quads);
