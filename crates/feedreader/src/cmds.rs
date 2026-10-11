@@ -413,15 +413,16 @@ pub enum Chosen {
 
 pub fn chosen(m: &mut Model, id: u32, path: Option<std::path::PathBuf>) {
     let Some(path) = path else { return };
-    if id == Chosen::Opml as u32 {
-        m.out.push(Request::ImportOpml(path));
-        m.message = Some("Importing\u{2026}".into());
-    } else if id == Chosen::Export as u32 {
-        m.out.push(Request::ExportOpml(path));
-    } else if id == Chosen::Legacy as u32 {
-        m.out.push(Request::ImportLegacy(path));
+    let Some(kind) = [Chosen::Opml, Chosen::Export, Chosen::Legacy].into_iter().find(|&c| c as u32 == id) else { return };
+    let request = match kind {
+        Chosen::Opml => Request::ImportOpml(path),
+        Chosen::Export => Request::ExportOpml(path),
+        Chosen::Legacy => Request::ImportLegacy(path),
+    };
+    if !matches!(kind, Chosen::Export) {
         m.message = Some("Importing\u{2026}".into());
     }
+    m.out.push(request);
 }
 
 pub fn expand(path: &str) -> std::path::PathBuf {

@@ -125,12 +125,21 @@ create index if not exists entry_media_url on entry_media(url);
 
 pub struct Store {
     db: Connection,
-    failure: std::cell::RefCell<Option<String>>,
+    failure: Failure,
 }
 
-fn note<T>(failure: &std::cell::RefCell<Option<String>>, r: rusqlite::Result<T>) {
-    if let Err(e) = r {
-        failure.borrow_mut().get_or_insert(e.to_string());
+#[derive(Default)]
+struct Failure(std::cell::RefCell<Option<String>>);
+
+impl Failure {
+    fn note<T>(&self, r: rusqlite::Result<T>) {
+        if let Err(e) = r {
+            self.0.borrow_mut().get_or_insert(e.to_string());
+        }
+    }
+
+    fn take(&self) -> Option<String> {
+        self.0.borrow_mut().take()
     }
 }
 
@@ -353,15 +362,15 @@ impl Store {
     }
 
     pub fn begin(&self) {
-        self.failure.borrow_mut().take();
-        note(&self.failure, self.db.execute_batch("begin"));
+        self.failure.take();
+        self.failure.note(self.db.execute_batch("begin"));
     }
 
     pub fn commit(&self) -> Result<(), String> {
-        match self.failure.borrow_mut().take() {
+        match self.failure.take() {
             Some(e) => {
-                note(&self.failure, self.db.execute_batch("rollback"));
-                self.failure.borrow_mut().take();
+                self.failure.note(self.db.execute_batch("rollback"));
+                self.failure.take();
                 Err(e)
             }
             None => self.db.execute_batch("commit").map_err(|e| e.to_string()),
@@ -435,12 +444,12 @@ impl Store {
         error: Option<&str>,
         now: i64,
     ) {
-        note(&self.failure, self.db.execute(
+        self.failure.note(self.db.execute(
             "update feeds set title = coalesce(?2, title), site_url = coalesce(?3, site_url), last_fetched = ?4, error = ?5 where id = ?1",
             params![id, title.filter(|t| !t.is_empty()), site_url, now, error],
         ));
         if let Some((etag, lm)) = validators {
-            note(&self.failure, self.db.execute(
+            self.failure.note(self.db.execute(
                 "update feeds set etag = ?2, last_modified = ?3 where id = ?1",
                 params![id, etag, lm],
             ));
@@ -501,12 +510,12 @@ impl Store {
                     ])
                     .unwrap_or(0);
                 if n == 1 {
-                    note(&self.failure, tx.execute(
+                    self.failure.note(tx.execute(
                         "insert into entries_fts (rowid, title, body) select rowid, ?2, ?3 from entries where id = ?1",
                         params![id, item.title, item.content.as_deref().or(item.summary.as_deref()).unwrap_or("")],
                     ));
                     for img in &item.images {
-                        note(&self.failure, tx.execute("insert or ignore into entry_media (entry_id, url) values (?1, ?2)", params![id, img]));
+                        self.failure.note(tx.execute("insert or ignore into entry_media (entry_id, url) values (?1, ?2)", params![id, img]));
                         images.push(img.clone());
                     }
                     added.push(Entry {
@@ -523,12 +532,12 @@ impl Store {
                 } else {
                     let before: Option<(String, i64)> = current.query_row([&id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
                     let had: bool = tx.query_row("select attachments is not null from entries where id = ?1", [&id], |r| r.get(0)).unwrap_or(true);
-                    note(&self.failure, fill.execute(params![id, item.content, item.summary, item.author, item.title, published, attachments_json(&item.attachments)]));
+                    self.failure.note(fill.execute(params![id, item.content, item.summary, item.author, item.title, published, attachments_json(&item.attachments)]));
                     if !had && !item.attachments.is_empty() {
                         refilled.push(id.clone());
                     }
                     if let Some(body) = item.content.as_deref().or(item.summary.as_deref()) {
-                        note(&self.failure, tx.execute(
+                        self.failure.note(tx.execute(
                             "update entries_fts set body = ?2 where rowid = (select rowid from entries where id = ?1) and body = ''",
                             params![id, body],
                         ));
@@ -542,7 +551,7 @@ impl Store {
                 }
             }
         }
-        note(&self.failure, tx.commit());
+        self.failure.note(tx.commit());
         let refilled = refilled.iter().filter_map(|id| self.entry(id).map(|x| x.0)).collect();
         Inserted { added, updated, images, refilled }
     }
@@ -557,10 +566,10 @@ impl Store {
                 )
                 .unwrap();
             for id in ids {
-                note(&self.failure, st.execute(params![id, read as i64, now]));
+                self.failure.note(st.execute(params![id, read as i64, now]));
             }
         }
-        note(&self.failure, tx.commit());
+        self.failure.note(tx.commit());
     }
 
     pub fn set_bookmarked(&mut self, ids: &[EntryId], on: bool, now: i64) {
@@ -573,18 +582,18 @@ impl Store {
                 )
                 .unwrap();
             for id in ids {
-                note(&self.failure, st.execute(params![id, on as i64, now]));
+                self.failure.note(st.execute(params![id, on as i64, now]));
             }
         }
-        note(&self.failure, tx.commit());
+        self.failure.note(tx.commit());
     }
 
     pub fn remove_feed(&self, id: &str, now: i64) {
-        note(&self.failure, self.db.execute("update feeds set removed_at = ?2 where id = ?1", params![id, now]));
+        self.failure.note(self.db.execute("update feeds set removed_at = ?2 where id = ?1", params![id, now]));
     }
 
     pub fn restore_feed(&self, id: &str) {
-        note(&self.failure, self.db.execute("update feeds set removed_at = null where id = ?1", [id]));
+        self.failure.note(self.db.execute("update feeds set removed_at = null where id = ?1", [id]));
     }
 
     pub fn removed_entries(&self, feed: &str) -> Vec<Entry> {
@@ -598,16 +607,16 @@ impl Store {
     }
 
     pub fn rename_feed(&self, id: &str, label: Option<&str>) {
-        note(&self.failure, self.db.execute("update feeds set label = ?2 where id = ?1", params![id, label]));
+        self.failure.note(self.db.execute("update feeds set label = ?2 where id = ?1", params![id, label]));
     }
 
     pub fn purge_removed(&self, before: i64) {
-        note(&self.failure, self.db.execute(
+        self.failure.note(self.db.execute(
             "delete from entries_fts where rowid in (select e.rowid from entries e join feeds f on f.id = e.feed_id
              where f.removed_at is not null and f.removed_at < ?1)",
             [before],
         ));
-        note(&self.failure, self.db.execute("delete from feeds where removed_at is not null and removed_at < ?1", [before]));
+        self.failure.note(self.db.execute("delete from feeds where removed_at is not null and removed_at < ?1", [before]));
     }
 
     #[profiling::function]
@@ -642,14 +651,14 @@ impl Store {
         }
         let tx = self.db.savepoint().unwrap();
         for id in &doomed {
-            note(&self.failure, tx.execute("delete from entries_fts where rowid = (select rowid from entries where id = ?1)", [id]));
-            note(&self.failure, tx.execute("delete from entries where id = ?1", [id]));
-            note(&self.failure, tx.execute("delete from states where entry_id = ?1", [id]));
-            note(&self.failure, tx.execute("delete from bodies where entry_id = ?1", [id]));
-            note(&self.failure, tx.execute("delete from extract_failed where entry_id = ?1", [id]));
-            note(&self.failure, tx.execute("delete from entry_media where entry_id = ?1", [id]));
+            self.failure.note(tx.execute("delete from entries_fts where rowid = (select rowid from entries where id = ?1)", [id]));
+            self.failure.note(tx.execute("delete from entries where id = ?1", [id]));
+            self.failure.note(tx.execute("delete from states where entry_id = ?1", [id]));
+            self.failure.note(tx.execute("delete from bodies where entry_id = ?1", [id]));
+            self.failure.note(tx.execute("delete from extract_failed where entry_id = ?1", [id]));
+            self.failure.note(tx.execute("delete from entry_media where entry_id = ?1", [id]));
         }
-        note(&self.failure, tx.commit());
+        self.failure.note(tx.commit());
         doomed
     }
 
@@ -672,7 +681,7 @@ impl Store {
     }
 
     pub fn extract_failed(&self, id: &str, error: &str, now: i64) {
-        note(&self.failure, self.db.execute(
+        self.failure.note(self.db.execute(
             "insert into extract_failed (entry_id, at, error) values (?1, ?2, ?3) on conflict(entry_id) do update set at = excluded.at, error = excluded.error",
             params![id, now, error],
         ));
@@ -687,7 +696,7 @@ impl Store {
     }
 
     pub fn set_clean_body(&self, id: &str, html: &str, now: i64) {
-        note(&self.failure, self.db.execute(
+        self.failure.note(self.db.execute(
             "insert or replace into bodies (entry_id, clean, extracted_at) values (?1, ?2, ?3)",
             params![id, html, now],
         ));
@@ -737,7 +746,7 @@ impl Store {
             ("prefetch_days", s.prefetch_days.to_string()),
         ];
         for (k, v) in pairs {
-            note(&self.failure, self.db.execute(
+            self.failure.note(self.db.execute(
                 "insert into settings (key, value) values (?1, ?2) on conflict(key) do update set value = excluded.value",
                 params![k, v],
             ));
@@ -751,7 +760,7 @@ impl Store {
         let mut bytes = [0u8; 24];
         getrandom::fill(&mut bytes).expect("system randomness");
         let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-        note(&self.failure, self.db.execute("insert into settings (key, value) values ('public_token', ?1)", [&token]));
+        self.failure.note(self.db.execute("insert into settings (key, value) values ('public_token', ?1)", [&token]));
         token
     }
 
@@ -771,7 +780,7 @@ impl Store {
         let key = format!("offered:{host}");
         let seen = self.db.query_row("select 1 from settings where key = ?1", [&key], |_| Ok(())).is_ok();
         if !seen {
-            note(&self.failure, self.db.execute("insert into settings (key, value) values (?1, '1')", [&key]));
+            self.failure.note(self.db.execute("insert into settings (key, value) values (?1, '1')", [&key]));
         }
         seen
     }
@@ -797,29 +806,29 @@ impl Store {
             .prepare("select substr(key, 9), value from clock where key like 'folders:%' and value is not null")
             .and_then(|mut st| st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map(|rows| rows.filter_map(Result::ok).collect()))
             .unwrap_or_default();
-        note(&self.failure, tx.execute("delete from folder_feeds", []));
-        note(&self.failure, tx.execute("delete from folders", []));
+        self.failure.note(tx.execute("delete from folder_feeds", []));
+        self.failure.note(tx.execute("delete from folders", []));
         for (id, name) in &named {
-            note(&self.failure, tx.execute("insert into folders (id, name) values (?1, ?2)", params![id, name]));
+            self.failure.note(tx.execute("insert into folders (id, name) values (?1, ?2)", params![id, name]));
         }
         for (feed, ids) in members {
             for id in serde_json::from_str::<Vec<String>>(&ids).unwrap_or_default() {
-                note(&self.failure, tx.execute(
+                self.failure.note(tx.execute(
                     "insert or ignore into folder_feeds (folder_id, feed_id) select ?1, ?2 where exists (select 1 from folders where id = ?1)",
                     params![id, feed],
                 ));
             }
         }
-        note(&self.failure, tx.commit());
+        self.failure.note(tx.commit());
     }
 
     pub fn set_feed_flag(&self, id: &str, column: &str, on: bool) {
         let sql = format!("update feeds set {column} = ?2 where id = ?1");
-        note(&self.failure, self.db.execute(&sql, params![id, on as i64]));
+        self.failure.note(self.db.execute(&sql, params![id, on as i64]));
     }
 
     pub fn set_feed_mode(&self, id: &str, mode: Option<Mode>) {
-        note(&self.failure, self.db.execute("update feeds set mode = ?2 where id = ?1", params![id, mode.map(|m| m.name())]));
+        self.failure.note(self.db.execute("update feeds set mode = ?2 where id = ?1", params![id, mode.map(|m| m.name())]));
     }
 
     pub fn rules(&self) -> Vec<Rule> {
@@ -837,14 +846,14 @@ impl Store {
     }
 
     pub fn add_rule(&self, rule: &Rule) {
-        note(&self.failure, self.db.execute(
+        self.failure.note(self.db.execute(
             "insert or replace into rules (id, word, scope) values (?1, ?2, ?3)",
             params![rule.id, rule.word, scope_text(&rule.scope)],
         ));
     }
 
     pub fn remove_rule(&self, id: &str) {
-        note(&self.failure, self.db.execute("delete from rules where id = ?1", [id]));
+        self.failure.note(self.db.execute("delete from rules where id = ?1", [id]));
     }
 
     pub fn recommendations(&self) -> Vec<Recommendation> {
@@ -873,7 +882,7 @@ impl Store {
     }
 
     pub fn unrecommend(&self, id: &str, now: i64) {
-        note(&self.failure, self.db.execute("update recommendations set removed_at = ?2 where entry_id = ?1", params![id, now]));
+        self.failure.note(self.db.execute("update recommendations set removed_at = ?2 where entry_id = ?1", params![id, now]));
     }
 
     pub fn public_items(&self) -> Vec<PublicItem> {
@@ -919,14 +928,14 @@ impl Store {
 
     pub fn save_link(&mut self, url: &str, title: &str, html: &str, now: i64) -> Entry {
         let id = entry_id(SAVED, url);
-        note(&self.failure, self.db.execute(
+        self.failure.note(self.db.execute(
             "insert into entries (id, feed_id, source_id, url, title, published, first_seen, content, cseq)
              values (?1, ?2, ?3, ?3, ?4, ?5, ?5, ?6, (select coalesce(max(cseq), 0) + 1 from entries))
              on conflict(id) do update set content = excluded.content, title = excluded.title, cseq = excluded.cseq",
             params![id, SAVED, url, title, now, html],
         ));
-        note(&self.failure, self.db.execute("delete from entries_fts where rowid = (select rowid from entries where id = ?1)", [&id]));
-        note(&self.failure, self.db.execute(
+        self.failure.note(self.db.execute("delete from entries_fts where rowid = (select rowid from entries where id = ?1)", [&id]));
+        self.failure.note(self.db.execute(
             "insert into entries_fts (rowid, title, body) select rowid, ?2, ?3 from entries where id = ?1",
             params![id, title, html],
         ));
@@ -1005,13 +1014,13 @@ impl Store {
                     .unwrap_or(0);
                 count += n;
                 if n == 1 {
-                    note(&self.failure, tx.execute(
+                    self.failure.note(tx.execute(
                         "insert into entries_fts (rowid, title, body) select rowid, ?2, '' from entries where id = ?1",
                         params![id, title],
                     ));
                 }
                 if read.is_some() || starred.is_some() {
-                    note(&self.failure, tx.execute(
+                    self.failure.note(tx.execute(
                         "insert or replace into states (entry_id, read, read_at, bookmarked, bookmarked_at) values (?1, ?2, ?3, ?4, ?5)",
                         params![
                             id,
@@ -1108,7 +1117,7 @@ impl Store {
     pub fn take_content(&mut self, feeds: &[WireFeed], entries: &[WireEntry]) -> Vec<Entry> {
         let tx = self.db.savepoint().unwrap();
         for f in feeds {
-            note(&self.failure, tx.execute(
+            self.failure.note(tx.execute(
                 "insert into feeds (id, url, title, site_url, position, last_fetched, error)
                  values (?1, ?2, ?3, ?4, 0, ?5, ?6)
                  on conflict(id) do update set title = excluded.title, site_url = excluded.site_url,
@@ -1129,14 +1138,14 @@ impl Store {
                 )
                 .unwrap_or(0);
             if n > 0 {
-                note(&self.failure, tx.execute("delete from entries_fts where rowid = (select rowid from entries where id = ?1)", [&e.id]));
-                note(&self.failure, tx.execute(
+                self.failure.note(tx.execute("delete from entries_fts where rowid = (select rowid from entries where id = ?1)", [&e.id]));
+                self.failure.note(tx.execute(
                     "insert into entries_fts (rowid, title, body) select rowid, ?2, ?3 from entries where id = ?1",
                     params![e.id, e.title, e.content.as_deref().or(e.summary.as_deref()).unwrap_or("")],
                 ));
             }
         }
-        note(&self.failure, tx.commit());
+        self.failure.note(tx.commit());
         for e in entries {
             if let Some((entry, _, _)) = self.entry(&e.id) {
                 added.push(entry);
@@ -1155,8 +1164,8 @@ impl Store {
             code.push(ALPHA[(n % 32) as usize] as char);
             n /= 32;
         }
-        note(&self.failure, self.db.execute("delete from pair_codes where expires < ?1", [now]));
-        note(&self.failure, self.db.execute("insert into pair_codes (code_hash, expires) values (?1, ?2)", params![hash(&code), now + 15 * 60_000]));
+        self.failure.note(self.db.execute("delete from pair_codes where expires < ?1", [now]));
+        self.failure.note(self.db.execute("insert into pair_codes (code_hash, expires) values (?1, ?2)", params![hash(&code), now + 15 * 60_000]));
         code
     }
 
@@ -1171,7 +1180,7 @@ impl Store {
         let mut bytes = [0u8; 32];
         getrandom::fill(&mut bytes).expect("system randomness");
         let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-        note(&self.failure, self.db.execute(
+        self.failure.note(self.db.execute(
             "insert into devices (token_hash, device, name, created) values (?1, ?2, ?3, ?4)",
             params![hash(&token), device, name, now],
         ));
@@ -1181,7 +1190,7 @@ impl Store {
     pub fn device_for(&self, token: &str, now: i64) -> Option<String> {
         let h = hash(token);
         let d = self.db.query_row("select device from devices where token_hash = ?1", [&h], |r| r.get::<_, String>(0)).ok()?;
-        note(&self.failure, self.db.execute("update devices set seen = ?2 where token_hash = ?1", params![h, now]));
+        self.failure.note(self.db.execute("update devices set seen = ?2 where token_hash = ?1", params![h, now]));
         Some(d)
     }
 
@@ -1193,7 +1202,7 @@ impl Store {
     }
 
     pub fn forget_device(&self, device: &str) {
-        note(&self.failure, self.db.execute("delete from devices where device = ?1", [device]));
+        self.failure.note(self.db.execute("delete from devices where device = ?1", [device]));
     }
 
     pub fn get(&self, key: &str) -> Option<String> {
@@ -1201,7 +1210,7 @@ impl Store {
     }
 
     pub fn put(&self, key: &str, value: &str) {
-        note(&self.failure, self.db.execute(
+        self.failure.note(self.db.execute(
             "insert into settings (key, value) values (?1, ?2) on conflict(key) do update set value = excluded.value",
             params![key, value],
         ));
@@ -1245,7 +1254,7 @@ impl Store {
             return d;
         }
         let d = new_id();
-        note(&self.failure, self.db.execute("insert into settings (key, value) values ('device_id', ?1)", [&d]));
+        self.failure.note(self.db.execute("insert into settings (key, value) values ('device_id', ?1)", [&d]));
         d
     }
 
@@ -1317,7 +1326,7 @@ impl Store {
 
     pub fn log_change(&self, c: &crate::types::Change) -> i64 {
         let cmd = serde_json::to_string(&c.command).unwrap_or_default();
-        note(&self.failure, self.db.execute(
+        self.failure.note(self.db.execute(
             "insert or ignore into changes (id, device, at, command) values (?1, ?2, ?3, ?4)",
             params![c.id, c.device, c.at, cmd],
         ));
@@ -1352,7 +1361,7 @@ impl Store {
     pub fn claim(&self, key: &str, at: i64, device: &str, value: &str) -> bool {
         let won = self.newer(key, at, device);
         if won {
-            note(&self.failure, self.db.execute("update clock set value = ?2 where key = ?1", params![key, value]));
+            self.failure.note(self.db.execute("update clock set value = ?2 where key = ?1", params![key, value]));
         }
         won
     }
@@ -1376,7 +1385,7 @@ impl Store {
             Some((a, d)) => at > a || (at == a && device > d.as_str()),
         };
         if win {
-            note(&self.failure, self.db.execute(
+            self.failure.note(self.db.execute(
                 "insert into clock (key, at, device) values (?1, ?2, ?3) on conflict(key) do update set at = excluded.at, device = excluded.device",
                 params![key, at, device],
             ));
@@ -1399,7 +1408,7 @@ impl Store {
         let (fails, interval) = crate::schedule::next(ok, fresh, fails, interval, base);
         let wait = if ok { interval } else { crate::schedule::backoff(fails, base) };
         let next = now + wait.max(hint.unwrap_or(0));
-        note(&self.failure, self.db.execute(
+        self.failure.note(self.db.execute(
             "update feeds set next_at = ?2, fails = ?3, interval = ?4 where id = ?1",
             params![id, next, fails, interval],
         ));
@@ -1415,7 +1424,7 @@ impl Store {
 
     pub fn set_tabs(&self, tabs: &[crate::types::TabState]) {
         if let Ok(v) = serde_json::to_string(tabs) {
-            note(&self.failure, self.db.execute(
+            self.failure.note(self.db.execute(
                 "insert into settings (key, value) values ('tabs', ?1) on conflict(key) do update set value = excluded.value",
                 [v],
             ));
@@ -1433,11 +1442,11 @@ impl Store {
     }
 
     pub fn touch_media(&self, url: &str, now: i64) {
-        note(&self.failure, self.db.execute("update media set used_at = ?2 where url = ?1", params![url, now]));
+        self.failure.note(self.db.execute("update media set used_at = ?2 where url = ?1", params![url, now]));
     }
 
     pub fn set_media(&self, url: &str, file: &str, kind: &str, bytes: i64, error: Option<&str>, now: i64) {
-        note(&self.failure, self.db.execute(
+        self.failure.note(self.db.execute(
             "insert into media (url, file, kind, bytes, error, fetched_at, used_at) values (?1, ?2, ?3, ?4, ?5, ?6, ?6)
              on conflict(url) do update set file = excluded.file, kind = excluded.kind, bytes = excluded.bytes,
              error = excluded.error, fetched_at = excluded.fetched_at, used_at = excluded.used_at",
@@ -1448,9 +1457,9 @@ impl Store {
     pub fn link_media(&mut self, links: &[(EntryId, String)]) {
         let tx = self.db.savepoint().unwrap();
         for (entry, url) in links {
-            note(&self.failure, tx.execute("insert or ignore into entry_media (entry_id, url) values (?1, ?2)", params![entry, url]));
+            self.failure.note(tx.execute("insert or ignore into entry_media (entry_id, url) values (?1, ?2)", params![entry, url]));
         }
-        note(&self.failure, tx.commit());
+        self.failure.note(tx.commit());
     }
 
     #[profiling::function]
@@ -1466,7 +1475,7 @@ impl Store {
             .prepare(&format!("select file from media where used_at < ?1 and not {kept}"))
             .and_then(|mut st| st.query_map([week], |r| r.get::<_, String>(0)).map(|rows| rows.filter_map(Result::ok).collect()))
             .unwrap_or_default();
-        note(&self.failure, self.db.execute(&format!("delete from media where used_at < ?1 and not {kept}"), [week]));
+        self.failure.note(self.db.execute(&format!("delete from media where used_at < ?1 and not {kept}"), [week]));
         let total: i64 = self.db.query_row("select coalesce(sum(bytes), 0) from media", [], |r| r.get(0)).unwrap_or(0);
         if total > budget {
             let rows: Vec<(String, String, i64)> = self
@@ -1479,12 +1488,12 @@ impl Store {
                 if over <= 0 {
                     break;
                 }
-                note(&self.failure, self.db.execute("delete from media where url = ?1", [&url]));
+                self.failure.note(self.db.execute("delete from media where url = ?1", [&url]));
                 doomed.push(file);
                 over -= bytes;
             }
         }
-        note(&self.failure, self.db.execute("delete from entry_media where entry_id not in (select id from entries)", []));
+        self.failure.note(self.db.execute("delete from entry_media where entry_id not in (select id from entries)", []));
         doomed.retain(|f| !f.is_empty());
         doomed
     }

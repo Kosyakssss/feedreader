@@ -230,6 +230,13 @@ pub(crate) enum Internal {
     Added(FeedId, Result<Fetch, String>),
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Reach {
+    Offline,
+    Online,
+    Mismatch,
+}
+
 struct Engine {
     dir: PathBuf,
     store: Store,
@@ -253,8 +260,7 @@ struct Engine {
     batching: bool,
     changed: tokio::sync::watch::Sender<i64>,
     hub: Option<sat::HubLink>,
-    hub_online: bool,
-    hub_mismatch: bool,
+    reach: Reach,
     hub_address: String,
     hub_task: Option<tokio::task::JoinHandle<()>>,
     listener: Option<tokio::task::JoinHandle<()>>,
@@ -335,8 +341,7 @@ impl Engine {
             changed,
             batching: false,
             hub,
-            hub_online: false,
-            hub_mismatch: false,
+            reach: Reach::Offline,
             hub_address: String::new(),
             hub_task: None,
             listener: None,
@@ -888,7 +893,7 @@ impl Engine {
     }
 
     fn fetches(&self) -> bool {
-        self.hub.is_none() || !self.hub_online
+        self.hub.is_none() || self.reach != Reach::Online
     }
 
     fn start_satellite(&mut self, link: sat::HubLink) {
@@ -903,7 +908,7 @@ impl Engine {
     fn sync_status(&self) {
         let status = match &self.hub {
             Some(link) => SyncStatus::Satellite {
-                online: self.hub_online,
+                online: self.reach == Reach::Online,
                 address: if self.hub_address.is_empty() { link.addresses.first().cloned().unwrap_or_default() } else { self.hub_address.clone() },
             },
             None => SyncStatus::Hub { devices: self.store.devices().into_iter().map(|(_, name, seen)| (name, seen)).collect() },
@@ -1081,7 +1086,7 @@ impl Engine {
             let client = self.client.clone();
             let dir = self.dir.join("media");
             let gate = self.media_gate.clone();
-            let hub = self.hub.clone().filter(|_| self.hub_online);
+            let hub = self.hub.clone().filter(|_| self.reach == Reach::Online);
             self.spawn(async move {
                 let _permit = gate.acquire_owned().await;
                 if let Some(link) = hub
@@ -1215,18 +1220,20 @@ impl Engine {
                 }
             }
             Internal::HubVersion(address, protocol) => {
-                if !self.hub_mismatch {
-                    self.hub_mismatch = true;
+                if self.reach != Reach::Mismatch {
+                    self.reach = Reach::Mismatch;
                     let advice = if protocol < PROTOCOL as u64 { "Update Feedreader on the hub" } else { "Update Feedreader on this device" };
                     self.emit(Event::Message(format!("The hub at {address} runs a different version of Feedreader, so syncing is paused. {advice}.")));
                 }
             }
             Internal::HubOnline(online, address) => {
-                if online {
-                    self.hub_mismatch = false;
-                }
-                if online != self.hub_online || (online && self.hub_address != address) {
-                    self.hub_online = online;
+                let reach = match (online, self.reach) {
+                    (true, _) => Reach::Online,
+                    (false, Reach::Mismatch) => Reach::Mismatch,
+                    (false, _) => Reach::Offline,
+                };
+                if reach != self.reach || (online && self.hub_address != address) {
+                    self.reach = reach;
                     self.hub_address = address;
                     self.sync_status();
                 }
@@ -1480,7 +1487,7 @@ impl Engine {
                 }
                 let _ = std::fs::remove_file(self.dir.join("secrets/hub.json"));
                 self.hub = None;
-                self.hub_online = false;
+                self.reach = Reach::Offline;
                 self.emit(Event::Message("This device no longer syncs with a hub. Restart the engine to make it a hub.".into()));
                 self.sync_status();
             }
