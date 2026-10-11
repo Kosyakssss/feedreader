@@ -585,7 +585,13 @@ fn snapshot(title: &'static str, sheets: Vec<Sheet>, args: &[String], out: &Path
     let mut images = Images::new(|| {});
     let mut frames = Vec::new();
     for i in 0..3 {
-        let (quads, ms) = screen.paint(bench.style, palette, pointer, |s| bench.paint(s, &mut images));
+        let scope = args.iter().any(|a| a == "--scope");
+        let (quads, ms) = screen.paint(bench.style, palette, pointer, |s| {
+            bench.paint(s, &mut images);
+            if scope {
+                s.scope(crate::scope::Probe { frames: &[] });
+            }
+        });
         frames.push((quads, ms));
         if let (0, Some((from, to))) = (i, drag) {
             screen.select(from, to);

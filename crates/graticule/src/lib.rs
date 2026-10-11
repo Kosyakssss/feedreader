@@ -13,6 +13,7 @@ mod menu;
 pub mod picture;
 pub mod proof;
 pub mod sheets;
+pub mod scope;
 pub mod shell;
 pub mod specimen;
 pub mod state;

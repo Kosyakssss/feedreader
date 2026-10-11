@@ -113,6 +113,7 @@ enum Signal<W> {
     WebClose,
     Images,
     Access(accesskit_winit::Event),
+    Menu(String),
 }
 
 impl<W> From<accesskit_winit::Event> for Signal<W> {
@@ -287,6 +288,7 @@ struct Running<A: App> {
     _menu: Option<menu::Menu>,
     access: Option<accesskit_winit::Adapter>,
     title: &'static str,
+    scope: bool,
 }
 
 fn mods(m: ModifiersState) -> Mods {
@@ -328,6 +330,9 @@ impl<A: App> Running<A> {
         scene.pressed = self.left_down;
         let painted = self.app.paint(&mut scene, stats);
         scene.finish();
+        if self.scope {
+            scene.scope(crate::scope::Probe { frames: &self.frames });
+        }
         self.runs = std::mem::take(&mut scene.runs);
         self.pictures = std::mem::take(&mut scene.pictures);
         self.sensitive = std::mem::take(&mut scene.sensitive);
@@ -706,9 +711,7 @@ impl<A: App> Running<A> {
         }
         self.settle();
         self.render();
-        if let Some(id) = menu::popup(&self.window, &items) {
-            self.app.context_chosen(id);
-        }
+        menu::popup(&self.window, &items);
     }
 
     fn drag_thumb(&mut self) {
@@ -808,7 +811,15 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
         let font_size = self.config.font_size;
         let metrics = metrics(&mut text, font_size, window.scale_factor() as f32, size.width, size.height);
         let system_dark = window.theme() == Some(winit::window::Theme::Dark);
-        let menu = if self.config.visible { menu::install(event_loop, self.config.title) } else { None };
+        let scope = std::env::var_os("GRATICULE_SCOPE").is_some_and(|v| v != "0");
+        let menu_proxy = self.proxy.clone();
+        let menu = if self.config.visible {
+            menu::install(event_loop, self.config.title, scope, move |id| {
+                let _ = menu_proxy.send_event(Signal::Menu(id));
+            })
+        } else {
+            None
+        };
         let waker = Waker { proxy: self.proxy.clone() };
         let mut cx = Ctx {
             window: &window,
@@ -870,6 +881,7 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             _menu: menu,
             access,
             title: self.config.title,
+            scope,
         };
         running.settle();
         if self.config.visible {
@@ -908,6 +920,17 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
                     }
                 }
                 accesskit_winit::WindowEvent::AccessibilityDeactivated => false,
+            },
+            Signal::Menu(id) if id == menu::SCOPE => {
+                r.scope = !r.scope;
+                true
+            }
+            Signal::Menu(id) => match id.parse() {
+                Ok(chosen) => {
+                    r.app.context_chosen(chosen);
+                    true
+                }
+                Err(_) => false,
             },
         };
         if redraw {

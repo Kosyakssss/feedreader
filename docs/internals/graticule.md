@@ -51,3 +51,7 @@ Engraver doesn't keep an SVG's colors: each fill and stroke takes the semantic i
 ## A canvas transforms points, not strokes
 
 Canvas paths are kept in the canvas's coordinates and mapped to pixels point by point before they're rasterized, so a chart can stretch differently across and down while its strokes stay one, two or three device pixels wide and its dots stay round. Each mapped path is rasterized once into the glyph atlas and cached by its points; a canvas that changes every frame keeps adding new shapes, and when the atlas fills it is cleared along with the glyphs. A canvas registers its rectangle as sensitive, so moving the pointer inside it repaints and hit testing follows the shape under the pointer, not the canvas's rectangle.
+
+## Menu choices arrive as events
+
+muda delivers both menu bar and context menu choices through one event handler, which the shell turns into an event-loop signal. A context menu's choice therefore reaches `App::context_chosen` just after the menu closes, not as the menu call's return value; the View menu's Scope item toggles the inspector the same way.

@@ -4,9 +4,12 @@ pub type Menu = muda::Menu;
 #[cfg(not(target_os = "macos"))]
 pub type Menu = ();
 
+pub const SCOPE: &str = "graticule.scope";
+
 #[cfg(target_os = "macos")]
-pub fn install(event_loop: &winit::event_loop::ActiveEventLoop, title: &str) -> Option<Menu> {
-    use muda::{PredefinedMenuItem as Item, Submenu};
+pub fn install(event_loop: &winit::event_loop::ActiveEventLoop, title: &str, scope: bool, chosen: impl Fn(String) + Send + Sync + 'static) -> Option<Menu> {
+    use muda::{CheckMenuItem, PredefinedMenuItem as Item, Submenu};
+    muda::MenuEvent::set_event_handler(Some(move |e: muda::MenuEvent| chosen(e.id.0)));
     use winit::platform::macos::ActiveEventLoopExtMacOS;
     event_loop.set_allows_automatic_window_tabbing(false);
     let app = Submenu::with_items(
@@ -31,14 +34,15 @@ pub fn install(event_loop: &winit::event_loop::ActiveEventLoop, title: &str) -> 
         &[&Item::minimize(None), &Item::zoom(None), &Item::fullscreen(None), &Item::separator(), &Item::bring_all_to_front(None)],
     )
     .ok()?;
-    let menu = muda::Menu::with_items(&[&app, &window]).ok()?;
+    let view = Submenu::with_items("View", true, &[&CheckMenuItem::with_id(SCOPE, "Show SC-01 Scope", true, scope, None)]).ok()?;
+    let menu = muda::Menu::with_items(&[&app, &view, &window]).ok()?;
     menu.init_for_nsapp();
     window.set_as_windows_menu_for_nsapp();
     Some(menu)
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn install(_: &winit::event_loop::ActiveEventLoop, _: &str) -> Option<Menu> {
+pub fn install(_: &winit::event_loop::ActiveEventLoop, _: &str, _: bool, _: impl Fn(String) + Send + Sync + 'static) -> Option<Menu> {
     None
 }
 
@@ -83,23 +87,18 @@ fn accelerator(chord: &crate::commands::Chord) -> Option<muda::accelerator::Acce
 
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
-pub fn popup(window: &winit::window::Window, items: &[(u32, String, Option<crate::commands::Chord>)]) -> Option<u32> {
+pub fn popup(window: &winit::window::Window, items: &[(u32, String, Option<crate::commands::Chord>)]) {
     use muda::ContextMenu;
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     let menu = muda::Menu::new();
     for (id, label, chord) in items {
-        menu.append(&muda::MenuItem::with_id(id.to_string(), label, true, chord.as_ref().and_then(accelerator))).ok()?;
+        if menu.append(&muda::MenuItem::with_id(id.to_string(), label, true, chord.as_ref().and_then(accelerator))).is_err() {
+            return;
+        }
     }
-    let RawWindowHandle::AppKit(view) = window.window_handle().ok()?.as_raw() else { return None };
-    while muda::MenuEvent::receiver().try_recv().is_ok() {}
-    let shown = unsafe { menu.show_context_menu_for_nsview(view.ns_view.as_ptr(), None) };
-    if !shown {
-        return None;
-    }
-    muda::MenuEvent::receiver().try_recv().ok().and_then(|e| e.id.0.parse().ok())
+    let Some(RawWindowHandle::AppKit(view)) = window.window_handle().ok().map(|h| h.as_raw()) else { return };
+    unsafe { menu.show_context_menu_for_nsview(view.ns_view.as_ptr(), None) };
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn popup(_: &winit::window::Window, _: &[(u32, String, Option<crate::commands::Chord>)]) -> Option<u32> {
-    None
-}
+pub fn popup(_: &winit::window::Window, _: &[(u32, String, Option<crate::commands::Chord>)]) {}
