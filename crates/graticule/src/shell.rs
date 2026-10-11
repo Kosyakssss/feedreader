@@ -162,14 +162,16 @@ pub trait App: Sized + 'static {
 }
 
 pub fn metrics(text: &mut Text, font_size: f32, scale: f32, width: u32, height: u32) -> Metrics {
-    let font = font_size * scale;
-    let cell_h = (font * 1.6).round();
+    let base = font_size * scale;
     let probe = TextStyle {
         face: Face::Mono,
-        size: font,
+        size: base,
         weight: 400.0,
     };
-    let cell_w = text.measure("0000000000", probe, cell_h) / 10.0;
+    let advance = text.measure("0000000000", probe, base) / 10.0;
+    let cell_w = advance.round().max(1.0);
+    let font = base * cell_w / advance;
+    let cell_h = (font * 1.6).round();
     Metrics {
         scale,
         size: font,

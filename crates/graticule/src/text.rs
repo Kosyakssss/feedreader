@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
 use parley::{
-    Alignment, AlignmentOptions, FontContext, FontFamily, FontStyle, FontVariations, FontWeight, Layout,
+    Alignment, AlignmentOptions, FontContext, FontFamily, FontStyle, FontWeight, Layout,
     LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty,
 };
 use swash::scale::{Render, ScaleContext, Source, StrikeWith};
@@ -11,9 +11,15 @@ use swash::zeno::{Format, Vector};
 
 use crate::gpu::{ATLAS, Quad};
 
-const FONT: &[u8] = include_bytes!("../assets/fonts/GoogleSansCode.ttf");
-const FONT_ITALIC: &[u8] = include_bytes!("../assets/fonts/GoogleSansCode-Italic.ttf");
-const FAMILY: &str = "Google Sans Code";
+const MONO: &[&[u8]] = &[include_bytes!("../assets/fonts/IBMPlexMono-Var.ttf"), include_bytes!("../assets/fonts/IBMPlexMono-VarItalic.ttf")];
+const SANS: &[&[u8]] = &[
+    include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf"),
+    include_bytes!("../assets/fonts/IBMPlexSans-Italic.ttf"),
+    include_bytes!("../assets/fonts/IBMPlexSans-Medium.ttf"),
+    include_bytes!("../assets/fonts/IBMPlexSans-SemiBold.ttf"),
+    include_bytes!("../assets/fonts/IBMPlexSans-SemiBoldItalic.ttf"),
+    include_bytes!("../assets/fonts/IBMPlexSans-Bold.ttf"),
+];
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Face {
@@ -104,6 +110,8 @@ impl Shelf {
 
 pub struct Text {
     fonts: FontContext,
+    mono: String,
+    sans: String,
     layouts_cx: LayoutContext<u8>,
     scale: ScaleContext,
     layouts: HashMap<u64, (Layout<u8>, u64)>,
@@ -135,12 +143,23 @@ impl Default for Text {
 impl Text {
     pub fn new() -> Self {
         let mut fonts = FontContext::new();
-        fonts.collection.register_fonts(parley::fontique::Blob::from(FONT.to_vec()), None);
-        fonts
-            .collection
-            .register_fonts(parley::fontique::Blob::from(FONT_ITALIC.to_vec()), None);
+        let mut register = |files: &[&[u8]]| {
+            let mut name = String::new();
+            for file in files {
+                for (family, _) in fonts.collection.register_fonts(parley::fontique::Blob::from(file.to_vec()), None) {
+                    if name.is_empty() {
+                        name = fonts.collection.family_name(family).unwrap_or_default().to_string();
+                    }
+                }
+            }
+            name
+        };
+        let mono = register(MONO);
+        let sans = register(SANS);
         Self {
             fonts,
+            mono,
+            sans,
             layouts_cx: LayoutContext::new(),
             scale: ScaleContext::new(),
             layouts: HashMap::new(),
@@ -178,11 +197,12 @@ impl Text {
         let frame = self.frame;
         let fonts = &mut self.fonts;
         let cx = &mut self.layouts_cx;
+        let (mono, sans) = (self.mono.as_str(), self.sans.as_str());
         let entry = self.layouts.entry(key).or_insert_with(|| {
             profiling::scope!("shape");
             let text: String = spans.iter().map(|(t, _)| *t).collect();
             let mut b = cx.ranged_builder(fonts, &text, 1.0, true);
-            b.push_default(StyleProperty::FontFamily(FontFamily::named(FAMILY)));
+            b.push_default(StyleProperty::FontFamily(FontFamily::named(sans)));
             b.push_default(StyleProperty::FontSize(size));
             b.push_default(StyleProperty::LineHeight(LineHeight::Absolute(line)));
             let mut at = 0;
@@ -193,13 +213,9 @@ impl Text {
                     continue;
                 }
                 b.push(StyleProperty::FontWeight(FontWeight::new(s.weight as f32)), r.clone());
-                b.push(
-                    StyleProperty::FontVariations(FontVariations::from(match s.face {
-                        Face::Mono => "\"MONO\" 1",
-                        Face::Prop => "\"MONO\" 0",
-                    })),
-                    r.clone(),
-                );
+                if s.face == Face::Mono {
+                    b.push(StyleProperty::FontFamily(FontFamily::named(mono)), r.clone());
+                }
                 if s.italic {
                     b.push(StyleProperty::FontStyle(FontStyle::Italic), r.clone());
                 }

@@ -366,7 +366,7 @@ fn rank(cmd: Cmd) -> u8 {
 
 fn mode_label(m: &Model, mode: Mode) -> String {
     let current = m.reader.as_ref().map(|r| r.mode) == Some(mode);
-    format!("{} {}", if current { "\u{25CF}" } else { "\u{25CB}" }, mode.name())
+    if current { format!("\u{2022} {}", mode.name()) } else { mode.name().to_string() }
 }
 
 fn prompt(m: &mut Model, kind: PromptKind, label: &str, value: &str) {
