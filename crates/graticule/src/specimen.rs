@@ -6,7 +6,8 @@ use std::time::Instant;
 use crate::commands::{Chord, Command, Key, Registry};
 use crate::field::Field;
 use crate::grid::Area;
-use crate::images::Images;
+use crate::images::{Images, Slot};
+use crate::proof::{Proofs, Status, Variant, file_name, lines_name, write_png};
 use crate::shell::{self, App, Config, Ctx, Cursor, Effect, FrameStats, Offscreen, Painted};
 use crate::state::{Id, Scrolling, State};
 use crate::ui::{DARK, LIGHT, LineStyle, List, Palette, Scene};
@@ -76,6 +77,8 @@ pub enum Cmd {
     Frame,
     Scrolling,
     Blur,
+    Approve,
+    Diff,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,20 +115,15 @@ pub struct Bench {
     pub frame: Frame,
     pub scrolling: Scrolling,
     pub sandbox: Sandbox,
+    pub proofs: Proofs,
+    diff: bool,
+    variant: Option<Variant>,
+    approvals: u32,
+    note: Option<String>,
     paint_ms: f32,
 }
 
 const STYLES: [LineStyle; 5] = [LineStyle::Light, LineStyle::Heavy, LineStyle::Double, LineStyle::Dotted, LineStyle::Ascii];
-
-fn style_name(s: LineStyle) -> &'static str {
-    match s {
-        LineStyle::Ascii => "ascii",
-        LineStyle::Light => "light",
-        LineStyle::Heavy => "heavy",
-        LineStyle::Double => "double",
-        LineStyle::Dotted => "dotted",
-    }
-}
 
 impl Bench {
     pub fn new(title: &'static str, sheets: Vec<Sheet>) -> Self {
@@ -139,8 +137,21 @@ impl Bench {
             frame: Frame::Fit,
             scrolling: Scrolling::Rows,
             sandbox: Sandbox::default(),
+            proofs: Proofs::new(title),
+            diff: false,
+            variant: None,
+            approvals: 0,
+            note: None,
             paint_ms: 0.0,
         }
+    }
+
+    fn variant(&self, dark: bool) -> Variant {
+        Variant { lines: self.style, dark, cols: self.frame.cols().unwrap_or(100) }
+    }
+
+    fn status(&self) -> Option<Status> {
+        self.variant.and_then(|v| self.proofs.status(self.current, v))
     }
 
     pub fn palette(&self, system_dark: bool) -> Palette {
@@ -182,6 +193,21 @@ impl Bench {
                 }
             }
             Cmd::Blur => self.sandbox.focused = None,
+            Cmd::Approve => {
+                if let (Some(v), Some(sheet)) = (self.variant, self.sheets.get(self.current)) {
+                    self.note = Some(match self.proofs.approve(self.current, sheet, v) {
+                        Ok(path) => format!("approved {}", path.display()),
+                        Err(e) => format!("couldn't approve: {e}"),
+                    });
+                    self.approvals += 1;
+                    self.diff = false;
+                }
+            }
+            Cmd::Diff => self.diff = !self.diff,
+        }
+        if !matches!(cmd, Cmd::Approve | Cmd::Diff) {
+            self.diff = false;
+            self.note = None;
         }
     }
 
@@ -228,8 +254,13 @@ impl Bench {
         rows
     }
 
-    pub fn paint(&mut self, s: &mut Scene<Hit>) {
+    pub fn paint(&mut self, s: &mut Scene<Hit>, images: &mut Images) {
         s.state.scrolling = self.scrolling;
+        let variant = self.variant(s.palette == DARK);
+        self.variant = Some(variant);
+        if let Some(sheet) = self.sheets.get(self.current) {
+            self.proofs.check(self.current, sheet, variant);
+        }
         s.selectable = false;
         let pal = s.palette;
         let mono = s.m.mono();
@@ -246,7 +277,7 @@ impl Bench {
         let w = s.write(title, self.title, s.m.prop(600.0), pal.ink);
         let mut x = title.col + (w / s.m.cell_w).ceil() as i32 + 3;
         let controls: [(Cmd, &str, String); 5] = [
-            (Cmd::Style, "lines", style_name(self.style).into()),
+            (Cmd::Style, "lines", lines_name(self.style).into()),
             (Cmd::Appearance, "appearance", format!("{:?}", self.appearance).to_lowercase()),
             (Cmd::Frame, "frame", format!("{:?}", self.frame).to_lowercase()),
             (Cmd::Scrolling, "scrolling", format!("{:?}", self.scrolling).to_lowercase()),
@@ -291,6 +322,7 @@ impl Bench {
 
         let mut main = main.inset(2, 1);
         let head = main.take_top(1);
+        let proof_row = main.take_top(1);
         main.take_top(1);
         if let Some(sheet) = self.sheets.get(self.current) {
             let w = s.write(head, sheet.group, s.m.prop(400.0), pal.muted);
@@ -299,6 +331,26 @@ impl Bench {
             let ms = format!("paint {:.2} ms", self.paint_ms);
             let cols = ms.len() as i32;
             s.write(Area::new(head.right() - cols, head.row, cols, 1), &ms, mono, pal.muted);
+            let (proof, ink) = match self.status() {
+                Some(Status::Same) => ("matches its proof".to_string(), pal.muted),
+                Some(Status::Changed(n)) => (format!("{n} pixels differ from its proof"), pal.warn),
+                Some(Status::Missing) | None => ("no proof yet".to_string(), pal.faint),
+            };
+            let mut x = proof_row.col;
+            let w = s.write(Area::new(x, proof_row.row, proof.chars().count() as i32, 1), &proof, mono, ink);
+            x += (w / s.m.cell_w).ceil() as i32 + 3;
+            let mut actions = vec![(Cmd::Approve, "approve")];
+            if matches!(self.status(), Some(Status::Changed(_))) {
+                actions.push((Cmd::Diff, if self.diff { "show the sheet" } else { "show what changed" }));
+            }
+            for (cmd, label) in actions {
+                let a = Area::new(x, proof_row.row, label.len() as i32, 1);
+                let r = s.rect(a);
+                s.hover(r);
+                s.write(a, label, mono, pal.link);
+                s.hit(r, Hit::Run(cmd));
+                x += label.len() as i32 + 3;
+            }
             let area = match self.frame.cols() {
                 Some(cols) if cols + 2 < main.cols => Area::new(main.col, main.row, cols + 2, main.rows),
                 _ => main,
@@ -310,11 +362,23 @@ impl Bench {
                 area.inset(1, 1)
             };
             s.push_clip(s.rect(inner));
-            let started = Instant::now();
-            s.selectable = true;
-            (sheet.paint)(s, inner, &self.sandbox);
-            s.selectable = false;
-            self.paint_ms = started.elapsed().as_secs_f32() * 1000.0;
+            if self.diff {
+                let key = format!("diff:{}:{}", self.approvals, file_name(sheet, variant));
+                if images.get(&key).is_none() {
+                    images.load(key.clone(), self.proofs.diff_path(sheet, variant));
+                }
+                if let Some(Slot::Ready { id, width, height }) = images.get(&key) {
+                    let k = s.m.scale / 2.0;
+                    let r = s.rect(inner);
+                    s.image(crate::ui::Rect::new(r.x, r.y, width as f32 * k, height as f32 * k), id);
+                }
+            } else {
+                let started = Instant::now();
+                s.selectable = true;
+                (sheet.paint)(s, inner, &self.sandbox);
+                s.selectable = false;
+                self.paint_ms = started.elapsed().as_secs_f32() * 1000.0;
+            }
             s.pop_clip();
             if self.grid {
                 grid(s, inner);
@@ -326,7 +390,8 @@ impl Bench {
             .filter(|c| !c.keys.is_empty())
             .map(|c| format!("{} {}", crate::commands::keys_label(&c.keys), (c.label)(self)))
             .collect();
-        s.write(status.inset(1, 0), &keys.join("   "), mono, pal.muted);
+        let line = self.note.clone().unwrap_or_else(|| keys.join("   "));
+        s.write(status.inset(1, 0), &line, mono, pal.muted);
     }
 }
 
@@ -369,6 +434,8 @@ pub fn registry() -> &'static Registry<Cmd, Bench> {
                 c(Cmd::Frame, vec![], |_| "next frame".into(), |_| true),
                 c(Cmd::Scrolling, vec![], |_| "switch scrolling".into(), |_| true),
                 c(Cmd::Grid, vec![], |_| "show or hide the grid".into(), |_| true),
+                c(Cmd::Approve, vec![], |_| "approve this sheet as its proof".into(), |_| true),
+                c(Cmd::Diff, vec![], |_| "show what changed from the proof".into(), |b| matches!(b.status(), Some(Status::Changed(_)))),
             ],
         }
     })
@@ -406,7 +473,7 @@ impl App for Runner {
     }
 
     fn paint(&mut self, scene: &mut Scene<Hit>, _: FrameStats) -> Painted {
-        self.bench.paint(scene);
+        self.bench.paint(scene, &mut self.images);
         Painted::default()
     }
 
@@ -440,6 +507,8 @@ pub fn main(title: &'static str, sheets: impl Fn() -> Vec<Sheet> + 'static) {
     let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
     let result = if let Some(out) = arg("--snapshot") {
         snapshot(title, sheets(), &args, Path::new(&out))
+    } else if let Some(out) = arg("--out") {
+        export(title, sheets(), Path::new(&out))
     } else {
         shell::run(
             Config { title, size: (1280.0, 820.0), min_size: (640.0, 400.0), font_size: 13.0, visible: true },
@@ -467,10 +536,16 @@ fn snapshot(title: &'static str, sheets: Vec<Sheet>, args: &[String], out: &Path
         bench.appearance = Appearance::Dark;
     }
     if let Some(style) = arg("--lines") {
-        bench.style = STYLES.into_iter().find(|s| style_name(*s) == style).ok_or(format!("no line style {style}"))?;
+        bench.style = STYLES.into_iter().find(|s| lines_name(*s) == style).ok_or(format!("no line style {style}"))?;
     }
     if args.iter().any(|a| a == "--grid") {
         bench.grid = true;
+    }
+    if args.iter().any(|a| a == "--approve")
+        && let Some(sheet) = bench.sheets.get(bench.current)
+    {
+        let v = bench.variant(bench.appearance == Appearance::Dark);
+        bench.proofs.approve(bench.current, sheet, v)?;
     }
     let pointer = arg("--pointer").and_then(|s| s.split_once(',').and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?))));
     let mut screen = Offscreen::new(w * scale as u32, h * scale as u32, scale, 13.0);
@@ -479,9 +554,10 @@ fn snapshot(title: &'static str, sheets: Vec<Sheet>, args: &[String], out: &Path
         let n: Vec<f32> = s.split([',', ':']).filter_map(|v| v.parse().ok()).collect();
         (n.len() == 4).then(|| ((n[0] * scale, n[1] * scale), (n[2] * scale, n[3] * scale)))
     });
+    let mut images = Images::new(|| {});
     let mut frames = Vec::new();
     for i in 0..3 {
-        let (quads, ms) = screen.paint(bench.style, palette, pointer, |s| bench.paint(s));
+        let (quads, ms) = screen.paint(bench.style, palette, pointer, |s| bench.paint(s, &mut images));
         frames.push((quads, ms));
         if let (0, Some((from, to))) = (i, drag) {
             screen.select(from, to);
@@ -494,9 +570,42 @@ fn snapshot(title: &'static str, sheets: Vec<Sheet>, args: &[String], out: &Path
             println!("{:?} {:?}", node.role(), node.label().or(node.value()).unwrap_or_default());
         }
     }
-    let mut images = Images::new(|| {});
     let pixels = screen.capture(&quads, palette.bg, &mut images);
     screen.save_png(out, &pixels)?;
     println!("{} paint {ms:.2} ms, sheet {:.2} ms", out.display(), bench.paint_ms);
     Ok(())
 }
+
+fn export(title: &'static str, sheets: Vec<Sheet>, dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let mut proofs = Proofs::new(title);
+    let mut html = format!("<!doctype html><html><head><meta charset=\"utf-8\"><title>{title}</title><style>{EXPORT_STYLE}</style></head><body><h1>{title}</h1>");
+    for (i, sheet) in sheets.iter().enumerate() {
+        html.push_str(&format!("<h2>{} / {}</h2><table><tr><th></th><th>light</th><th>dark</th></tr>", sheet.group, sheet.name));
+        for lines in STYLES {
+            html.push_str(&format!("<tr><th>{}</th>", lines_name(lines)));
+            for dark in [false, true] {
+                let v = Variant { lines, dark, cols: 100 };
+                let render = proofs.render(sheet, v);
+                let file = file_name(sheet, v);
+                write_png(&dir.join(&file), &render)?;
+                let status = match proofs.check(i, sheet, v) {
+                    Status::Same => "matches its proof".to_string(),
+                    Status::Changed(n) => format!("<b>{n} pixels differ from its proof</b>"),
+                    Status::Missing => "no proof".to_string(),
+                };
+                html.push_str(&format!("<td><a href=\"{file}\"><img src=\"{file}\"></a><br>{:.2} ms, {status}</td>", render.ms));
+            }
+            html.push_str("</tr>");
+        }
+        html.push_str("</table>");
+        println!("{} / {}", sheet.group, sheet.name);
+    }
+    html.push_str("</body></html>");
+    let index = dir.join("index.html");
+    std::fs::write(&index, html).map_err(|e| format!("{}: {e}", index.display()))?;
+    println!("{}", index.display());
+    Ok(())
+}
+
+const EXPORT_STYLE: &str = "body{font:13px/1.5 ui-monospace,monospace;margin:2rem;background:#f9f9f7;color:#1a1a1c}h1,h2{font-size:13px;font-weight:600;letter-spacing:.04em;border-bottom:1px solid #b8b8ba;padding-bottom:.3rem;margin-top:2.5rem}table{border-collapse:collapse}th{font-weight:400;color:#737377;text-align:left;padding:.3rem .6rem;vertical-align:top}td{padding:.3rem .6rem;vertical-align:top;color:#737377}img{width:520px;border:1px solid #b8b8ba;display:block}b{color:#9e6b0d;font-weight:400}";

@@ -39,3 +39,7 @@ Every piece of text drawn while `Scene::selectable` is on is recorded as a run: 
 ## Accessibility comes from what was painted
 
 Every app gets an AccessKit tree without describing one: the shell builds it after each frame, only while an assistive technology is listening, from what the frame recorded. Each clickable area becomes a button labelled by the text drawn inside it, other text becomes labels, fields become text inputs with the focused one's value, all in drawing order. A click from VoiceOver presses the same hit a mouse would. Text that opts out of selection is still recorded, flagged, so it stays readable. The window is created hidden and shown after the adapter exists, as AccessKit requires on macOS. Components can give richer roles (lists, checkboxes, tabs) as the library grows; `specimen --snapshot … --access` prints the tree.
+
+## Proofs are rendered offscreen at a fixed size
+
+A proof is a sheet rendered by its own offscreen GPU device at scale 2, 100 columns (or the frame's width) by 40 rows, with an empty sandbox, so it doesn't depend on the window's size, what was clicked or the paint time in the header. Approving writes it as a PNG under the platform data folder (`Graticule/Specimen/<app>/`), one file per sheet, line style, appearance and width; it isn't committed, since a round of approvals would add megabytes of images to the history. Checking renders the sheet again and compares pixels exactly; a difference also writes a `.diff.png` with the changed pixels in red over a faded copy, which the window shows on request.

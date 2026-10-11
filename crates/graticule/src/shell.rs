@@ -1029,13 +1029,15 @@ pub struct Offscreen {
     pub metrics: Metrics,
     width: u32,
     height: u32,
+    scale: f32,
+    font_size: f32,
 }
 
 impl Offscreen {
     pub fn new(width: u32, height: u32, scale: f32, font_size: f32) -> Self {
         let mut text = Text::new();
         let metrics = metrics(&mut text, font_size, scale, width, height);
-        Self { gpu: Gpu::new(None, (width, height)), text, state: State::default(), runs: Vec::new(), hits: Vec::new(), fields: Vec::new(), metrics, width, height }
+        Self { gpu: Gpu::new(None, (width, height)), text, state: State::default(), runs: Vec::new(), hits: Vec::new(), fields: Vec::new(), metrics, width, height, scale, font_size }
     }
 
     pub fn paint<H>(&mut self, style: LineStyle, palette: Palette, pointer: Option<(f32, f32)>, f: impl FnOnce(&mut Scene<H>)) -> (Vec<Quad>, f32) {
@@ -1051,6 +1053,19 @@ impl Offscreen {
         self.fields = std::mem::take(&mut scene.fields);
         let quads = std::mem::take(&mut scene.quads);
         (quads, started.elapsed().as_secs_f32() * 1000.0)
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32) {
+        if (width, height) == (self.width, self.height) {
+            return;
+        }
+        self.gpu.resize(width, height);
+        self.metrics = metrics(&mut self.text, self.font_size, self.scale, width, height);
+        (self.width, self.height) = (width, height);
+    }
+
+    pub fn size(&self) -> (u32, u32) {
+        (self.width, self.height)
     }
 
     pub fn select(&mut self, from: (f32, f32), to: (f32, f32)) {

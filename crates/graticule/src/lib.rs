@@ -8,6 +8,7 @@ pub mod gpu;
 pub mod grid;
 pub mod images;
 mod menu;
+pub mod proof;
 pub mod sheets;
 pub mod shell;
 pub mod specimen;
