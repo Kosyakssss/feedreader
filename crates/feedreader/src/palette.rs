@@ -216,7 +216,7 @@ fn describe(m: &Model, reg: &Registry<Cmd, Model>, item: &Item) -> (String, Stri
 }
 
 #[profiling::function]
-pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, main: Rect) -> Option<Rect> {
+pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, main: Rect) {
     let mt = s.m;
     let (cw, ch) = (mt.cell_w, mt.cell_h);
     let pal = s.palette;
@@ -227,8 +227,9 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, main
     let tw = s.text(title, mono, main.x + cw, main.y, None, pal.ink).width;
     let fx = main.x + cw * 3.0 + tw;
     let field = Rect::new(fx, main.y, (main.right() - fx - cw * 2.0).max(cw * 10.0), ch);
-    let current = m.palette.as_ref().map(|p| p.field.clone()).unwrap_or_default();
-    let caret = s.field(field, &current, true, "type to search; is:unread in:folder from:feed");
+    if let Some(p) = &m.palette {
+        s.field(field, &p.field, true, "type to search; is:unread in:folder from:feed");
+    }
     s.hit(field, Hit::Palette(usize::MAX));
     let mut y = main.y + ch;
     if let Some(e) = &error {
@@ -236,7 +237,7 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, main
         y += ch;
     }
     let list = Rect::new(main.x, y, main.w, main.bottom() - y);
-    let Some(p) = m.palette.as_mut() else { return caret };
+    let Some(p) = m.palette.as_mut() else { return };
     p.row_h = ch;
     p.view_h = list.h;
     let max = (p.items.len() as f32 * ch - list.h).max(0.0);
@@ -250,7 +251,7 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, main
     if p.items.is_empty() {
         let msg = if text.trim().is_empty() { "Nothing to show." } else { "Nothing matches." };
         s.text(msg, mt.prop(400.0), main.x + cw, list.y, None, pal.muted);
-        return caret;
+        return;
     }
     s.push_clip(Rect::new(list.x, list.y, list.w - cw * 2.5, list.h));
     let first = (scroll / ch).floor() as usize;
@@ -277,5 +278,4 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, main
         s.hit(r, Hit::Palette(row));
     }
     s.pop_clip();
-    caret
 }

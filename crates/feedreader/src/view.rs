@@ -51,7 +51,6 @@ pub enum Web {
 
 pub struct PaintOut {
     pub webview: Option<(Rect, Web)>,
-    pub ime: Option<Rect>,
 }
 
 pub fn when(ms: i64) -> String {
@@ -179,7 +178,7 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
     let (cw, ch) = (mt.cell_w, mt.cell_h);
     let pal = s.palette;
     let mono = mt.mono();
-    let mut out = PaintOut { webview: None, ime: None };
+    let mut out = PaintOut { webview: None };
     let hair = mt.scale.round().max(1.0);
 
     let refresh = if !m.ready {
@@ -279,13 +278,10 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
         let err_w = p.error.as_ref().map(|e| s.measure(e, mono) + cw * 2.0).unwrap_or(0.0);
         let fw = (mt.width - fx - cw - err_w).max(cw * 10.0);
         let field = Rect::new(fx, y, fw, ch);
-        let caret = s.field(field, &p.field, m.focus == Focus::Prompt, "");
+        s.field(field, &p.field, m.focus == Focus::Prompt, "");
         s.hit(field, Hit::Prompt);
         if let Some(e) = &p.error {
             s.text(e, mono, field.right() + cw, y, None, pal.danger);
-        }
-        if m.focus == Focus::Prompt {
-            out.ime = caret;
         }
         y += ch;
     }
@@ -334,7 +330,7 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
         Rect::new(main.x, main.y + ch * 2.0, main.w, main.h - ch * 2.0)
     };
     if m.palette.is_some() {
-        out.ime = crate::palette::paint(m, reg, s, main);
+        crate::palette::paint(m, reg, s, main);
         return out;
     }
     if m.reader.is_some() {
@@ -342,7 +338,7 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
         return out;
     }
     match m.page {
-        Page::List => paint_list(m, s, main, &mut out),
+        Page::List => paint_list(m, s, main),
         Page::Feeds => paint_feeds(m, s, main),
         Page::Settings => paint_settings(m, s, main),
         Page::Help => paint_help(m, reg, s, main),
@@ -527,7 +523,7 @@ fn paint_strip(m: &mut Model, s: &mut Scene<Hit>, r: Rect) {
 }
 
 #[profiling::function]
-fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOut) {
+fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
     let mt = s.m;
     let (cw, ch) = (mt.cell_w, mt.cell_h);
     let pal = s.palette;
@@ -547,11 +543,8 @@ fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOut)
     let fw = (main.right() - cw * 4.0 - cnt_w - fx).min(cw * 36.0);
     if fw > cw * 8.0 {
         let field = Rect::new(fx, main.y, fw, ch);
-        let caret = s.field(field, &m.filter, m.focus == Focus::Filter, "filter");
+        s.field(field, &m.filter, m.focus == Focus::Filter, "filter");
         s.hit(field, Hit::Filter);
-        if m.focus == Focus::Filter {
-            out.ime = caret;
-        }
     }
 
     let narrow = main.w < cw * 72.0;

@@ -18,11 +18,12 @@ use std::time::{Duration, Instant};
 
 use engine::{Event, Request};
 use graticule::commands::{Chord, Key, Registry};
+use graticule::field::{Edit, Keys};
 use graticule::images::Images;
 use graticule::shell::{Config, Ctx, Effect, FrameStats, Offscreen, Painted, Waker};
 use graticule::ui::{DARK, LIGHT, LineStyle, Palette, Scene};
 
-use model::{Focus, Model};
+use model::Model;
 
 const BASE_SIZE: f32 = 13.0;
 
@@ -178,23 +179,9 @@ impl Stage {
                 }
                 other if other.starts_with("type:") => {
                     let t = other.trim_start_matches("type:").replace('_', " ");
-                    match model.focus {
-                        Focus::Filter => {
-                            model.filter.insert(&t);
-                            model.reset_list();
-                        }
-                        Focus::Prompt => {
-                            if let Some(p) = model.prompt.as_mut() {
-                                p.field.insert(&t);
-                            }
-                        }
-                        Focus::Palette => {
-                            if let Some(p) = model.palette.as_mut() {
-                                p.field.insert(&t);
-                            }
-                            palette::refresh(model);
-                        }
-                        Focus::Main => {}
+                    if let Some(f) = model.field() {
+                        f.insert(&t);
+                        model.field_changed();
                     }
                     continue;
                 }
@@ -209,6 +196,21 @@ impl Stage {
                     let name = other.trim_start_matches("cmd:");
                     if let Some(c) = registry.commands.iter().find(|c| format!("{:?}", c.id).eq_ignore_ascii_case(name)) {
                         cmds::exec(model, c.id);
+                    }
+                }
+                other if other.contains('+') => {
+                    let (mods, key) = other.rsplit_once('+').unwrap_or_default();
+                    let keys = Keys { shift: mods.contains("shift"), alt: mods.contains("alt"), primary: mods.contains("cmd"), control: mods.contains("ctrl") };
+                    let key = match key {
+                        "left" => Key::Left,
+                        "right" => Key::Right,
+                        "backspace" => Key::Backspace,
+                        k => Key::Char(k.chars().next().unwrap_or(' ')),
+                    };
+                    if let Some(f) = model.field()
+                        && matches!(f.key(key, keys), Edit::Changed | Edit::Cut(_))
+                    {
+                        model.field_changed();
                     }
                 }
                 other => {
@@ -281,7 +283,10 @@ fn gallery(args: &[String]) {
         eprintln!("Couldn't create {}: {e}", dir.display());
         return;
     }
-    let (handle, rx, snapshot) = library();
+    let (handle, rx, mut snapshot) = library();
+    if let Event::Snapshot { tabs, .. } = &mut snapshot {
+        tabs.clear();
+    }
     let mut stage = Stage { handle, rx, screen: Offscreen::new(GALLERY_SIZES[0].1, GALLERY_SIZES[0].2, 1.0, BASE_SIZE), pointer: None, quads: Vec::new() };
     let mut html = String::from(GALLERY_HEAD);
     for (screen, keys) in GALLERY_SCREENS {

@@ -127,7 +127,16 @@ pub struct Scene<'a, H> {
     pub palette: Palette,
     pub hits: Vec<(Rect, H)>,
     pub pointer: Option<(f32, f32)>,
+    pub focused: Option<Focused>,
+    pub fields: Vec<Rect>,
     clips: Vec<[f32; 4]>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Focused {
+    pub rect: Rect,
+    pub origin: f32,
+    pub caret: Rect,
 }
 
 impl<'a, H> Scene<'a, H> {
@@ -140,6 +149,8 @@ impl<'a, H> Scene<'a, H> {
             palette,
             hits: Vec::new(),
             pointer: None,
+            focused: None,
+            fields: Vec::new(),
             clips: vec![[0.0, 0.0, m.width, m.height]],
         }
     }
@@ -263,17 +274,17 @@ impl<'a, H> Scene<'a, H> {
         )
     }
 
-    pub fn field(&mut self, r: Rect, f: &Field, focused: bool, placeholder: &str) -> Option<Rect> {
+    pub fn field(&mut self, r: Rect, f: &Field, focused: bool, placeholder: &str) {
         let mono = self.m.mono();
         let pal = self.palette;
         self.fill(r, pal.field);
+        self.fields.push(r);
         if focused {
             let t = self.m.scale.round().max(1.0);
             self.fill(Rect::new(r.x, r.bottom() - t, r.w, t), pal.ink);
         }
         self.push_clip(r);
         let tx = r.x + self.m.cell_w * 0.5;
-        let mut caret = None;
         if f.text.is_empty() && f.preedit.is_empty() && !focused {
             self.text(placeholder, mono, tx, r.y, None, pal.faint);
         } else {
@@ -282,6 +293,12 @@ impl<'a, H> Scene<'a, H> {
             let room = r.w - self.m.cell_w * 1.5;
             let shift = (bw - room).max(0.0);
             let x0 = tx - shift;
+            let sel = f.selection();
+            if focused && !sel.is_empty() && f.preedit.is_empty() {
+                let sx = x0 + self.measure(&f.text[..sel.start], mono);
+                let ex = x0 + self.measure(&f.text[..sel.end], mono);
+                self.fill(Rect::new(sx, r.y, ex - sx, r.h), pal.selection);
+            }
             self.text(before, mono, x0, r.y, None, pal.ink);
             let mut cx = x0 + bw;
             if !f.preedit.is_empty() {
@@ -293,12 +310,13 @@ impl<'a, H> Scene<'a, H> {
             self.text(&f.text[f.caret..], mono, cx, r.y, None, pal.ink);
             if focused {
                 let c = Rect::new(cx.floor(), r.y + self.m.cell_h * 0.15, (self.m.scale * 2.0).round().max(1.0), self.m.cell_h * 0.7);
-                self.fill(c, pal.ink);
-                caret = Some(c);
+                if sel.is_empty() {
+                    self.fill(c, pal.ink);
+                }
+                self.focused = Some(Focused { rect: r, origin: x0, caret: c });
             }
         }
         self.pop_clip();
-        caret
     }
 
     pub fn measure(&mut self, s: &str, style: TextStyle) -> f32 {

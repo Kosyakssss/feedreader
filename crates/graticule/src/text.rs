@@ -234,11 +234,13 @@ impl Text {
     }
 
     pub fn measure(&mut self, text: &str, style: TextStyle, line: f32) -> f32 {
-        let span = SpanStyle {
-            weight: style.weight as u16,
-            ..SpanStyle::plain(style.face)
-        };
-        self.layout(&[(text, span)], style.size, line, None).width()
+        let span = SpanStyle { weight: style.weight as u16, ..SpanStyle::plain(style.face) };
+        self.layout(&[(text, span)], style.size, line, None).full_width()
+    }
+
+    pub fn index_at(&mut self, text: &str, style: TextStyle, line: f32, x: f32) -> usize {
+        let span = SpanStyle { weight: style.weight as u16, ..SpanStyle::plain(style.face) };
+        parley::Cursor::from_point(self.layout(&[(text, span)], style.size, line, None), x, 0.0).index()
     }
 
     pub fn height(&mut self, spans: &[(&str, SpanStyle)], size: f32, line: f32, wrap: f32) -> f32 {

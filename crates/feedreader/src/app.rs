@@ -261,7 +261,6 @@ impl graticule::shell::App for Feed {
                     },
                 )
             }),
-            ime: out.ime,
         }
     }
 
@@ -299,26 +298,11 @@ impl graticule::shell::App for Feed {
     }
 
     fn field(&mut self) -> Option<&mut Field> {
-        match self.model.focus {
-            Focus::Filter => Some(&mut self.model.filter),
-            Focus::Prompt => self.model.prompt.as_mut().map(|p| &mut p.field),
-            Focus::Palette => self.model.palette.as_mut().map(|p| &mut p.field),
-            Focus::Main => None,
-        }
+        self.model.field()
     }
 
     fn field_changed(&mut self) {
-        if self.model.focus == Focus::Palette {
-            if let Some(p) = self.model.palette.as_mut() {
-                p.cursor = 0;
-                p.scroll = 0.0;
-            }
-            palette::refresh(&mut self.model);
-        } else if self.model.focus == Focus::Filter {
-            self.model.reset_list();
-        } else if let Some(p) = &mut self.model.prompt {
-            p.error = None;
-        }
+        self.model.field_changed();
     }
 
     fn hoverable(hit: &Hit) -> bool {
@@ -409,7 +393,7 @@ impl graticule::shell::App for Feed {
             }
             Some(Hit::Filter) => {
                 m.focus = Focus::Filter;
-                m.filter.end();
+                m.filter.place(usize::MAX, false);
             }
             Some(Hit::Prompt) => m.focus = Focus::Prompt,
             Some(Hit::Feed(row)) => {

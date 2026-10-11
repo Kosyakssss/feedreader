@@ -12,7 +12,8 @@ use winit::window::WindowId;
 pub use winit::window::{CursorIcon as Cursor, Window};
 
 use crate::commands::{Chord, Key, Registry};
-use crate::field::Field;
+use crate::field::{Edit, Field, Keys};
+use crate::ui::Focused;
 use crate::gpu::{Gpu, Quad};
 use crate::images::Images;
 use crate::menu;
@@ -82,7 +83,6 @@ impl Web {
 #[derive(Default)]
 pub struct Painted {
     pub web: Option<(Rect, Web)>,
-    pub ime: Option<Rect>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -254,6 +254,9 @@ struct Running<A: App> {
     clicks: u32,
     frames: Vec<[f32; 3]>,
     ime_on: bool,
+    focused: Option<Focused>,
+    fields: Vec<Rect>,
+    selecting: bool,
     clipboard: Option<arboard::Clipboard>,
     system_dark: bool,
     proxy: EventLoopProxy<Signal<A::Wake>>,
@@ -300,6 +303,8 @@ impl<A: App> Running<A> {
         let painted = self.app.paint(&mut scene, stats);
         let quads = std::mem::take(&mut scene.quads);
         self.hits = std::mem::take(&mut scene.hits);
+        self.focused = scene.focused.take();
+        self.fields = std::mem::take(&mut scene.fields);
         drop(scene);
         for u in self.text.uploads.drain(..) {
             self.gpu.upload(u.x, u.y, u.w, u.h, &u.data);
@@ -316,7 +321,7 @@ impl<A: App> Running<A> {
         self.gpu.render(&quads, palette.bg);
         let presented = Instant::now();
         self.sync_web(painted.web, palette.bg);
-        self.sync_ime(painted.ime);
+        self.sync_ime(self.focused.map(|f| f.caret));
         let ms = |a: Instant, b: Instant| (b - a).as_secs_f32() * 1000.0;
         self.frames.push([ms(started, done), ms(done, presented), ms(presented, Instant::now())]);
         profiling::finish_frame!();
@@ -420,9 +425,7 @@ impl<A: App> Running<A> {
 
     #[profiling::function]
     fn key(&mut self, event: &winit::event::KeyEvent) -> bool {
-        if foreign(self.modifiers) {
-            return false;
-        }
+        let control = foreign(self.modifiers);
         let m = mods(self.modifiers);
         let key = match &event.logical_key {
             WKey::Named(NamedKey::ArrowDown) => Some(Key::Down),
@@ -450,16 +453,12 @@ impl<A: App> Running<A> {
             _ => None,
         };
         let Some(key) = key else { return false };
-        let shift_matters = m.primary || !matches!(key, Key::Char(c) if !c.is_ascii_alphabetic());
-        let chord = Chord {
-            key: match key {
-                Key::Char(c) => Key::Char(c.to_ascii_lowercase()),
-                k => k,
-            },
-            cmd: m.primary,
-            shift: m.shift && shift_matters,
+        let plain = match key {
+            Key::Char(c) => Key::Char(c.to_ascii_lowercase()),
+            k => k,
         };
         if !m.primary
+            && !control
             && matches!(key, Key::Char(_))
             && let Some(t) = event.text.as_ref().map(|t| t.to_string())
             && !t.chars().any(char::is_control)
@@ -470,57 +469,52 @@ impl<A: App> Running<A> {
             self.app.field_changed();
             return true;
         }
+        if let Some(f) = self.app.field()
+            && f.preedit.is_empty()
+        {
+            let keys = Keys { shift: m.shift, alt: m.alt, primary: m.primary, control };
+            match f.key(plain, keys) {
+                Edit::Ignored => {}
+                Edit::Moved => return true,
+                Edit::Changed => {
+                    self.app.field_changed();
+                    return true;
+                }
+                Edit::Copy(text) => {
+                    if let Some(c) = &mut self.clipboard {
+                        let _ = c.set_text(text);
+                    }
+                    return true;
+                }
+                Edit::Cut(text) => {
+                    if let Some(c) = &mut self.clipboard {
+                        let _ = c.set_text(text);
+                    }
+                    self.app.field_changed();
+                    return true;
+                }
+                Edit::Paste => {
+                    let pasted = self.clipboard.as_mut().and_then(|c| c.get_text().ok()).map(|t| t.replace(['\n', '\r'], " "));
+                    if let Some(t) = pasted
+                        && let Some(f) = self.app.field()
+                    {
+                        f.insert(&t);
+                        self.app.field_changed();
+                        return true;
+                    }
+                }
+            }
+        }
+        if control {
+            return false;
+        }
+        let shift_matters = m.primary || !matches!(key, Key::Char(c) if !c.is_ascii_alphabetic());
+        let chord = Chord { key: plain, cmd: m.primary, shift: m.shift && shift_matters };
         if let Some(c) = self.app.registry().lookup(self.app.model(), &chord) {
             self.app.exec(c);
             return true;
         }
-        let pasted = match key {
-            Key::Char('v') if m.primary => self.clipboard.as_mut().and_then(|c| c.get_text().ok()).map(|t| t.replace(['\n', '\r'], " ")),
-            _ => None,
-        };
-        let Some(f) = self.app.field() else { return false };
-        let changed = match key {
-            Key::Backspace if m.primary => f.delete_to_start(),
-            Key::Backspace if m.alt => f.delete_word(),
-            Key::Backspace => f.backspace(),
-            Key::Delete => f.delete(),
-            Key::Left if m.primary => {
-                f.home();
-                false
-            }
-            Key::Right if m.primary => {
-                f.end();
-                false
-            }
-            Key::Left => {
-                f.left();
-                false
-            }
-            Key::Right => {
-                f.right();
-                false
-            }
-            Key::Home => {
-                f.home();
-                false
-            }
-            Key::End => {
-                f.end();
-                false
-            }
-            Key::Char('v') if m.primary => match pasted {
-                Some(t) => {
-                    f.insert(&t);
-                    true
-                }
-                None => return false,
-            },
-            _ => return false,
-        };
-        if changed {
-            self.app.field_changed();
-        }
-        true
+        false
     }
 
     #[profiling::function]
@@ -539,6 +533,25 @@ impl<A: App> Running<A> {
         let hit = self.hit_at(x, y);
         let mut cx = cx!(self);
         self.app.press(hit, &mut cx);
+        self.selecting = false;
+        if self.app.field().is_none() || !self.fields.iter().any(|r| r.contains(x, y)) {
+            return;
+        }
+        if !self.focused.is_some_and(|f| f.rect.contains(x, y)) {
+            self.render();
+        }
+        let Some(at) = self.caret_at(x, y) else { return };
+        let (shift, clicks) = (self.modifiers.shift_key(), self.clicks);
+        if let Some(f) = self.app.field() {
+            if clicks == 2 { f.select_word(at) } else { f.place(at, shift) }
+            self.selecting = true;
+        }
+    }
+
+    fn caret_at(&mut self, x: f32, y: f32) -> Option<usize> {
+        let focused = self.focused.filter(|f| f.rect.contains(x, y) || self.selecting)?;
+        let f = self.app.field()?;
+        Some(self.text.index_at(&f.text, self.metrics.mono(), self.metrics.cell_h, x - focused.origin))
     }
 
     fn middle(&mut self) {
@@ -577,6 +590,15 @@ impl<A: App> Running<A> {
     }
 
     fn moved(&mut self) -> bool {
+        if self.left_down && self.selecting {
+            let (x, y) = self.mouse;
+            if let Some(at) = self.caret_at(x, y)
+                && let Some(f) = self.app.field()
+            {
+                f.place(at, true);
+            }
+            return true;
+        }
         if self.left_down {
             let hit = self.hit_at(self.mouse.0, self.mouse.1);
             let mut cx = cx!(self);
@@ -661,6 +683,9 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             clicks: 0,
             frames: Vec::new(),
             ime_on: false,
+            focused: None,
+            fields: Vec::new(),
+            selecting: false,
             clipboard: arboard::Clipboard::new().ok(),
             system_dark,
             proxy: self.proxy.clone(),
@@ -779,6 +804,7 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             }
             WindowEvent::MouseInput { state: ElementState::Released, button: MouseButton::Left, .. } => {
                 r.left_down = false;
+                r.selecting = false;
                 r.app.release();
                 false
             }

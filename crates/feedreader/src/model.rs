@@ -719,6 +719,34 @@ impl Model {
         self.reset_list();
     }
 
+    pub fn field(&mut self) -> Option<&mut Field> {
+        match self.focus {
+            Focus::Filter => Some(&mut self.filter),
+            Focus::Prompt => self.prompt.as_mut().map(|p| &mut p.field),
+            Focus::Palette => self.palette.as_mut().map(|p| &mut p.field),
+            Focus::Main => None,
+        }
+    }
+
+    pub fn field_changed(&mut self) {
+        match self.focus {
+            Focus::Palette => {
+                if let Some(p) = self.palette.as_mut() {
+                    p.cursor = 0;
+                    p.scroll = 0.0;
+                }
+                crate::palette::refresh(self);
+            }
+            Focus::Filter => self.reset_list(),
+            Focus::Prompt => {
+                if let Some(p) = &mut self.prompt {
+                    p.error = None;
+                }
+            }
+            Focus::Main => {}
+        }
+    }
+
     #[profiling::function]
     pub fn event(&mut self, event: Event) {
         match event {

@@ -601,7 +601,7 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
         }
         Cmd::Filter => {
             m.focus = Focus::Filter;
-            m.filter.end();
+            m.filter.place(usize::MAX, false);
         }
         Cmd::FilterDone => m.focus = Focus::Main,
         Cmd::FilterClear => {
@@ -787,7 +787,7 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
             let hint = m.current_entry().filter(|_| m.page != Page::Settings).map(|e| format!(" from:{}", m.feed_name(&e.feed_id))).unwrap_or_default();
             prompt(m, PromptKind::Mute, "Mute a word or phrase (add in:folder or from:feed to narrow it)", &hint);
             if let Some(p) = m.prompt.as_mut() {
-                p.field.home();
+                p.field.place(0, false);
             }
         }
         Cmd::SaveLink => {
