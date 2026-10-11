@@ -15,3 +15,7 @@ A key reaches the focused field before the command registry, and only keys the f
 ## Launch
 
 On an M1 with a warm cache, a window shows its first frame about 160 ms after the process starts: about 15 ms before `main`, about 75 ms for AppKit to finish launching, about 40 ms to create the window, 5 ms for the GPU surface and about 20 ms for the app to attach to the engine, take its snapshot and paint. Loading the fonts takes about 35 ms, so it runs on its own thread from the start of `run` and is joined when the window exists, which hides it behind AppKit's startup.
+
+## Context menus open at the mouse
+
+muda converts a position given to `show_context_menu_for_nsview` as if the view were unflipped, but winit's view is flipped, so menus opened upside down relative to the click. The shell passes no position, and muda uses the mouse location in screen coordinates.

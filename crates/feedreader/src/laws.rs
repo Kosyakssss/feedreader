@@ -92,6 +92,8 @@ fn library() -> impl Strategy<Value = Event> {
 
 fn listed(m: &mut Model, view: View) -> usize {
     m.show(view);
+    m.filter.set("is:unread ");
+    m.reset_list();
     m.list.visible.len()
 }
 

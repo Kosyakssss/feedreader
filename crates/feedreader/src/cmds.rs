@@ -245,7 +245,7 @@ fn build() -> Registry<Cmd, Model> {
                 listing(m) && m.list.selected.is_empty()
             }),
             c(Cmd::MarkAllRead, vec![], |_| "mark all read".into(), |m| listing(m) && m.list.selected.is_empty() && !m.list.visible.is_empty()),
-            c(Cmd::Filter, vec![], |_| "filter".into(), listing),
+            c(Cmd::Filter, vec![ch('/')], |_| "filter".into(), |m| idle(m) && m.page == Page::List),
             c(Cmd::AddFeed, vec![ch('a')], |_| "add feed".into(), feeds_page),
             c(Cmd::RemoveFeed, vec![ch('d')], |m| {
                 if m.armed.is_some() { "press d again to remove".into() } else { "remove".into() }
@@ -600,6 +600,9 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
             }
         }
         Cmd::Filter => {
+            if m.reader.is_some() {
+                m.activate(0);
+            }
             m.focus = Focus::Filter;
             m.filter.place(usize::MAX, false);
         }

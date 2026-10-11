@@ -571,7 +571,7 @@ impl<A: App> Running<A> {
         }
         self.settle();
         self.render();
-        if let Some(id) = menu::popup(&self.window, &items, (self.mouse.0 as f64, self.mouse.1 as f64)) {
+        if let Some(id) = menu::popup(&self.window, &items) {
             self.app.context_chosen(id);
         }
     }

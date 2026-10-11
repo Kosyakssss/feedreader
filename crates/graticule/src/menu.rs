@@ -83,7 +83,7 @@ fn accelerator(chord: &crate::commands::Chord) -> Option<muda::accelerator::Acce
 
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
-pub fn popup(window: &winit::window::Window, items: &[(u32, String, Option<crate::commands::Chord>)], at: (f64, f64)) -> Option<u32> {
+pub fn popup(window: &winit::window::Window, items: &[(u32, String, Option<crate::commands::Chord>)]) -> Option<u32> {
     use muda::ContextMenu;
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     let menu = muda::Menu::new();
@@ -92,8 +92,7 @@ pub fn popup(window: &winit::window::Window, items: &[(u32, String, Option<crate
     }
     let RawWindowHandle::AppKit(view) = window.window_handle().ok()?.as_raw() else { return None };
     while muda::MenuEvent::receiver().try_recv().is_ok() {}
-    let position = muda::dpi::Position::Physical(muda::dpi::PhysicalPosition::new(at.0 as i32, at.1 as i32));
-    let shown = unsafe { menu.show_context_menu_for_nsview(view.ns_view.as_ptr(), Some(position)) };
+    let shown = unsafe { menu.show_context_menu_for_nsview(view.ns_view.as_ptr(), None) };
     if !shown {
         return None;
     }
@@ -101,6 +100,6 @@ pub fn popup(window: &winit::window::Window, items: &[(u32, String, Option<crate
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn popup(_: &winit::window::Window, _: &[(u32, String, Option<crate::commands::Chord>)], _: (f64, f64)) -> Option<u32> {
+pub fn popup(_: &winit::window::Window, _: &[(u32, String, Option<crate::commands::Chord>)]) -> Option<u32> {
     None
 }

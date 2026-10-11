@@ -42,3 +42,35 @@ pub fn parse(m: &Model, text: &str) -> Query {
     q
 }
 
+
+pub struct Hints {
+    pub from: usize,
+    pub options: Vec<(String, String)>,
+    pub error: Option<String>,
+}
+
+const PREFIXES: [&str; 3] = ["is:", "in:", "from:"];
+
+fn key(name: &str) -> String {
+    name.to_lowercase().replace(' ', "_")
+}
+
+pub fn hints(m: &Model, text: &str, caret: usize) -> Hints {
+    let before = &text[..caret];
+    let from = before.rfind(char::is_whitespace).map_or(0, |i| i + 1);
+    let token = before[from..].to_lowercase();
+    let options: Vec<(String, String)> = if token.is_empty() {
+        PREFIXES.iter().map(|p| (p.to_string(), p.to_string())).collect()
+    } else if let Some(v) = token.strip_prefix("is:") {
+        ["unread", "read", "bookmarked"].iter().filter(|o| o.starts_with(v)).map(|o| (o.to_string(), format!("is:{o} "))).collect()
+    } else if let Some(v) = token.strip_prefix("in:") {
+        m.folders.iter().filter(|f| key(&f.name).contains(v)).take(8).map(|f| (f.name.clone(), format!("in:{} ", key(&f.name)))).collect()
+    } else if let Some(v) = token.strip_prefix("from:") {
+        m.subscriptions().filter(|f| key(f.name()).contains(v)).take(8).map(|f| (f.name().to_string(), format!("from:{} ", key(f.name())))).collect()
+    } else {
+        PREFIXES.iter().filter(|p| p.starts_with(token.as_str())).map(|p| (p.to_string(), p.to_string())).collect()
+    };
+    let error = if options.is_empty() && PREFIXES.iter().any(|p| token.starts_with(p)) { parse(m, &token).error } else { None };
+    let error = error.or_else(|| parse(m, &format!("{}{}", &text[..from], &text[caret..])).error);
+    Hints { from, options, error }
+}

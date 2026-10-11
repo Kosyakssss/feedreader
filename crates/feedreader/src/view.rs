@@ -41,6 +41,7 @@ pub enum Hit {
     Tab(usize),
     CloseTab(usize),
     Prompt,
+    Complete(usize, String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -262,6 +263,10 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
         last.push((bar.len() - 1, x));
     }
     let mut rows_needed = bar_rows.len();
+    let hints = (m.focus == Focus::Filter).then(|| crate::find::hints(m, &m.filter.text, m.filter.caret));
+    if hints.is_some() {
+        rows_needed += 1;
+    }
     if m.prompt.is_some() {
         rows_needed += 1;
     }
@@ -282,6 +287,23 @@ pub fn paint(m: &mut Model, reg: &Registry<Cmd, Model>, s: &mut Scene<Hit>, stat
         s.hit(field, Hit::Prompt);
         if let Some(e) = &p.error {
             s.text(e, mono, field.right() + cw, y, None, pal.danger);
+        }
+        y += ch;
+    }
+    if let Some(h) = &hints {
+        let mut x = cw;
+        x += s.text("filter by", mono, x, y, None, pal.muted).width + cw * 2.0;
+        for (label, with) in &h.options {
+            let part = Part::button(String::new(), label.clone(), pal.ink, Hit::Complete(h.from, with.clone()));
+            x += button(s, &part, x, y) + cw * 2.0;
+        }
+        let note = match &h.error {
+            Some(e) => Some((e.as_str(), pal.danger)),
+            None if h.from == m.filter.caret => Some(("or type words to search", pal.muted)),
+            None => None,
+        };
+        if let Some((text, color)) = note {
+            s.text(text, mono, x, y, Some((mt.width - x - cw).max(0.0)), color);
         }
         y += ch;
     }
@@ -531,14 +553,9 @@ fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect) {
 
     let title = m.view_name().to_uppercase();
     let tw = s.text(&title, mono, main.x + cw, main.y, Some(main.w * 0.4), pal.ink).width;
-    let error = crate::find::parse(m, &m.filter.text).error;
-    let count = match &error {
-        Some(e) => e.clone(),
-        None if m.list.visible.is_empty() => String::new(),
-        None => format!("{} of {}", m.list.cursor + 1, m.list.visible.len()),
-    };
+    let count = if m.list.visible.is_empty() { String::new() } else { format!("{} of {}", m.list.cursor + 1, m.list.visible.len()) };
     let cnt_w = s.measure(&count, mono).min(main.w * 0.4);
-    s.text(&count, mono, main.right() - cw * 2.0 - cnt_w, main.y, Some(cnt_w), if error.is_some() { pal.danger } else { pal.muted });
+    s.text(&count, mono, main.right() - cw * 2.0 - cnt_w, main.y, Some(cnt_w), pal.muted);
     let fx = main.x + cw * 3.0 + tw;
     let fw = (main.right() - cw * 4.0 - cnt_w - fx).min(cw * 36.0);
     if fw > cw * 8.0 {

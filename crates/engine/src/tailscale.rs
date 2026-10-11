@@ -35,6 +35,7 @@ async fn run(args: &[&str]) -> Result<Vec<u8>, String> {
 pub struct Node {
     pub name: String,
     pub funnel: bool,
+    pub key_expiry: Option<i64>,
 }
 
 pub async fn node() -> Result<Node, String> {
@@ -51,20 +52,36 @@ pub async fn node() -> Result<Node, String> {
         .filter(|s| !s.is_empty())
         .ok_or("Tailscale has no name for this machine")?;
     let funnel = me.get("CapMap").and_then(|c| c.as_object()).is_some_and(|c| c.contains_key("funnel"));
-    Ok(Node { name, funnel })
+    let key_expiry = me
+        .get("KeyExpiry")
+        .and_then(|s| s.as_str())
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.timestamp_millis());
+    Ok(Node { name, funnel, key_expiry })
 }
 
 pub async fn name() -> Option<String> {
     node().await.ok().map(|n| n.name)
 }
 
-pub async fn publish(public: u16, local: u16) -> Result<String, String> {
+pub async fn publish(public: u16, local: u16) -> Result<Node, String> {
     let node = node().await?;
     if !node.funnel {
         return Err("Funnel isn't allowed for this machine; turn it on in the tailnet's access controls".into());
     }
     run(&["funnel", "--bg", "--yes", &format!("--https={public}"), &format!("http://127.0.0.1:{local}")]).await?;
-    Ok(node.name)
+    Ok(node)
+}
+
+pub async fn published(public: u16, local: u16) -> bool {
+    let Ok(out) = run(&["funnel", "status", "--json"]).await else { return false };
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out) else { return false };
+    let ours = format!("http://127.0.0.1:{local}");
+    v.get("Web").and_then(|w| w.as_object()).is_some_and(|web| {
+        web.iter().any(|(host, site)| {
+            host.ends_with(&format!(":{public}")) && site.pointer("/Handlers/~1/Proxy").and_then(|p| p.as_str()) == Some(ours.as_str())
+        })
+    })
 }
 
 pub async fn unpublish(public: u16) -> Result<(), String> {

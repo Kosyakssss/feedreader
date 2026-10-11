@@ -87,7 +87,7 @@ Windows is not a target for Feedreader 1.0; whether Graticule supports it is Ope
 - Recommending works on any device, offline too; it publishes when the command reaches the hub. Public route: Tailscale Funnel.
 
 ### 2.9 Find, search and the command palette
-- Every list has a find field. It takes words and the filter tokens `is:unread`, `is:read`, `is:bookmarked`, `in:folder` and `from:feed`. Home opens with `is:unread` in the field, so the Unread/All state is visible text; deleting the token shows everything. The separate Unread/All toggle is retired.
+- Every list has a find field. It takes words and the filter tokens `is:unread`, `is:read`, `is:bookmarked`, `in:folder` and `from:feed`. The field starts empty, so every list shows everything until you narrow it; `/` puts the caret in it from the list or from an open entry. While it has focus, the command line shows what can come next: the token prefixes on an empty field, then the values for the prefix being typed (`is:` lists unread, read and bookmarked; `in:` and `from:` list matching folders and feeds), each clickable to complete it, and any mistake in the filter. The separate Unread/All toggle is retired.
 - The palette is fzf-like over entries (titles and full text), feeds, folders and places, with the same tokens. Backed by SQLite FTS5 on every engine.
 - Cmd-K on desktop opens the palette; it also runs every command in the registry by name. Nothing equivalent on phones.
 
@@ -128,7 +128,7 @@ The `feedreader` command is the same binary as the desktop app: `serve` (headles
 
 ### 3.2 The list
 - One long chronological list is the only way to browse. A quiet "That's everything" at the end. Relative times, exact on hover.
-- Unread or all is the find field's `is:unread` token (§2.9).
+- Unread only is the find field's `is:unread` token (§2.9).
 - The scrollbar is always visible, with the position next to it ("214 / 3000").
 - Marking something read while viewing never moves or removes rows under the cursor. New entries arriving while scrolled down never shift what you're looking at (scroll anchoring).
 - Refresh is `r` or pulling down hard on phones. There is no refresh button.
@@ -161,9 +161,9 @@ The `feedreader` command is the same binary as the desktop app: `serve` (headles
 ### 3.7 Keyboard and input
 - Every action is a command in one registry with a name, a label, optional keys and an availability rule. The action bar, the help page, the palette, context menus, mouse targets and keymaps are all generated from it, so every available action is visible on screen.
 - The action bar groups commands by subject (this entry, this list, the app) and wraps to more rows instead of hiding anything; if a narrow window truly can't fit them, it says how many more are in the palette.
-- Carried over: 1–4 navigation, j/k next/previous, o open, Shift-O open all unread, m toggle read, s toggle bookmark, x select, Shift-J/K extend, r refresh, ? help, Esc close/clear. Feeds page: d remove, i import, e export. `h`/`l` are retired with the Unread/All toggle; `a` (add feed) goes with the add-feed prompt.
+- Carried over: 1–4 navigation, j/k next/previous, o open, Shift-O open all unread, m toggle read, s toggle bookmark, x select, Shift-J/K extend, r refresh, ? help, / filter, Esc close/clear. Feeds page: d remove, i import, e export. `h`/`l` are retired with the Unread/All toggle; `a` (add feed) goes with the add-feed prompt.
 - Fixed new ones: Cmd-Z, Cmd-Shift-Z, Cmd-W, Cmd-Shift-T, Cmd-Shift-[ and ], Cmd-Shift-C (copy the original link), Cmd-K, Cmd-C (copy selected text). On Linux, Ctrl takes Cmd's place.
-- System shortcuts stay the system's: on macOS the menu bar has the standard app and Window menus, so hiding, minimizing, full screen and window tiling (Globe-Ctrl-F and the rest) work as in any Mac app. Keys with the other platform's modifier (Ctrl on macOS, Super on Linux) are never taken by the app.
+- System shortcuts stay the system's: on macOS the menu bar has the standard app and Window menus, so hiding, minimizing, full screen and window tiling (Globe-Ctrl-F and the rest) work as in any Mac app. Keys with the other platform's modifier (Ctrl on macOS, Super on Linux) are never taken by the app, except the platform's text bindings inside a focused field.
 - `a` for mark all read stays retired. Everything else is designed with the owner; never add shortcuts unilaterally. Keys are user settings (Later), F-keys included.
 - One focus model: no shortcuts while typing; Escape blurs, then clears, then closes.
 - Every gesture has a keyboard and screen-reader equivalent (AccessKit, fed from the same pass that paints).
@@ -411,7 +411,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 5. **Partial.** The shell lives in Graticule (`graticule::shell`): the event loop, keys to commands, editing of the focused field, IME, clipboard, hit testing, hover, cursors, clicks and drags, the wheel, the web pane, the menu bar, file drops and effects as data; apps implement `graticule::shell::App`, and `Offscreen` renders the same way for snapshots. Open: interaction state (scroll offsets, drags) kept by Graticule instead of the app's model, so the view stops writing into the model.
 6. **Partial.** Registry-driven components. Done: native context menus on macOS, built from the commands available for what was right-clicked, with their shortcuts (the one `unsafe`, `docs/internals/unsafe.md`). Open: the action bar grouped by subject with nothing hidden, help as a drawn tree, the palette and menu bar as Graticule components, context menus on Linux.
 7. **Partial.** Native file dialogs: Graticule's `Effect::Choose` shows the platform's picker (`rfd`) and hands the path back through `App::chosen`; import, export and the old app's library use it instead of typed paths. Done: single-line fields with native behavior. `graticule::field::Field` is a pure editing model (anchor and caret, word moves, a kill buffer, undo per field, grouped by typing and deleting), the focused field gets editing keys before the registry, and the mouse places the caret, drags a selection, double-clicks a word and Shift-clicks to extend. Open: selection on by default in the reading area; multi-line fields.
-8. **Open.** Components, one at a time with gallery sheets: entry row, list with scrollbar and position, find field with tokens, places strip, tab strip with the new tab, spec sheet, table, tree, confirm row and message line, badges, article. The find field's behavior is done: tokens shared with the palette (`find.rs`), `is:unread` shown by default, the Unread/All toggle and `h`/`l` retired.
+8. **Open.** Components, one at a time with gallery sheets: entry row, list with scrollbar and position, find field with tokens, places strip, tab strip with the new tab, spec sheet, table, tree, confirm row and message line, badges, article. The find field's behavior is done: tokens shared with the palette (`find.rs`), an empty start, `/` to focus it, completions in the command line, the Unread/All toggle and `h`/`l` retired.
 9. **Open.** Accessibility with AccessKit, fed from the same pass that paints.
 
 ### 10.4 Feedreader on Graticule

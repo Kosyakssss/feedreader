@@ -336,7 +336,7 @@ impl graticule::shell::App for Feed {
         if let Some(r) = self.model.reader.as_mut() {
             r.sel = None;
         }
-        if !matches!(hit, Some(Hit::Filter) | Some(Hit::Prompt) | Some(Hit::Cmd(_))) && self.model.focus == Focus::Filter {
+        if !matches!(hit, Some(Hit::Filter) | Some(Hit::Prompt) | Some(Hit::Cmd(_)) | Some(Hit::Complete(..))) && self.model.focus == Focus::Filter {
             self.model.focus = Focus::Main;
         }
         if let Some(Hit::Track(t, which)) = hit {
@@ -396,6 +396,10 @@ impl graticule::shell::App for Feed {
                 m.filter.place(usize::MAX, false);
             }
             Some(Hit::Prompt) => m.focus = Focus::Prompt,
+            Some(Hit::Complete(from, with)) => {
+                m.filter.complete(from, &with);
+                m.field_changed();
+            }
             Some(Hit::Feed(row)) => {
                 if m.feeds_page.cursor == row {
                     cmds::exec(m, Cmd::Open);

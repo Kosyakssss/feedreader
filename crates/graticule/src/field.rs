@@ -70,6 +70,11 @@ impl Field {
         self.replace(self.selection(), s, Kind::Typing);
     }
 
+    pub fn complete(&mut self, from: usize, with: &str) {
+        let from = self.boundary(from).min(self.caret);
+        self.replace(from..self.caret, with, Kind::Alone);
+    }
+
     pub fn select_all(&mut self) {
         self.anchor = 0;
         self.caret = self.text.len();

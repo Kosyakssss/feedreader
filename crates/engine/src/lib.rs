@@ -198,6 +198,13 @@ enum Job {
     Probe(String, Client),
 }
 
+pub(crate) enum Funnel {
+    Public(String, Option<i64>),
+    Private,
+    Unchanged,
+    Failed(bool, String),
+}
+
 pub(crate) enum Internal {
     Api(hub::Api),
     Ask(sat::Ask),
@@ -207,7 +214,7 @@ pub(crate) enum Internal {
     HubVersion(String, u64),
     Paired(Result<sat::HubLink, String>),
     Pairing(Client, String),
-    Funnel(bool, Result<Option<String>, String>),
+    Funnel(Funnel),
     Page(Job, Result<(String, String), String>),
     MediaFetched(String, Result<(String, String, i64), String>),
     Offer(String, Result<Vec<Candidate>, String>),
@@ -407,8 +414,8 @@ impl Engine {
                 self.public_url = None;
             }
         }
-        if self.settings.publish && self.hub.is_none() {
-            self.funnel(true);
+        if self.hub.is_none() {
+            self.funnel(self.settings.publish);
         }
         if self.hub.is_none() && self.store.get("log_seeded").is_none() {
             self.seed_log();
@@ -873,12 +880,20 @@ impl Engine {
         let (port, funnel) = (self.config.public_port, self.config.funnel_port);
         let token = self.store.token();
         self.spawn(async move {
-            let r = if on {
-                tailscale::publish(funnel, port).await.map(|name| Some(format!("https://{name}:{funnel}/{token}/")))
+            let outcome = if on {
+                match tailscale::publish(funnel, port).await {
+                    Ok(node) => Funnel::Public(format!("https://{}:{funnel}/{token}/", node.name), node.key_expiry),
+                    Err(e) => Funnel::Failed(true, e),
+                }
+            } else if tailscale::published(funnel, port).await {
+                match tailscale::unpublish(funnel).await {
+                    Ok(()) => Funnel::Private,
+                    Err(e) => Funnel::Failed(false, e),
+                }
             } else {
-                tailscale::unpublish(funnel).await.map(|_| None)
+                Funnel::Unchanged
             };
-            Internal::Funnel(on, r)
+            Internal::Funnel(outcome)
         });
     }
 
@@ -1159,27 +1174,31 @@ impl Engine {
             Internal::Page(job, r) => self.page(job, r),
             Internal::Api(call) => self.api(call),
             Internal::Pairing(to, link) => self.reply(to, Event::Pairing(link)),
-            Internal::Funnel(on, r) => {
+            Internal::Funnel(outcome) => {
                 let local = format!("http://127.0.0.1:{}/{}/", self.config.public_port, self.store.token());
-                let message = match (on, r) {
-                    (_, Ok(Some(url))) => {
+                self.public_url = Some(local);
+                let message = match outcome {
+                    Funnel::Public(url, expiry) => {
                         self.public_url = Some(url.clone());
-                        format!("Your I recommend feed is public at {url}")
+                        let warning = expiry
+                            .and_then(chrono::DateTime::from_timestamp_millis)
+                            .map(|d| {
+                                format!(
+                                    " This Mac's Tailscale key expires on {}, and the link stops working then unless you turn off key expiry for this machine in the Tailscale admin console.",
+                                    d.with_timezone(&chrono::Local).format("%-d %B %Y")
+                                )
+                            })
+                            .unwrap_or_default();
+                        Some(format!("Your I recommend feed is public at {url}.{warning}"))
                     }
-                    (_, Ok(None)) => {
-                        self.public_url = Some(local);
-                        "Your I recommend feed is no longer public.".into()
-                    }
-                    (true, Err(e)) => {
-                        self.public_url = Some(local);
-                        format!("Couldn't publish through Tailscale Funnel: {e}")
-                    }
-                    (false, Err(e)) => {
-                        self.public_url = Some(local);
-                        format!("Couldn't stop Tailscale Funnel: {e}")
-                    }
+                    Funnel::Private => Some("Your I recommend feed is no longer public.".into()),
+                    Funnel::Unchanged => None,
+                    Funnel::Failed(true, e) => Some(format!("Couldn't publish through Tailscale Funnel: {e}")),
+                    Funnel::Failed(false, e) => Some(format!("Couldn't stop Tailscale Funnel: {e}")),
                 };
-                self.emit(Event::Message(message));
+                if let Some(m) = message {
+                    self.emit(Event::Message(m));
+                }
                 self.publish();
                 self.emit(Event::PublicUrl(self.public_url.clone()));
             }
