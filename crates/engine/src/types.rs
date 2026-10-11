@@ -202,6 +202,12 @@ pub struct Settings {
     pub reading_width: u32,
     #[serde(default)]
     pub publish: bool,
+    #[serde(default = "prefetch_days")]
+    pub prefetch_days: u32,
+}
+
+fn prefetch_days() -> u32 {
+    30
 }
 
 impl Default for Settings {
@@ -218,6 +224,7 @@ impl Default for Settings {
             reading_size: 100,
             reading_width: 78,
             publish: false,
+            prefetch_days: 30,
         }
     }
 }

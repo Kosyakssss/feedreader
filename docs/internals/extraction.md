@@ -7,6 +7,8 @@ Clean mode runs Defuddle, which is JavaScript, without giving Feedreader a JavaS
 - The app sends `Request::Extracted(job, result)` back. On an error or an empty result the engine runs the Rust Readability port (`dom_smoothie`) on the same HTML, which is also the only extractor a headless `serve` has; it never asks for a web view it wasn't told exists (`Request::UseWebExtractor`).
 - When the extracted text is less than half of the feed's own text, or extraction fails and the feed has text, the reader shows the feed's text with a note saying why.
 
+Prefetching (`Engine::prefetch_next`) uses the same path for one unread entry at a time, and only while some client has offered the web extractor: a headless hub would otherwise fill the cache with Readability's weaker text, which is then what opening the entry shows. Each page hands its HTML through the app's main thread once, which is why it is one at a time.
+
 `feedreader extract <url>` runs the same path from the terminal and prints which extractor produced the text; `--local` forces Readability for comparison.
 
 ## The vendored bundle

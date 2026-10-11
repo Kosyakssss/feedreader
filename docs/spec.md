@@ -232,7 +232,7 @@ crates/feedreader  the binary: desktop app, headless `serve`, command line
 - The engine caches everything an entry references: inline images, thumbnails, favicons and attachments. Apps draw them from the cache, never from third parties at reading time (blocks tracking pixels and IP leaks), and they work offline.
 - An entry's cached media is deleted 7 days after it's read, unless it's bookmarked, saved or recommended.
 - Limits: a per-item cap (larger items aren't cached and stay links) and a total budget shown in Settings with current usage; over budget, oldest-read goes first. Values Open.
-- **Prefetch.** Opening an entry never waits on the network. In the background, the engine fetches and extracts the Clean text of every unread entry up to 30 days old (configurable), and caches its images and attachments, within the fetch limits of §5.5 and the media budget. The app pre-shapes what you're likely to open next (§6.10).
+- **Prefetch.** Opening an entry never waits on the network. In the background, the engine fetches and extracts the Clean text of unread entries up to 30 days old ("Prepare unread entries from the last" in Settings; 0 turns it off), newest first and one page at a time, and caches their images. It runs while an app with the extraction web view is attached, so prepared text is the same Defuddle result opening would give. Pages that fail, or whose feed text is fuller, are retried after a week. Caching attachments is Open (§9). The app pre-shapes what you're likely to open next (§6.10).
 
 ### 5.7 Extraction and the web pane
 - Clean mode runs **Defuddle** inside a hidden system web view (WebKit on macOS and Linux, Android WebView). The engine fetches the page through the safe fetcher (§5.8) and hands the HTML to the app; the app parses it with `DOMParser` (no scripts run, nothing loads) and runs Defuddle on it; the result goes back to the engine, which stores it.
@@ -431,7 +431,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 ### 10.8 Engine and platform
 16. **Open.** Sync: the version handshake, households, rate limiting on the public listener, the engine-wide TOML file.
 17. **Open.** Engine errors reported instead of discarded (§5.9).
-18. **Partial.** Media: images and pruning done; attachments are data (type, size, duration) shown in every reading mode. Open: attachments cached for offline (limits are Open, §9), prefetching unread entries up to 30 days old (§5.6), favicons, attachments in the public I recommend feed.
+18. **Partial.** Media: images and pruning done; attachments are data shown in every reading mode; unread entries up to 30 days old are prepared in the background (§5.6). Open: attachments cached for offline (limits are Open, §9), favicons, attachments in the public I recommend feed.
 19. **Partial.** Discovery. Open: JSON-LD, h-feed, sitemaps.
 20. **Partial.** Tabs. Open: reordering by drag, one web view per tab.
 21. **Open.** Export bundle, move to another machine.

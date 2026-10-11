@@ -863,6 +863,10 @@ fn setting_row(m: &Model, s: Setting) -> (&'static str, String) {
         Setting::ReadingMode => ("Open entries in", format!("{} mode", st.reading_mode.name())),
         Setting::Lines => ("Lines and borders", m.settings.lines.name().to_string()),
         Setting::RefreshMinutes => ("Refresh every", format!("{} minutes", st.refresh_minutes)),
+        Setting::PrefetchDays => (
+            "Prepare unread entries from the last",
+            if st.prefetch_days == 0 { "off".into() } else { format!("{} days", st.prefetch_days) },
+        ),
         Setting::MaxEntries => ("Keep at most", format!("{} entries", st.max_entries)),
         Setting::MaxAge => (
             "Delete entries older than",

@@ -110,6 +110,11 @@ create table if not exists media (
   fetched_at integer not null,
   used_at integer not null
 ) strict;
+create table if not exists extract_failed (
+  entry_id text primary key,
+  at integer not null,
+  error text not null
+) strict;
 create table if not exists entry_media (
   entry_id text not null,
   url text not null,
@@ -619,10 +624,36 @@ impl Store {
             let _ = tx.execute("delete from entries where id = ?1", [id]);
             let _ = tx.execute("delete from states where entry_id = ?1", [id]);
             let _ = tx.execute("delete from bodies where entry_id = ?1", [id]);
+            let _ = tx.execute("delete from extract_failed where entry_id = ?1", [id]);
             let _ = tx.execute("delete from entry_media where entry_id = ?1", [id]);
         }
         tx.commit().unwrap();
         doomed
+    }
+
+    pub fn next_prefetch(&self, since: i64, retry_before: i64) -> Option<(EntryId, String)> {
+        self.db
+            .query_row(
+                "select e.id, e.url from entries e
+                 left join states s on s.entry_id = e.id
+                 left join bodies b on b.entry_id = e.id
+                 left join extract_failed f on f.entry_id = e.id
+                 where coalesce(s.read, 0) = 0 and e.url <> '' and e.feed_id <> 'saved' and e.published >= ?1
+                   and b.entry_id is null and (f.entry_id is null or f.at < ?2)
+                 order by e.published desc limit 1",
+                params![since, retry_before],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .ok()
+            .flatten()
+    }
+
+    pub fn extract_failed(&self, id: &str, error: &str, now: i64) {
+        let _ = self.db.execute(
+            "insert into extract_failed (entry_id, at, error) values (?1, ?2, ?3) on conflict(entry_id) do update set at = excluded.at, error = excluded.error",
+            params![id, now, error],
+        );
     }
 
     pub fn clean_body(&self, id: &str) -> Option<String> {
@@ -661,6 +692,7 @@ impl Store {
                 "reading_size" => s.reading_size = v.parse().unwrap_or(s.reading_size),
                 "reading_width" => s.reading_width = v.parse().unwrap_or(s.reading_width),
                 "publish" => s.publish = v == "1",
+                "prefetch_days" => s.prefetch_days = v.parse().unwrap_or(s.prefetch_days),
                 _ => {}
             }
         }
@@ -680,6 +712,7 @@ impl Store {
             ("reading_size", s.reading_size.to_string()),
             ("reading_width", s.reading_width.to_string()),
             ("publish", if s.publish { "1".into() } else { "0".into() }),
+            ("prefetch_days", s.prefetch_days.to_string()),
         ];
         for (k, v) in pairs {
             let _ = self.db.execute(

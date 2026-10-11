@@ -200,6 +200,7 @@ enum Fetch {
 #[derive(Clone)]
 enum Job {
     Entry(EntryId),
+    Prefetch(EntryId),
     Save(String),
     Probe(String, Client),
 }
@@ -235,6 +236,7 @@ struct Engine {
     published: public::Shared,
     public_url: Option<String>,
     extractors: Vec<Client>,
+    prefetching: Option<EntryId>,
     media_inflight: HashSet<String>,
     media_waiting: HashSet<String>,
     media_gate: std::sync::Arc<tokio::sync::Semaphore>,
@@ -315,6 +317,7 @@ impl Engine {
             published: Default::default(),
             public_url: None,
             extractors: Vec::new(),
+            prefetching: None,
             media_inflight: HashSet::new(),
             media_waiting: HashSet::new(),
             media_gate: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
@@ -471,7 +474,19 @@ impl Engine {
 
     fn read(&mut self, job: Job, r: Result<Extracted, String>, by: Extractor) {
         match job {
-            Job::Entry(id) => self.extracted(id, r.map(|x| x.html)),
+            Job::Entry(id) => {
+                let (blocks, note) = self.keep_extracted(&id, r.map(|x| x.html));
+                self.emit(Event::Body(Body { entry: id, mode: Mode::Clean, blocks, note }));
+            }
+            Job::Prefetch(id) => {
+                let (blocks, _) = self.keep_extracted(&id, r.map(|x| x.html));
+                if self.store.clean_body(&id).is_none() {
+                    let why = blocks.err().unwrap_or_else(|| "the feed's own text is fuller".into());
+                    self.store.extract_failed(&id, &why, now());
+                }
+                self.prefetching = None;
+                self.prefetch_next();
+            }
             Job::Save(url) => match r {
                 Ok(x) => {
                     let title = if x.title.is_empty() {
@@ -500,18 +515,31 @@ impl Engine {
         }
     }
 
-    fn extracted(&mut self, id: EntryId, r: Result<String, String>) {
-        let Some((entry, content, summary)) = self.store.entry(&id) else { return };
+    fn prefetch_next(&mut self) {
+        if self.prefetching.is_some() || self.extractors.is_empty() || self.settings.prefetch_days == 0 {
+            return;
+        }
+        let t = now();
+        let since = t - self.settings.prefetch_days as i64 * 86_400_000;
+        let Some((id, url)) = self.store.next_prefetch(since, t - 7 * 86_400_000) else { return };
+        self.prefetching = Some(id.clone());
+        self.fetch_page(Job::Prefetch(id), url);
+    }
+
+    fn keep_extracted(&mut self, id: &EntryId, r: Result<String, String>) -> (Result<Vec<Block>, String>, Option<String>) {
+        let Some((entry, content, summary)) = self.store.entry(id) else { return (Err("This entry is gone.".into()), None) };
         let feed_html = content.or(summary).unwrap_or_default();
         let feed_text = parse::text_of(&feed_html, true).len();
         let extracted = r.as_ref().map(|html| parse::text_of(html, true).len()).unwrap_or(0);
         let use_feed = feed_text > 200 && extracted * 2 < feed_text;
         let (blocks, note) = match r {
             Ok(html) if !use_feed => {
-                self.store.set_clean_body(&id, &html, now());
+                self.store.set_clean_body(id, &html, now());
                 let base = url::Url::parse(&entry.url).ok();
-                let links: Vec<(EntryId, String)> = parse::image_urls(&html, base.as_ref(), 40).into_iter().map(|u| (id.clone(), u)).collect();
+                let images = parse::image_urls(&html, base.as_ref(), 40);
+                let links: Vec<(EntryId, String)> = images.iter().map(|u| (id.clone(), u.clone())).collect();
                 self.store.link_media(&links);
+                self.want_media(images, false);
                 (Ok(parse::blocks(&html, Some(&entry.url))), None)
             }
             Ok(_) => (
@@ -524,12 +552,7 @@ impl Engine {
             ),
             Err(e) => (Err(e), None),
         };
-        self.emit(Event::Body(Body {
-            entry: id,
-            mode: Mode::Clean,
-            blocks,
-            note,
-        }));
+        (blocks, note)
     }
 
     fn seed_log(&mut self) {
@@ -1067,6 +1090,7 @@ impl Engine {
                 self.emit(Event::Refresh(self.status.clone()));
             }
             Internal::RefreshDone(run) if run == self.status.run => {
+                self.prefetch_next();
                 let removed = self.store.prune(&self.settings, now());
                 if !removed.is_empty() {
                     self.emit(Event::EntriesRemoved(removed));
@@ -1370,6 +1394,7 @@ impl Engine {
                 if !self.extractors.contains(&from) {
                     self.extractors.push(from);
                 }
+                self.prefetch_next();
             }
             Request::PairCode => {
                 if self.hub.is_some() {

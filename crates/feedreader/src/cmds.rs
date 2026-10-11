@@ -895,6 +895,12 @@ fn edit_setting(m: &mut Model) {
             &s.max_age_days.map(|d| d.to_string()).unwrap_or_default(),
         ),
         Setting::RefreshMinutes => prompt(m, PromptKind::Setting(setting), "Refresh every this many minutes", &s.refresh_minutes.to_string()),
+        Setting::PrefetchDays => prompt(
+            m,
+            PromptKind::Setting(setting),
+            "Prepare unread entries from this many days back, so they open without waiting (0 turns it off)",
+            &s.prefetch_days.to_string(),
+        ),
         Setting::ConfirmOver => prompt(
             m,
             PromptKind::Setting(setting),
@@ -1051,6 +1057,17 @@ fn submit(m: &mut Model) {
                     Ok(n) => {
                         s.refresh_minutes = n;
                         format!("Refreshing every {n} minutes")
+                    }
+                    Err(e) => return fail(m, &e),
+                },
+                Setting::PrefetchDays => match number(&value, 0, 365) {
+                    Ok(0) => {
+                        s.prefetch_days = 0;
+                        "Not preparing entries ahead".to_string()
+                    }
+                    Ok(n) => {
+                        s.prefetch_days = n;
+                        format!("Preparing unread entries from the last {n} days")
                     }
                     Err(e) => return fail(m, &e),
                 },
