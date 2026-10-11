@@ -1,6 +1,7 @@
 use crate::commands::{Chord, Key};
 use crate::field::Field;
-use crate::kit::{Kind, Tone, Value};
+use crate::commands::{Command, Registry};
+use crate::kit::{Align, Column, Kind, Node, Place, Tone, Value};
 use crate::grid::Area;
 use crate::specimen::{Hit, Sandbox, Sheet};
 use crate::state::Id;
@@ -20,6 +21,12 @@ pub fn all() -> Vec<Sheet> {
         Sheet::new("Actions", "Button", buttons),
         Sheet::new("Actions", "Keys and actions", actions),
         Sheet::new("Actions", "Link", links),
+        Sheet::new("Navigation", "Tabs, places and breadcrumb", navigation),
+        Sheet::new("Feedback", "Status, message and confirm", feedback),
+        Sheet::new("Data", "Spec sheet", spec_sheet),
+        Sheet::new("Data", "Table", table).filling(),
+        Sheet::new("Data", "Tree", tree),
+        Sheet::new("Commands", "Action bar and help", commands),
         Sheet::new("Controls", "Checkbox", checkbox),
         Sheet::new("Controls", "Radio, switch and cycle", choices),
         Sheet::new("Controls", "Stepper and progress", steppers),
@@ -401,4 +408,177 @@ fn steppers(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
         caption(s, row.at(0, 0, 18, 1), &format!("{:.0}%", f * 100.0));
         s.progress(row.at(20, 0, 40, 1), f);
     }
+}
+
+fn navigation(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
+    caption(s, a.take_top(1), "Tabs are documents you opened; places are where lists live, the current one marked by a dot.");
+    a.take_top(1);
+    let tabs = Id::new("sheet.tabs");
+    caption(s, a.take_top(1), "tabs");
+    s.tabs(a.take_top(1), &["New tab", "How the grid works", "Release notes 0.1", "A very long article title that keeps going"], sb.pick(tabs).unwrap_or(1), |i| Hit::Pick(tabs, i));
+    a.take_top(2);
+    let places = Id::new("sheet.places");
+    caption(s, a.take_top(1), "places");
+    let list = [
+        Place { label: "Home", count: Some(42) },
+        Place { label: "Bookmarks", count: Some(7) },
+        Place { label: "I recommend", count: None },
+        Place { label: "Friends", count: Some(3) },
+        Place { label: "Feeds", count: None },
+        Place { label: "Settings", count: None },
+    ];
+    s.places(a.take_top(1), &list, sb.pick(places).unwrap_or(0), |i| Hit::Pick(places, i));
+    a.take_top(2);
+    caption(s, a.take_top(1), "breadcrumb");
+    let crumbs = Id::new("sheet.crumbs");
+    s.breadcrumb(a.take_top(1), &["Feeds", "Friends", "Robin's notes"], |i| Some(Hit::Pick(crumbs, i)));
+}
+
+fn feedback(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
+    caption(s, a.take_top(1), "Nothing floats: a toast is the message line, a dialog an inline confirm row, a tooltip the status line's hint.");
+    a.take_top(1);
+    caption(s, a.take_top(1), "status line");
+    let line = a.take_top(1);
+    s.status_line(line, &[Value::State("hub", Tone::Neutral), Value::Count("1,284 entries")], "j k move   / filter", &[Value::Date("10:52"), Value::Product("DK-01")]);
+    a.take_top(2);
+    caption(s, a.take_top(1), "message line");
+    let msg = Id::new("sheet.message");
+    for (text, tone) in [
+        ("Your I recommend feed is public.", Tone::Ok),
+        ("Three feeds haven't answered for a week.", Tone::Warn),
+        ("Couldn't save a change, so it was undone.", Tone::Danger),
+        ("Marked 12 entries read.", Tone::Neutral),
+    ] {
+        s.message(a.take_top(1).at(0, 0, 72, 1), text, tone, Some(Hit::Bump(msg)));
+    }
+    a.take_top(1);
+    caption(s, a.take_top(1), "confirm row");
+    let c = Id::new("sheet.confirm");
+    if sb.pick(c).is_none() {
+        s.confirm(a.take_top(1), "Remove 3 feeds and their entries?", ("Remove", Kind::Danger, Hit::Pick(c, 1)), ("Keep them", Hit::Pick(c, 0)));
+    } else {
+        s.message(a.take_top(1).at(0, 0, 72, 1), "Answered. Click the sheet again to reset it.", Tone::Neutral, None);
+    }
+}
+
+fn spec_sheet(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
+    caption(s, a.take_top(1), "A spec sheet is the whole running system as key and value, grouped.");
+    a.take_top(1);
+    let width = a.cols.min(72);
+    let groups: [(&str, &[(&str, Value)]); 3] = [
+        ("Software", &[("Graticule", Value::Product("DK-01")), ("Version", Value::Version("v0.1.0")), ("Build", Value::Code("2026-10-11 f9750b4"))]),
+        ("Engine", &[("Role", Value::State("hub", Tone::Neutral)), ("Paired devices", Value::Count("2")), ("Publishing", Value::State("public", Tone::Ok)), ("Last refresh", Value::Date("10:52"))]),
+        ("Frames", &[("Paint", Value::Count("0.31 ms")), ("Budget", Value::Count("1.00 ms")), ("Scrolling", Value::Mode("rows"))]),
+    ];
+    for (title, rows) in groups {
+        s.spec_group(a.take_top(1).at(0, 0, width, 1), title);
+        for (k, v) in rows {
+            s.spec(a.take_top(1).at(0, 0, width, 1), k, *v, 24);
+        }
+        a.take_top(1);
+    }
+}
+
+const FEEDS: [(&str, &str, &str, &str); 8] = [
+    ("Robin's notes", "12", "10:52", "ok"),
+    ("Ars Technica", "148", "10:40", "ok"),
+    ("The Old New Thing", "3", "Fri", "ok"),
+    ("A channel that moved", "0", "Sep 2026", "moved"),
+    ("Low-tech Magazine", "1", "Thu", "ok"),
+    ("Hacker News: Front", "88", "10:51", "ok"),
+    ("A feed that fails", "0", "Aug 2026", "failing"),
+    ("Julia Evans", "5", "Wed", "ok"),
+];
+
+fn table(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
+    caption(s, a.take_top(1), "A table is a list with columns: titles over a rule, values in their own look, numbers to the right.");
+    a.take_top(1);
+    let id = Id::new("sheet.table");
+    let columns = [
+        Column { title: "Feed", cols: 28, align: Align::Left },
+        Column { title: "Unread", cols: 8, align: Align::Right },
+        Column { title: "Updated", cols: 10, align: Align::Left },
+        Column { title: "State", cols: 10, align: Align::Left },
+    ];
+    let rows = 60;
+    s.table(id, a, &columns, rows, sb.pick(id), |i, j| {
+        let f = FEEDS[i % FEEDS.len()];
+        match j {
+            0 => Value::Text(f.0),
+            1 => Value::Count(f.1),
+            2 => Value::Date(f.2),
+            _ => match f.3 {
+                "ok" => Value::State("ok", Tone::Ok),
+                "moved" => Value::State("moved", Tone::Warn),
+                _ => Value::State("failing", Tone::Danger),
+            },
+        }
+    }, |i| Hit::Pick(id, i));
+}
+
+fn tree(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
+    caption(s, a.take_top(1), "A tree draws everything at once, like a sitemap; the help page and the folder tree can be one.");
+    a.take_top(1);
+    let id = Id::new("sheet.tree");
+    let nodes = [
+        Node { label: "Feedreader", depth: 0, last: true, open: Some(true) },
+        Node { label: "Places", depth: 1, last: false, open: Some(true) },
+        Node { label: "Home", depth: 2, last: false, open: None },
+        Node { label: "Bookmarks", depth: 2, last: false, open: None },
+        Node { label: "I recommend", depth: 2, last: true, open: None },
+        Node { label: "Folders", depth: 1, last: false, open: Some(true) },
+        Node { label: "Friends", depth: 2, last: false, open: None },
+        Node { label: "Work", depth: 2, last: true, open: Some(false) },
+        Node { label: "Settings", depth: 1, last: true, open: None },
+    ];
+    s.tree(a, &nodes, sb.pick(id), |i| Hit::Pick(id, i));
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Demo {
+    Next,
+    Previous,
+    Open,
+    Read,
+    Bookmark,
+    Select,
+    Refresh,
+    Filter,
+    Help,
+    Palette,
+    Undo,
+}
+
+fn demo() -> &'static Registry<Demo, ()> {
+    static REGISTRY: std::sync::OnceLock<Registry<Demo, ()>> = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        let make = |id, keys: Vec<Chord>, label: fn(&()) -> String, available: fn(&()) -> bool, rank| Command { id, keys, label, available, rank };
+        Registry {
+            commands: vec![
+                make(Demo::Next, vec![Chord::ch('j'), Chord::key(Key::Down)], |_| "next".into(), |_| true, 0),
+                make(Demo::Previous, vec![Chord::ch('k'), Chord::key(Key::Up)], |_| "previous".into(), |_| true, 0),
+                make(Demo::Open, vec![Chord::ch('o')], |_| "open".into(), |_| true, 1),
+                make(Demo::Read, vec![Chord::ch('m')], |_| "mark read".into(), |_| true, 1),
+                make(Demo::Bookmark, vec![Chord::ch('s')], |_| "bookmark".into(), |_| true, 1),
+                make(Demo::Select, vec![Chord::ch('x')], |_| "select".into(), |_| true, 2),
+                make(Demo::Refresh, vec![Chord::ch('r')], |_| "refresh".into(), |_| true, 3),
+                make(Demo::Filter, vec![Chord::ch('/')], |_| "filter".into(), |_| true, 3),
+                make(Demo::Undo, vec![Chord::cmd('z')], |_| "undo".into(), |_| false, 3),
+                make(Demo::Palette, vec![Chord::cmd('k')], |_| "palette".into(), |_| true, 4),
+                make(Demo::Help, vec![Chord::ch('?')], |_| "help".into(), |_| true, 4),
+            ],
+        }
+    })
+}
+
+fn commands(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
+    caption(s, a.take_top(1), "The action bar and help are generated from the command registry, so every available action is on screen.");
+    a.take_top(1);
+    let id = Id::new("sheet.commands");
+    caption(s, a.take_top(1), "action bar, wide");
+    s.action_bar(a.take_top(3), demo(), &(), |_| Hit::Bump(id));
+    caption(s, a.take_top(1), "action bar, narrow (36 columns, two rows)");
+    s.action_bar(a.take_top(3).at(0, 0, 36, 2), demo(), &(), |_| Hit::Bump(id));
+    caption(s, a.take_top(1), "help: every command, unavailable ones faint");
+    s.help(a.take_top(12), demo(), &(), |_| Hit::Bump(id));
 }

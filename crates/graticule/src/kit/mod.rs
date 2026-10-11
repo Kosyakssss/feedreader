@@ -1,8 +1,14 @@
 mod actions;
+mod commands;
 mod controls;
+mod data;
+mod feedback;
+mod nav;
 mod values;
 
 pub use actions::Kind;
+pub use data::{Align, Column, Node};
+pub use nav::Place;
 pub use values::{Tone, Value};
 
 use crate::grid::Area;

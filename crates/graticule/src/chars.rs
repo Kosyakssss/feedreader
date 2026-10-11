@@ -1,7 +1,7 @@
 use crate::ui::Rect;
 
 pub fn drawn(c: char) -> bool {
-    matches!(c as u32, 0x2500..=0x259F | 0x2800..=0x28FF) || matches!(c, '\u{21E7}' | '\u{2325}' | '\u{2303}')
+    matches!(c as u32, 0x2500..=0x259F | 0x2800..=0x28FF) || matches!(c, '\u{21E7}' | '\u{2325}' | '\u{2303}' | '\u{25B4}' | '\u{25B8}' | '\u{25BE}' | '\u{25C2}')
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -253,6 +253,10 @@ pub fn draw(c: char, r: Rect, pen: &mut Pen) -> Option<Shape> {
             let (l, r, top, bottom) = (w * 0.1, w * 0.9, h * 0.34, h * 0.68);
             format!("M {l} {top} L {} {top} L {} {bottom} L {r} {bottom} M {} {top} L {r} {top}", w * 0.36, w * 0.64, w * 0.62)
         }
+        '\u{25B8}' => return Some(Shape::Path(format!("M {} {} L {} {cy} L {} {} Z", w * 0.25, h * 0.32, w * 0.8, w * 0.25, h * 0.68), None)),
+        '\u{25C2}' => return Some(Shape::Path(format!("M {} {} L {} {cy} L {} {} Z", w * 0.75, h * 0.32, w * 0.2, w * 0.75, h * 0.68), None)),
+        '\u{25BE}' => return Some(Shape::Path(format!("M {} {} L {} {} L {cx} {} Z", w * 0.15, h * 0.38, w * 0.85, h * 0.38, h * 0.66), None)),
+        '\u{25B4}' => return Some(Shape::Path(format!("M {} {} L {} {} L {cx} {} Z", w * 0.15, h * 0.62, w * 0.85, h * 0.62, h * 0.34), None)),
         '\u{2303}' => format!("M {} {} L {cx} {} L {} {}", w * 0.18, h * 0.5, h * 0.3, w * 0.82, h * 0.5),
         _ => return None,
     };

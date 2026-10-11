@@ -794,7 +794,7 @@ impl<'a, H> Scene<'a, H> {
         if content <= view {
             return;
         }
-        let thumb_w = (track.w * 0.4).round().max(t * 3.0);
+        let thumb_w = if self.style == LineStyle::Heavy { t * 5.0 } else { t * 3.0 };
         let thumb_x = (track.x + (track.w - thumb_w) / 2.0).round();
         match self.style {
             LineStyle::Ascii => {
