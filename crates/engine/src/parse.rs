@@ -182,6 +182,12 @@ pub fn parse_feed(bytes: &[u8], base: &str) -> Result<ParsedFeed, String> {
                     thumb = m.thumbnails.first().map(|t| t.image.uri.clone());
                 }
             }
+            for l in e.links.iter().filter(|l| l.rel.as_deref() == Some("enclosure")) {
+                let kind = l.media_type.clone().unwrap_or_default();
+                if !kind.starts_with("image/") && !attachments.iter().any(|a| a.url == l.href) {
+                    attachments.push(Attachment { url: l.href.clone(), kind, bytes: l.length.filter(|&s| s > 0), seconds: None });
+                }
+            }
             if let Some(t) = thumb.filter(|_| !has_image && !media.contains("<img")) {
                 media.insert_str(0, &format!("<p><img src=\"{}\"></p>", attr(&t)));
             }

@@ -81,6 +81,10 @@ pub fn atom(token: &str, base: &str, items: &[PublicItem]) -> String {
         s.push_str(&format!("    <id>{id}</id>\n"));
         s.push_str(&format!("    <title>{}</title>\n", esc(&i.title)));
         s.push_str(&format!("    <link href=\"{}\"/>\n", attr(&i.url)));
+        for a in &i.attachments {
+            let length = a.bytes.map(|b| format!(" length=\"{b}\"")).unwrap_or_default();
+            s.push_str(&format!("    <link rel=\"enclosure\" href=\"{}\" type=\"{}\"{length}/>\n", attr(&a.url), attr(&a.kind)));
+        }
         s.push_str(&format!("    <published>{}</published>\n", rfc3339(i.published)));
         s.push_str(&format!("    <updated>{}</updated>\n", rfc3339(i.at)));
         s.push_str(&format!("    <author><name>{}</name></author>\n", esc(&i.source)));
@@ -112,6 +116,10 @@ pub fn page(base: &str, items: &[PublicItem]) -> String {
     }
     for i in live {
         s.push_str(&format!("<p><a href=\"{}\">{}</a><br><span class=\"m\">{}</span></p>", attr(&i.url), esc(&i.title), esc(&i.source)));
+        for a in &i.attachments {
+            let minutes = a.seconds.map(|s| format!(", {} min", s.div_ceil(60))).unwrap_or_default();
+            s.push_str(&format!("<p class=\"m\">[<a href=\"{}\">{}{minutes}</a>]</p>", attr(&a.url), a.class()));
+        }
         if !i.note.trim().is_empty() {
             s.push_str(&format!("<blockquote>{}</blockquote>", esc(&i.note)));
         }

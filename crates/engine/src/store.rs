@@ -847,7 +847,8 @@ impl Store {
     pub fn public_items(&self) -> Vec<PublicItem> {
         let since = crate::now() - 60 * 86_400_000;
         self.rows(
-            "select entry_id, note, title, url, source, published, content, at, removed_at from recommendations
+            "select entry_id, note, title, url, source, published, content, at, removed_at,
+             (select attachments from entries where id = entry_id) from recommendations
              where removed_at is null or removed_at > ?1 order by at desc limit 200",
             [since],
             |r| {
@@ -861,6 +862,7 @@ impl Store {
                     content: r.get(6)?,
                     at: r.get(7)?,
                     removed_at: r.get(8)?,
+                    attachments: attachments_of(r.get(9)?),
                 })
             },
         )
@@ -1454,4 +1456,5 @@ pub struct PublicItem {
     pub content: Option<String>,
     pub at: i64,
     pub removed_at: Option<i64>,
+    pub attachments: Vec<Attachment>,
 }

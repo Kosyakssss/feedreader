@@ -431,7 +431,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 ### 10.8 Engine and platform
 16. **Open.** Sync: households; refresh limits and the background engine switch in `engine.toml`.
 17. **Done.** Engine errors: a failed write in the store is recorded, the whole message rolls back, and the failure is logged and shown, followed by a fresh snapshot so no app shows a change that didn't stick; the migration refuses to run if it can't back up; `serve` exits with an error if the engine thread dies, so launchd restarts it. Queries that fail to prepare or run are recorded the same way, so nothing in the store panics.
-18. **Partial.** Media: images and pruning done; attachments are data shown in every reading mode; unread entries up to 30 days old are prepared in the background (§5.6). Open: attachments cached for offline (limits are Open, §9), favicons, attachments in the public I recommend feed.
+18. **Partial.** Media: images and pruning done; attachments are data shown in every reading mode, read from RSS enclosures, Media RSS and Atom enclosure links, and published as enclosures in the I recommend feed; unread entries up to 30 days old are prepared in the background (§5.6). Open: attachments cached for offline (limits are Open, §9), favicons.
 19. **Partial.** Discovery. Open: JSON-LD, h-feed, sitemaps.
 20. **Partial.** Tabs. Open: reordering by drag, one web view per tab.
 21. **Open.** Export bundle, move to another machine.
