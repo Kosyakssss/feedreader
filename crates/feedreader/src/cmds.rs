@@ -27,7 +27,6 @@ pub enum Cmd {
     Bookmark,
     Browser,
     CopyLink,
-    UnreadAll,
     OpenAllUnread,
     MarkAllRead,
     Filter,
@@ -241,9 +240,6 @@ fn build() -> Registry<Cmd, Model> {
             c(Cmd::Original, vec![], |m| mode_label(m, Mode::Original), reading_entry),
             c(Cmd::Browser, vec![], |_| "open in browser".into(), |m| entry_action(m) || reading(m)),
             c(Cmd::CopyLink, vec![Chord::cmd_shift('c')], |_| "copy link".into(), |m| entry_action(m) || reading(m)),
-            c(Cmd::UnreadAll, vec![ch('h'), ch('l')], |m| {
-                if m.unread_only { "show all".into() } else { "show unread".into() }
-            }, |m| listing(m) && m.view.filters_read()),
             c(Cmd::OpenAllUnread, vec![Chord { key: Key::Char('o'), cmd: false, shift: true }], |_| "open all unread".into(), |m| {
                 listing(m) && m.list.selected.is_empty()
             }),
@@ -527,10 +523,6 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
                 m.message = Some(format!("Copied {u}"));
                 m.effects.push(Effect::Copy(u));
             }
-        }
-        Cmd::UnreadAll => {
-            m.unread_only = !m.unread_only;
-            m.reset_list();
         }
         Cmd::OpenAllUnread => {
             let ids: Vec<String> = m

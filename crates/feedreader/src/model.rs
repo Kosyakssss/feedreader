@@ -3,6 +3,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use engine::{Block, Candidate, Entry, EntryId, Event, Feed, FeedId, Folder, Mode, Recommendation, RefreshStatus, Request, Rule, SAVED, Settings, TabState};
 
 pub use engine::Target;
+
+use crate::find::{Query, parse};
 use graticule::field::Field;
 use graticule::images::Images;
 use graticule::shell::Effect;
@@ -327,7 +329,6 @@ pub struct Model {
     pub refresh: RefreshStatus,
     pub page: Page,
     pub view: View,
-    pub unread_only: bool,
     pub list: ListState,
     pub filter: Field,
     pub focus: Focus,
@@ -405,12 +406,11 @@ impl Model {
             refresh: RefreshStatus::default(),
             page: Page::List,
             view: View::Home,
-            unread_only: true,
             list: ListState {
                 row_h: 1.0,
                 ..Default::default()
             },
-            filter: Field::default(),
+            filter: Field::with("is:unread "),
             focus: Focus::Main,
             reader: None,
             tabs: Vec::new(),
@@ -619,7 +619,7 @@ impl Model {
         }
     }
 
-    fn matches(&self, e: &Entry, needle: &str) -> bool {
+    fn matches(&self, e: &Entry, q: &Query, in_folder: Option<&HashSet<&str>>) -> bool {
         let Some(feed) = self.feed(&e.feed_id) else { return false };
         let in_view = match &self.view {
             View::Home => !feed.hidden && !self.hidden.contains(&e.id),
@@ -630,13 +630,18 @@ impl Model {
             }
             View::Feed(id) => &e.feed_id == id && !self.hidden.contains(&e.id),
         };
-        let state_ok = !self.unread_only
-            || !e.read
-            || !self.view.filters_read()
-            || self.list.sticky.contains(&e.id);
-        let text_ok = needle.is_empty()
-            || e.title.to_lowercase().contains(needle)
-            || self.feed_name(&e.feed_id).to_lowercase().contains(needle);
+        let state_ok = match q.read {
+            Some(false) => !e.read || self.list.sticky.contains(&e.id),
+            Some(true) => e.read,
+            None => true,
+        } && (!q.bookmarked || e.bookmarked)
+            && q.feed.as_ref().is_none_or(|f| *f == e.feed_id)
+            && in_folder.is_none_or(|set| set.contains(e.feed_id.as_str()));
+        let text_ok = q.words.is_empty() || {
+            let title = e.title.to_lowercase();
+            let source = self.feed_name(&e.feed_id).to_lowercase();
+            q.words.iter().all(|w| title.contains(w.as_str()) || source.contains(w.as_str()))
+        };
         in_view && state_ok && text_ok
     }
 
@@ -656,9 +661,10 @@ impl Model {
     fn rebuild_from(&mut self, mark: Mark) {
         let row_h = self.list.row_h;
         let Mark { anchor, offset, cursor: cursor_id } = mark;
-        let needle = self.filter.text.to_lowercase();
+        let q = parse(self, &self.filter.text);
+        let in_folder: Option<HashSet<&str>> = q.folder.as_ref().and_then(|id| self.folder(id)).map(|f| f.feeds.iter().map(String::as_str).collect());
         let visible: Vec<usize> = (0..self.entries.len())
-            .filter(|&i| self.matches(&self.entries[i], &needle))
+            .filter(|&i| self.matches(&self.entries[i], &q, in_folder.as_ref()))
             .collect();
         self.list.visible = visible;
         let position = |id: &Option<String>, list: &[usize], entries: &[Entry]| {
@@ -676,6 +682,10 @@ impl Model {
         self.list.scroll = self.list.scroll.clamp(0.0, max);
         let live: HashSet<&EntryId> = self.list.visible.iter().map(|&i| &self.entries[i].id).collect();
         self.list.selected.retain(|id| live.contains(id));
+    }
+
+    pub fn finds_unread(&self) -> bool {
+        parse(self, &self.filter.text).read == Some(false)
     }
 
     pub fn reset_list(&mut self) {
@@ -699,6 +709,7 @@ impl Model {
     }
 
     pub fn show(&mut self, view: View) {
+        self.filter.set(if view.filters_read() { "is:unread " } else { "" });
         self.view = view;
         self.go(Page::List);
         self.reset_list();
@@ -890,7 +901,7 @@ impl Model {
                     if let Some(&i) = self.entry_index.get(&id) {
                         inverse.push((id.clone(), self.entries[i].read));
                         self.entries[i].read = v;
-                        if v && self.unread_only {
+                        if v && self.finds_unread() {
                             self.list.sticky.insert(id.clone());
                         }
                         if v { on.push(id) } else { off.push(id) }

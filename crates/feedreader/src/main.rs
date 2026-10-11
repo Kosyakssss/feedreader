@@ -2,6 +2,7 @@ mod app;
 mod article;
 mod cmds;
 mod extract;
+mod find;
 #[cfg(test)]
 mod laws;
 mod model;
@@ -260,9 +261,9 @@ fn snapshot(args: &[String]) {
 }
 
 const GALLERY_SCREENS: &[(&str, &str)] = &[
-    ("List", "1 h"),
-    ("Selection", "1 h x x x down"),
-    ("Reader", "1 h o wait"),
+    ("List", "1 cmd:filterclear"),
+    ("Selection", "1 cmd:filterclear x x x down"),
+    ("Reader", "1 cmd:filterclear o wait"),
     ("Feeds", "3"),
     ("Settings", "4"),
     ("Help", "?"),

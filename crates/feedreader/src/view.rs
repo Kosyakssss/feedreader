@@ -532,16 +532,16 @@ fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOut)
     let pal = s.palette;
     let mono = mt.mono();
 
-    let state = if !m.view.filters_read() { "newest first" } else if m.unread_only { "unread" } else { "all" };
-    let title = format!("{} \u{00B7} {state}", m.view_name()).to_uppercase();
+    let title = m.view_name().to_uppercase();
     let tw = s.text(&title, mono, main.x + cw, main.y, Some(main.w * 0.4), pal.ink).width;
-    let count = if m.list.visible.is_empty() {
-        String::new()
-    } else {
-        format!("{} of {}", m.list.cursor + 1, m.list.visible.len())
+    let error = crate::find::parse(m, &m.filter.text).error;
+    let count = match &error {
+        Some(e) => e.clone(),
+        None if m.list.visible.is_empty() => String::new(),
+        None => format!("{} of {}", m.list.cursor + 1, m.list.visible.len()),
     };
-    let cnt_w = s.measure(&count, mono);
-    s.text(&count, mono, main.right() - cw * 2.0 - cnt_w, main.y, None, pal.muted);
+    let cnt_w = s.measure(&count, mono).min(main.w * 0.4);
+    s.text(&count, mono, main.right() - cw * 2.0 - cnt_w, main.y, Some(cnt_w), if error.is_some() { pal.danger } else { pal.muted });
     let fx = main.x + cw * 3.0 + tw;
     let fw = (main.right() - cw * 4.0 - cnt_w - fx).min(cw * 36.0);
     if fw > cw * 8.0 {
@@ -565,16 +565,18 @@ fn paint_list(m: &mut Model, s: &mut Scene<Hit>, main: Rect, out: &mut PaintOut)
     s.hit(track, Hit::Track(track, Scroll::List));
 
     if m.list.visible.is_empty() {
-        let text = if !m.filter.text.is_empty() {
-            format!("Nothing here matches \u{201C}{}\u{201D}.", m.filter.text)
+        let q = crate::find::parse(m, &m.filter.text);
+        let narrowed = !q.words.is_empty() || q.bookmarked || q.folder.is_some() || q.feed.is_some() || q.read == Some(true);
+        let text = if narrowed {
+            format!("Nothing here matches \u{201C}{}\u{201D}.", m.filter.text.trim())
         } else if m.feeds.is_empty() {
             "No feeds yet. Press 3 for the Feeds page, then a to add one.".to_string()
         } else if m.view == View::Bookmarks {
             "No bookmarks yet. Press s on an entry to keep it here.".to_string()
         } else if m.view == View::Recommended {
             "Nothing recommended yet. Use recommend on an entry to share it with friends through your public link.".to_string()
-        } else if m.unread_only {
-            "Nothing unread here. Press h to see everything.".to_string()
+        } else if q.read == Some(false) {
+            "Nothing unread here. Remove is:unread from the filter to see everything.".to_string()
         } else {
             "No entries here yet.".to_string()
         };

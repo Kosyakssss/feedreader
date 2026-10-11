@@ -411,7 +411,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 5. **Partial.** The shell lives in Graticule (`graticule::shell`): the event loop, keys to commands, editing of the focused field, IME, clipboard, hit testing, hover, cursors, clicks and drags, the wheel, the web pane, the menu bar, file drops and effects as data; apps implement `graticule::shell::App`, and `Offscreen` renders the same way for snapshots. Open: interaction state (scroll offsets, drags) kept by Graticule instead of the app's model, so the view stops writing into the model.
 6. **Open.** Registry-driven components: action bar (grouped, no hiding), help as a drawn tree, palette, context menus (macOS, the one `unsafe`), menu bar.
 7. **Open.** Text: selection on by default; fields with native behavior; native file dialogs.
-8. **Open.** Components, one at a time with gallery sheets: entry row, list with scrollbar and position, find field with tokens, places strip, tab strip with the new tab, spec sheet, table, tree, confirm row and message line, badges, article.
+8. **Open.** Components, one at a time with gallery sheets: entry row, list with scrollbar and position, find field with tokens, places strip, tab strip with the new tab, spec sheet, table, tree, confirm row and message line, badges, article. The find field's behavior is done: tokens shared with the palette (`find.rs`), `is:unread` shown by default, the Unread/All toggle and `h`/`l` retired.
 9. **Open.** Accessibility with AccessKit, fed from the same pass that paints.
 
 ### 10.4 Feedreader on Graticule
