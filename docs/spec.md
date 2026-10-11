@@ -422,7 +422,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 12. **Open.** Canvas: shapes, weights, hit testing, ASCII rendering, live frames; charts on top (a posting-frequency sparkline per feed on the Feeds page, the pairing QR code).
 
 ### 10.6 Instant
-13. **Open.** Stage budgets measured per interaction; memoized components; integer ids; the main thread freed of shaping and waiting; pre-shaping; instant launch (§6.10).
+13. **Partial.** Launch is measured stage by stage (`docs/internals/graticule.md`) and fonts load in parallel with AppKit's startup. Open: stage budgets measured per interaction; memoized components; integer ids; the main thread freed of shaping and waiting; pre-shaping.
 
 ### 10.7 Demo apps
 14. **Open.** The editor.
