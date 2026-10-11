@@ -160,7 +160,8 @@ pub struct List {
 #[derive(Clone, Copy, Debug)]
 pub struct Focused {
     pub rect: Rect,
-    pub origin: f32,
+    pub origin: (f32, f32),
+    pub wrap: Option<f32>,
     pub caret: Rect,
 }
 
@@ -481,8 +482,72 @@ impl<'a, H> Scene<'a, H> {
                 if sel.is_empty() {
                     self.fill(c, pal.ink);
                 }
-                self.focused = Some(Focused { rect: r, origin: x0, caret: c });
+                self.focused = Some(Focused { rect: r, origin: (x0, r.y), wrap: None, caret: c });
             }
+        }
+        self.pop_clip();
+    }
+
+    pub fn text_area(&mut self, id: Id, r: Rect, f: &Field, focused: bool, placeholder: &str) {
+        let pal = self.palette;
+        let mono = self.m.mono();
+        let (size, line) = (mono.size, self.m.cell_h);
+        let pad = self.m.cell_w * 0.5;
+        let wrap = (r.w - pad * 2.0).max(self.m.cell_w);
+        self.fill(r, pal.field);
+        self.fields.push(r);
+        self.scrollables.push((r, id));
+        if focused {
+            let t = self.hair();
+            self.fill(Rect::new(r.x, r.bottom() - t, r.w, t), pal.ink);
+        }
+        let composing = !f.preedit.is_empty();
+        let shown = if composing { format!("{}{}{}", &f.text[..f.caret], f.preedit, &f.text[f.caret..]) } else { String::new() };
+        let text = if composing { shown.as_str() } else { f.text.as_str() };
+        let span = SpanStyle::plain(Face::Mono);
+        let spans = [(text, span)];
+        let content = self.text.height(&spans, size, line, wrap).max(line);
+        let caret_at = f.caret + f.preedit.len();
+        let c = self.text.caret(&spans, size, line, wrap, caret_at);
+        let s = self.state.scroll_mut(id);
+        s.item = content;
+        s.count = 1;
+        s.view = r.h;
+        if focused {
+            let total = s.total();
+            if c[1] < total {
+                s.set_total(c[1]);
+            } else if c[1] + line > total + r.h {
+                s.set_total(c[1] + line - r.h);
+            }
+        }
+        s.set_total(s.total());
+        let scroll = s.total();
+        let origin = (r.x + pad, r.y - scroll);
+        self.push_clip(r);
+        if text.is_empty() && !focused {
+            self.text(placeholder, mono, origin.0, origin.1, None, pal.faint);
+        } else {
+            let sel = f.selection();
+            if focused && !sel.is_empty() && !composing {
+                for q in self.text.range_rects(&spans, size, line, wrap, sel) {
+                    self.fill(Rect::new(origin.0 + q[0], origin.1 + q[1], q[2].max(self.m.cell_w * 0.5), q[3]), pal.selection);
+                }
+            }
+            if composing {
+                let t = self.hair();
+                for q in self.text.range_rects(&spans, size, line, wrap, f.caret..caret_at) {
+                    self.fill(Rect::new(origin.0 + q[0], origin.1 + q[1] + line * 0.85, q[2], t), pal.ink);
+                }
+            }
+            self.spans(Block { spans: &spans, size, line, wrap: Some(wrap) }, origin, None, &[pal.ink]);
+        }
+        if focused {
+            let caret = Rect::new((origin.0 + c[0]).floor(), origin.1 + c[1] + line * 0.15, (self.m.scale * 2.0).round().max(1.0), line * 0.7);
+            if f.selection().is_empty() {
+                self.fill(caret, pal.ink);
+            }
+            self.focused = Some(Focused { rect: r, origin, wrap: Some(wrap), caret });
         }
         self.pop_clip();
     }
@@ -606,8 +671,7 @@ impl<'a, H> Scene<'a, H> {
         let ink = if self.hovered(track) { self.palette.ink } else { self.palette.muted };
         let t = self.hair();
         let mid = (track.x + track.w / 2.0).floor();
-        if content <= view && self.style != LineStyle::Ascii {
-            self.vline(track.x + (track.w - self.m.cell_w) / 2.0, track.y, track.bottom());
+        if content <= view {
             return;
         }
         let thumb_w = (track.w * 0.4).round().max(t * 3.0);

@@ -506,8 +506,22 @@ impl<A: App> Running<A> {
                     self.app.field_changed();
                     return true;
                 }
+                Edit::Line(to, extend) => {
+                    let (Some(focused), Some(f)) = (self.focused, self.app.field()) else { return true };
+                    let Some(wrap) = focused.wrap else { return true };
+                    let mono = self.metrics.mono();
+                    let span = crate::text::SpanStyle::plain(Face::Mono);
+                    let at = self.text.line_move(&[(&f.text, span)], mono.size, self.metrics.cell_h, wrap, f.caret, to);
+                    f.place(at, extend);
+                    return true;
+                }
                 Edit::Paste => {
-                    let pasted = self.clipboard.as_mut().and_then(|c| c.get_text().ok()).map(|t| t.replace(['\n', '\r'], " "));
+                    let multiline = self.app.field().is_some_and(|f| f.multiline);
+                    let pasted = self
+                        .clipboard
+                        .as_mut()
+                        .and_then(|c| c.get_text().ok())
+                        .map(|t| if multiline { t.replace("\r\n", "\n") } else { t.replace(['\n', '\r'], " ") });
                     if let Some(t) = pasted
                         && let Some(f) = self.app.field()
                     {
@@ -575,7 +589,12 @@ impl<A: App> Running<A> {
     fn caret_at(&mut self, x: f32, y: f32) -> Option<usize> {
         let focused = self.focused.filter(|f| f.rect.contains(x, y) || self.selecting)?;
         let f = self.app.field()?;
-        Some(self.text.index_at(&f.text, self.metrics.mono(), self.metrics.cell_h, x - focused.origin))
+        let mono = self.metrics.mono();
+        let (dx, dy) = (x - focused.origin.0, y - focused.origin.1);
+        Some(match focused.wrap {
+            Some(wrap) => self.text.byte_at(&[(&f.text, crate::text::SpanStyle::plain(Face::Mono))], mono.size, self.metrics.cell_h, wrap, dx, dy),
+            None => self.text.index_at(&f.text, mono, self.metrics.cell_h, dx),
+        })
     }
 
     fn middle(&mut self) {

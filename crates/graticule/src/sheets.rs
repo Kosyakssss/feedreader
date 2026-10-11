@@ -1,3 +1,4 @@
+use crate::field::Field;
 use crate::grid::Area;
 use crate::specimen::{Hit, Sandbox, Sheet};
 use crate::state::Id;
@@ -15,6 +16,7 @@ pub fn all() -> Vec<Sheet> {
         Sheet::new("Foundations", "Characters", characters),
         Sheet::new("Controls", "Checkbox", checkbox),
         Sheet::new("Controls", "Field", field),
+        Sheet::new("Controls", "Text area", text_area),
         Sheet::new("Scrolling", "List", list),
         Sheet::new("Scrolling", "Scroll area", scroll_area),
     ]
@@ -145,8 +147,9 @@ fn field(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
         let id = Id::new("sheet.field").child(i as u64);
         let row = a.take_top(2).line(0).at(0, 0, a.cols.min(48), 1);
         let r = s.rect(row);
-        s.field(r, sb.field(id), sb.is_focused(id), placeholder);
-        s.hit(r, Hit::Focus(id));
+        let empty = Field::default();
+        s.field(r, sb.field(id).unwrap_or(&empty), sb.is_focused(id), placeholder);
+        s.hit(r, Hit::Focus(id, None));
     }
 }
 
@@ -226,4 +229,17 @@ fn characters(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
     for line in ["┌──┬──┐ ┏━━┳━━┓ ╔══╦══╗ ╭──┬──╮ ▛▀▀▜ ░▒▓█", "├──┼──┤ ┣━━╋━━┫ ╠══╬══╣ │  │  │ ▌  ▐ ▁▂▃▄▅▆▇█", "└──┴──┘ ┗━━┻━━┛ ╚══╩══╝ ╰──┴──╯ ▙▄▄▟ ╱╲╳"] {
         s.write(a.take_top(1), line, mono, pal.ink);
     }
+}
+
+const DRAFT: &str = "Dear friend,\n\nThis is a text area: it wraps at its edge, keeps a newline where you press Return, and scrolls to keep the caret in view.\n\nUp and down move by the lines you see, Home and End go to their ends, Cmd with the arrows goes to the start or end of everything, and the Emacs keys work as they do in any Mac text field.";
+
+fn text_area(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
+    caption(s, a.take_top(1), "Click to edit. Return starts a new line; Escape leaves it.");
+    a.take_top(1);
+    let id = Id::new("sheet.text_area");
+    let seeded = Field::multiline(DRAFT);
+    let f = sb.field(id).unwrap_or(&seeded);
+    let r = s.rect(a.at(0, 0, a.cols.min(56), a.rows.min(12)));
+    s.text_area(id, r, f, sb.is_focused(id), "write something");
+    s.hit(r, Hit::Focus(id, Some(DRAFT)));
 }

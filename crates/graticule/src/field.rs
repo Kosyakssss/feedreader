@@ -8,6 +8,7 @@ pub struct Field {
     pub caret: usize,
     pub anchor: usize,
     pub preedit: String,
+    pub multiline: bool,
     history: Vec<(String, usize)>,
     future: Vec<(String, usize)>,
     last: Kind,
@@ -39,6 +40,15 @@ pub enum Edit {
     Copy(String),
     Cut(String),
     Paste,
+    Line(Line, bool),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Line {
+    Up,
+    Down,
+    Start,
+    End,
 }
 
 fn word(c: char) -> bool {
@@ -50,8 +60,12 @@ impl Field {
         Self { text: text.to_string(), caret: text.len(), anchor: text.len(), ..Self::default() }
     }
 
+    pub fn multiline(text: &str) -> Self {
+        Self { multiline: true, ..Self::with(text) }
+    }
+
     pub fn set(&mut self, text: &str) {
-        *self = Self { kill: std::mem::take(&mut self.kill), ..Self::with(text) };
+        *self = Self { kill: std::mem::take(&mut self.kill), multiline: self.multiline, ..Self::with(text) };
     }
 
     pub fn clear(&mut self) {
@@ -122,6 +136,40 @@ impl Field {
     pub fn key(&mut self, key: Key, k: Keys) -> Edit {
         let extend = k.shift;
         let selecting = !self.selection().is_empty();
+        if self.multiline {
+            match (key, k.primary, k.alt, k.control) {
+                (Key::Enter, false, false, false) => {
+                    self.replace(self.selection(), "\n", Kind::Typing);
+                    return Edit::Changed;
+                }
+                (Key::Up, true, false, false) => {
+                    self.place(0, extend);
+                    return Edit::Moved;
+                }
+                (Key::Down, true, false, false) => {
+                    self.place(self.text.len(), extend);
+                    return Edit::Moved;
+                }
+                (Key::Up, false, false, false) | (Key::Char('p'), false, false, true) => return Edit::Line(Line::Up, extend),
+                (Key::Down, false, false, false) | (Key::Char('n'), false, false, true) => return Edit::Line(Line::Down, extend),
+                (Key::Left, true, false, false) | (Key::Home, false, false, false) | (Key::Char('a'), false, false, true) => {
+                    return Edit::Line(Line::Start, extend);
+                }
+                (Key::Right, true, false, false) | (Key::End, false, false, false) | (Key::Char('e'), false, false, true) => {
+                    return Edit::Line(Line::End, extend);
+                }
+                (Key::Char('k'), false, false, true) if self.caret < self.text.len() => {
+                    let end = match self.text[self.caret..].find('\n') {
+                        Some(0) => self.caret + 1,
+                        Some(i) => self.caret + i,
+                        None => self.text.len(),
+                    };
+                    self.kill = self.text[self.caret..end].to_string();
+                    return self.delete(self.caret..end);
+                }
+                _ => {}
+            }
+        }
         let to = match (key, k.primary, k.alt, k.control) {
             (Key::Char('a'), true, false, false) => {
                 self.select_all();

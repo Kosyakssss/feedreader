@@ -30,7 +30,7 @@ pub enum Hit {
     Toggle(Id),
     Pick(Id, usize),
     Bump(Id),
-    Focus(Id),
+    Focus(Id, Option<&'static str>),
     Open(usize),
     Run(Cmd),
 }
@@ -43,8 +43,6 @@ pub struct Sandbox {
     fields: HashMap<Id, Field>,
     pub focused: Option<Id>,
 }
-
-static EMPTY: OnceLock<Field> = OnceLock::new();
 
 impl Sandbox {
     pub fn on(&self, id: Id) -> bool {
@@ -59,8 +57,8 @@ impl Sandbox {
         self.bumps.get(&id).copied().unwrap_or(0)
     }
 
-    pub fn field(&self, id: Id) -> &Field {
-        self.fields.get(&id).unwrap_or_else(|| EMPTY.get_or_init(Field::default))
+    pub fn field(&self, id: Id) -> Option<&Field> {
+        self.fields.get(&id)
     }
 
     pub fn is_focused(&self, id: Id) -> bool {
@@ -188,7 +186,7 @@ impl Bench {
     }
 
     pub fn press(&mut self, hit: Option<Hit>) {
-        let keep_focus = matches!(hit, Some(Hit::Focus(_)));
+        let keep_focus = matches!(hit, Some(Hit::Focus(..)));
         match hit {
             Some(Hit::Toggle(id)) => {
                 if !self.sandbox.on.remove(&id) {
@@ -199,8 +197,8 @@ impl Bench {
                 self.sandbox.picks.insert(id, i);
             }
             Some(Hit::Bump(id)) => *self.sandbox.bumps.entry(id).or_default() += 1,
-            Some(Hit::Focus(id)) => {
-                self.sandbox.fields.entry(id).or_default();
+            Some(Hit::Focus(id, seed)) => {
+                self.sandbox.fields.entry(id).or_insert_with(|| seed.map(Field::multiline).unwrap_or_default());
                 self.sandbox.focused = Some(id);
             }
             Some(Hit::Open(i)) => self.current = i.min(self.sheets.len().saturating_sub(1)),
@@ -423,7 +421,7 @@ impl App for Runner {
 
     fn cursor(&mut self, hit: Option<&Hit>, _: &mut Ctx) -> Cursor {
         match hit {
-            Some(Hit::Focus(_)) => Cursor::Text,
+            Some(Hit::Focus(..)) => Cursor::Text,
             Some(_) => Cursor::Pointer,
             None => Cursor::Default,
         }

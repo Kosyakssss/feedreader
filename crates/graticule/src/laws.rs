@@ -18,6 +18,9 @@ fn key() -> impl Strategy<Value = (Key, Keys)> {
         Just(Key::Char('y')),
         Just(Key::Char('x')),
         Just(Key::Char('d')),
+        Just(Key::Enter),
+        Just(Key::Up),
+        Just(Key::Down),
     ];
     (keys, any::<(bool, bool, bool, bool)>()).prop_map(|(k, (shift, alt, primary, control))| (k, Keys { shift, alt, primary, control }))
 }
@@ -60,8 +63,8 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
 
     #[test]
-    fn field_undo_returns_to_the_start_and_redo_to_the_end(start in "[a-z é]{0,12}", steps in prop::collection::vec(step(), 0..40)) {
-        let mut f = Field::with(&start);
+    fn field_undo_returns_to_the_start_and_redo_to_the_end(start in "[a-z é\n]{0,12}", multiline: bool, steps in prop::collection::vec(step(), 0..40)) {
+        let mut f = if multiline { Field::multiline(&start) } else { Field::with(&start) };
         for s in &steps {
             apply(&mut f, s);
             prop_assert!(valid(&f), "caret {} anchor {} in {:?}", f.caret, f.anchor, f.text);

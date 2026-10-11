@@ -268,6 +268,25 @@ impl Text {
         parley::Selection::word_from_point(layout, x, y).text_range()
     }
 
+    pub fn caret(&mut self, spans: &[(&str, SpanStyle)], size: f32, line: f32, wrap: f32, index: usize) -> [f32; 4] {
+        let layout = self.layout(spans, size, line, Some(wrap));
+        let b = parley::Cursor::from_byte_index(layout, index, parley::Affinity::Downstream).geometry(layout, 1.0);
+        [b.x0 as f32, b.y0 as f32, (b.x1 - b.x0) as f32, (b.y1 - b.y0) as f32]
+    }
+
+    pub fn line_move(&mut self, spans: &[(&str, SpanStyle)], size: f32, line: f32, wrap: f32, index: usize, to: crate::field::Line) -> usize {
+        use crate::field::Line;
+        let layout = self.layout(spans, size, line, Some(wrap));
+        let at = parley::Selection::from_byte_index(layout, index, parley::Affinity::Downstream);
+        let moved = match to {
+            Line::Up => at.previous_line(layout, false),
+            Line::Down => at.next_line(layout, false),
+            Line::Start => at.line_start(layout, false),
+            Line::End => at.line_end(layout, false),
+        };
+        moved.focus().index()
+    }
+
     pub fn range_rects(&mut self, spans: &[(&str, SpanStyle)], size: f32, line: f32, wrap: f32, range: Range<usize>) -> Vec<[f32; 4]> {
         let layout = self.layout(spans, size, line, Some(wrap));
         let a = parley::Cursor::from_byte_index(layout, range.start, parley::Affinity::Downstream);

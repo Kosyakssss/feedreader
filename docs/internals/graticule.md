@@ -27,3 +27,7 @@ Lists and scroll areas keep their scroll state in `graticule::state::State`, key
 ## Character graphics are drawn, not taken from the font
 
 Box drawing (U+2500–U+257F), block elements (U+2580–U+259F) and braille (U+2800–U+28FF) are drawn by `chars.rs` as rectangles snapped to device pixels, so lines meet exactly at cell edges whatever the font, size or scale. Each box character is four arms (up, right, down, left) of none, light, heavy or double weight. An arm's inner end depends on the arms across it, so joins have no gaps: a single line covers the line it meets, and of a double line's two strokes, the one on the side of a crossing arm stops at that arm's near stroke while the outer one runs to its far stroke, which gives double corners their inner and outer turns. Arcs and diagonals are paths rasterized once per cell size into the glyph atlas. Mono text that contains any of these characters is laid out cell by cell (`Scene::cells`); boxes and rules (`frame`, `rule`, `vrule`) are strings of the current line style's characters.
+
+## Moves that need the layout go through the shell
+
+`Field` is a pure editing model and doesn't know where its text wrapped. In a multi-line field, up, down and the line ends return `Edit::Line`, and the shell answers them from the layout the field was last painted with (`Focused.wrap`), using parley's line navigation. Everything else, including Return, Cmd with the arrows and Ctrl-K up to the end of the line, stays in the model, so the field law covers it.
