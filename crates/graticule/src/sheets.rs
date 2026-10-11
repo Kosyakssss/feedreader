@@ -1,7 +1,7 @@
 use crate::commands::{Chord, Key};
 use crate::field::Field;
 use crate::commands::{Command, Registry};
-use crate::kit::{Align, Column, Found, Kind, Node, Place, Table, Tone, Value};
+use crate::kit::{Align, Column, Found, Kind, Node, Palette, Place, Table, Tone, Value};
 use crate::grid::Area;
 use crate::specimen::{Hit, Sandbox, Sheet};
 use crate::state::Id;
@@ -625,6 +625,7 @@ fn palette(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
     let matches: Vec<(usize, Vec<std::ops::Range<usize>>)> = ITEMS.iter().enumerate().filter_map(|(i, (label, _))| subsequence(&field.text, label).map(|m| (i, m))).collect();
     let found: Vec<Found> = matches.iter().map(|(i, m)| Found { label: ITEMS[*i].0, detail: ITEMS[*i].1, matched: m }).collect();
     let r = a.at(0, 0, a.cols.min(80), a.rows.min(16));
-    s.palette(id.named("list"), r, &field, sb.is_focused(id), &found, sb.pick(id.named("cursor")).or(Some(0)), |i| Hit::Pick(id.named("cursor"), i));
+    let p = Palette { id: id.named("list"), field: &field, focused: sb.is_focused(id), found: &found, cursor: sb.pick(id.named("cursor")).or(Some(0)) };
+    s.palette(p, r, |i| Hit::Pick(id.named("cursor"), i));
     s.hit(s.rect(r.line(0)), Hit::Focus(id, None));
 }

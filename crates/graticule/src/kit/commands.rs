@@ -7,6 +7,14 @@ use crate::state::Id;
 use crate::text::{Block, Face, SpanStyle};
 use crate::ui::{List, Scene};
 
+pub struct Palette<'a> {
+    pub id: Id,
+    pub field: &'a Field,
+    pub focused: bool,
+    pub found: &'a [Found<'a>],
+    pub cursor: Option<usize>,
+}
+
 pub struct Found<'a> {
     pub label: &'a str,
     pub detail: &'a str,
@@ -91,7 +99,8 @@ impl<H: Clone> Scene<'_, H> {
         row
     }
 
-    pub fn palette(&mut self, id: Id, at: Area, field: &Field, focused: bool, found: &[Found], cursor: Option<usize>, hit: impl Fn(usize) -> H) {
+    pub fn palette(&mut self, p: Palette, at: Area, hit: impl Fn(usize) -> H) {
+        let Palette { id, field, focused, found, cursor } = p;
         let pal = self.palette;
         let mut body = at;
         let input = body.take_top(1);
