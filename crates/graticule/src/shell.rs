@@ -38,7 +38,30 @@ pub struct Mods {
 pub enum Effect {
     Open(String),
     Copy(String),
+    Choose(Choose),
     Quit,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Choose {
+    pub id: u32,
+    pub title: String,
+    pub save_as: Option<String>,
+    pub kinds: Vec<(String, Vec<String>)>,
+}
+
+fn choose(window: &Window, c: &Choose) -> Option<PathBuf> {
+    let mut dialog = rfd::FileDialog::new().set_title(&c.title).set_parent(window);
+    if let Some(dir) = std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Downloads")).filter(|d| d.is_dir()) {
+        dialog = dialog.set_directory(dir);
+    }
+    for (name, extensions) in &c.kinds {
+        dialog = dialog.add_filter(name, extensions);
+    }
+    match &c.save_as {
+        Some(name) => dialog.set_file_name(name).save_file(),
+        None => dialog.pick_file(),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -157,6 +180,7 @@ pub trait App: Sized + 'static {
         false
     }
     fn dropped(&mut self, _: PathBuf) {}
+    fn chosen(&mut self, _: u32, _: Option<PathBuf>) {}
     fn web_closed(&mut self) {}
     fn exiting(self) {}
 }
@@ -364,16 +388,26 @@ impl<A: App> Running<A> {
     }
 
     fn settle(&mut self) {
-        for effect in self.app.settle() {
-            match effect {
-                Effect::Open(target) => open_external(&target),
-                Effect::Copy(text) => {
-                    if let Some(c) = &mut self.clipboard {
-                        let _ = c.set_text(text);
+        let mut effects = self.app.settle();
+        while !effects.is_empty() {
+            let mut chose = false;
+            for effect in effects {
+                match effect {
+                    Effect::Open(target) => open_external(&target),
+                    Effect::Copy(text) => {
+                        if let Some(c) = &mut self.clipboard {
+                            let _ = c.set_text(text);
+                        }
                     }
+                    Effect::Choose(c) => {
+                        let path = choose(&self.window, &c);
+                        self.app.chosen(c.id, path);
+                        chose = true;
+                    }
+                    Effect::Quit => self.quit = true,
                 }
-                Effect::Quit => self.quit = true,
             }
+            effects = if chose { self.app.settle() } else { Vec::new() };
         }
         if self.visible {
             self.window.request_redraw();

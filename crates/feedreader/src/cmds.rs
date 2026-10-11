@@ -1,7 +1,7 @@
 use engine::{Mode, Request, Rule};
 use graticule::commands::{Chord, Command, Key, Registry};
 use graticule::field::Field;
-use graticule::shell::Effect;
+use graticule::shell::{Choose, Effect};
 
 use crate::model::{Confirm, Discovery, Focus, Model, Op, Page, Prompt, PromptKind, Row, Setting, Target, View};
 
@@ -377,14 +377,28 @@ fn prompt(m: &mut Model, kind: PromptKind, label: &str, value: &str) {
     m.focus = Focus::Prompt;
 }
 
-fn downloads(name: &str) -> String {
-    dirs_home()
-        .map(|h| format!("{h}/Downloads/{name}"))
-        .unwrap_or_else(|| name.to_string())
-}
-
 fn dirs_home() -> Option<String> {
     std::env::var("HOME").ok()
+}
+
+#[derive(Clone, Copy)]
+pub enum Chosen {
+    Opml,
+    Export,
+    Legacy,
+}
+
+pub fn chosen(m: &mut Model, id: u32, path: Option<std::path::PathBuf>) {
+    let Some(path) = path else { return };
+    if id == Chosen::Opml as u32 {
+        m.out.push(Request::ImportOpml(path));
+        m.message = Some("Importing\u{2026}".into());
+    } else if id == Chosen::Export as u32 {
+        m.out.push(Request::ExportOpml(path));
+    } else if id == Chosen::Legacy as u32 {
+        m.out.push(Request::ImportLegacy(path));
+        m.message = Some("Importing\u{2026}".into());
+    }
 }
 
 pub fn expand(path: &str) -> std::path::PathBuf {
@@ -615,11 +629,18 @@ pub fn exec(m: &mut Model, cmd: Cmd) {
                 prompt(m, PromptKind::Rename(f.id.clone()), "New name (empty uses the feed's own title)", f.name());
             }
         }
-        Cmd::Import => prompt(m, PromptKind::ImportOpml, "Import OPML from", &downloads("")),
-        Cmd::Export => {
-            let name = format!("feedreader-{}.opml", chrono::Local::now().format("%Y-%m-%d"));
-            prompt(m, PromptKind::ExportOpml, "Export OPML to", &downloads(&name));
-        }
+        Cmd::Import => m.effects.push(Effect::Choose(Choose {
+            id: Chosen::Opml as u32,
+            title: "Import OPML".into(),
+            save_as: None,
+            kinds: vec![("OPML".into(), vec!["opml".into(), "xml".into()])],
+        })),
+        Cmd::Export => m.effects.push(Effect::Choose(Choose {
+            id: Chosen::Export as u32,
+            title: "Export OPML".into(),
+            save_as: Some(format!("feedreader-{}.opml", chrono::Local::now().format("%Y-%m-%d"))),
+            kinds: vec![("OPML".into(), vec!["opml".into()])],
+        })),
         Cmd::Pick => {
             if let Some(Discovery::Found(_, c, i)) = &m.discovery
                 && let Some(cand) = c.get(*i)
@@ -903,7 +924,12 @@ fn edit_setting(m: &mut Model) {
             "Ask before opening more than this many entries",
             &s.confirm_open_over.to_string(),
         ),
-        Setting::ImportLegacy => prompt(m, PromptKind::ImportLegacy, "Path to the current app's feedreader.sqlite", ""),
+        Setting::ImportLegacy => m.effects.push(Effect::Choose(Choose {
+            id: Chosen::Legacy as u32,
+            title: "Import the old app's library".into(),
+            save_as: None,
+            kinds: vec![("Feedreader library".into(), vec!["sqlite".into(), "db".into()])],
+        })),
     }
 }
 
@@ -1001,29 +1027,6 @@ fn submit(m: &mut Model) {
             let label = if value.is_empty() || m.feed(&id).is_some_and(|f| f.title == value) { None } else { Some(value) };
             let name = m.feed_name(&id).to_string();
             m.act(format!("Renamed {name}"), Op::Rename(id, label));
-        }
-        PromptKind::ImportOpml => {
-            let path = expand(&value);
-            if !path.is_file() {
-                return fail(m, "No file there");
-            }
-            m.out.push(Request::ImportOpml(path));
-            m.message = Some("Importing\u{2026}".into());
-        }
-        PromptKind::ExportOpml => {
-            let path = expand(&value);
-            if path.is_dir() {
-                return fail(m, "That's a folder; add a file name");
-            }
-            m.out.push(Request::ExportOpml(path));
-        }
-        PromptKind::ImportLegacy => {
-            let path = expand(&value);
-            if !path.is_file() {
-                return fail(m, "No file there");
-            }
-            m.out.push(Request::ImportLegacy(path));
-            m.message = Some("Importing\u{2026}".into());
         }
         PromptKind::Setting(setting) => {
             let mut s = m.settings.clone();

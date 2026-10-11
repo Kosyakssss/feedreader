@@ -194,9 +194,6 @@ pub enum PromptKind {
     RenameFolder(String),
     Mute,
     Recommend(Vec<EntryId>),
-    ImportOpml,
-    ExportOpml,
-    ImportLegacy,
     Setting(Setting),
 }
 

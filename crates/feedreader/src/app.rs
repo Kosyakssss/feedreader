@@ -546,6 +546,10 @@ impl graticule::shell::App for Feed {
         self.model.message = Some("Importing\u{2026}".into());
     }
 
+    fn chosen(&mut self, id: u32, path: Option<PathBuf>) {
+        cmds::chosen(&mut self.model, id, path);
+    }
+
     fn web_closed(&mut self) {
         self.model.back();
     }
