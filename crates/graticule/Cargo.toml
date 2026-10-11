@@ -25,3 +25,6 @@ muda = { version = "0.21.2", default-features = false }
 
 [features]
 profile = ["profiling/profile-with-tracy"]
+
+[dev-dependencies]
+proptest = "1.12.0"

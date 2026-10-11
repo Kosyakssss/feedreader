@@ -1684,6 +1684,7 @@ dependencies = [
  "png",
  "pollster 1.0.1",
  "profiling",
+ "proptest",
  "rfd",
  "swash",
  "wgpu",

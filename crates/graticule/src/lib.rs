@@ -1,5 +1,7 @@
 pub mod commands;
 pub mod field;
+#[cfg(test)]
+mod laws;
 pub mod gpu;
 pub mod images;
 mod menu;
