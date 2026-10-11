@@ -19,6 +19,7 @@ pub fn all() -> Vec<Sheet> {
         Sheet::new("Foundations", "Characters", characters),
         Sheet::new("Foundations", "Values", values),
         Sheet::new("Foundations", "Pictures", pictures),
+        Sheet::new("Foundations", "Canvas", canvas),
         Sheet::new("Actions", "Button", buttons),
         Sheet::new("Actions", "Keys and actions", actions),
         Sheet::new("Actions", "Link", links),
@@ -654,4 +655,66 @@ fn pictures(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
         s.write(row.at(col, 0, w, 1), p.label, mono, muted);
         col += 18;
     }
+}
+
+const POSTS: [f32; 24] = [2.0, 3.0, 1.0, 4.0, 6.0, 5.0, 3.0, 7.0, 9.0, 6.0, 4.0, 5.0, 8.0, 11.0, 9.0, 7.0, 6.0, 8.0, 10.0, 12.0, 9.0, 8.0, 11.0, 13.0];
+
+fn canvas(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
+    use crate::canvas::{Canvas, Label, Mark, Path, Shape, Weight};
+    use crate::picture::Ink;
+    caption(s, a.take_top(1), "A canvas holds shapes in its own coordinates, in semantic ink and weights; points can be hovered and clicked.");
+    a.take_top(1);
+    let id = Id::new("sheet.canvas");
+    let (w, h) = (240.0, 100.0);
+    let n = (POSTS.len() - 1) as f32;
+    let at = |i: usize| (10.0 + i as f32 / n * (w - 20.0), h - 10.0 - POSTS[i] / 14.0 * (h - 20.0));
+    let line: Vec<(f32, f32)> = (0..POSTS.len()).map(at).collect();
+    let mut area = Path::new().move_to(10.0, h - 10.0);
+    for (x, y) in &line {
+        area = area.line_to(*x, *y);
+    }
+    area = area.line_to(w - 10.0, h - 10.0).close();
+    let mut marks = vec![
+        Mark { shape: Shape::Path(area), ink: Ink::Field, stroke: None, id: None },
+        Mark { shape: Shape::Path(Path::polyline(&[(10.0, 10.0), (10.0, h - 10.0), (w - 10.0, h - 10.0)])), ink: Ink::Muted, stroke: Some(Weight::Thin), id: None },
+    ];
+    for y in [30.0, 50.0, 70.0] {
+        marks.push(Mark { shape: Shape::Path(Path::polyline(&[(10.0, y), (w - 10.0, y)])), ink: Ink::Rule, stroke: Some(Weight::Thin), id: None });
+    }
+    marks.push(Mark { shape: Shape::Path(Path::polyline(&line)), ink: Ink::Ink, stroke: Some(Weight::Regular), id: None });
+    let picked = sb.pick(id);
+    for (i, (x, y)) in line.iter().enumerate() {
+        let ink = if picked == Some(i) { Ink::Danger } else { Ink::Link };
+        marks.push(Mark { shape: Shape::Dot(*x, *y), ink, stroke: None, id: Some(i as u64) });
+    }
+    let value = picked.map(|i| format!("week {}: {} posts", i + 1, POSTS[i]));
+    let mut labels = vec![Label { x: 12.0, y: 6.0, text: "posts a week", ink: Ink::Muted }];
+    if let Some(v) = &value {
+        labels.push(Label { x: 120.0, y: 6.0, text: v, ink: Ink::Danger });
+    }
+    let chart = a.take_top(14).at(0, 0, a.cols.min(80), 14);
+    s.canvas(chart, Canvas { width: w, height: h, marks: &marks, labels: &labels, live: false }, |under| under.map(|i| Hit::Pick(id, i as usize)));
+    a.take_top(1);
+    caption(s, a.take_top(1), "sparklines, a canvas one row tall");
+    for (name, ink) in [("Robin's notes", Ink::Ink), ("Ars Technica", Ink::Link), ("A feed that fails", Ink::Danger)] {
+        let row = a.take_top(1);
+        let style = s.m.prop(400.0);
+        let ink_color = s.palette.ink;
+        s.write(row.at(0, 0, 20, 1), name, style, ink_color);
+        s.sparkline(row.at(22, 0, 24, 1), &POSTS, ink);
+    }
+    a.take_top(1);
+    let live = Id::new("sheet.live");
+    let on = sb.on(live);
+    s.switch(a.take_top(1), "Live: a canvas may ask for frames only while it moves", on, Some(Hit::Toggle(live)));
+    let clock = a.take_top(8).at(0, 0, 16, 8);
+    let t = if on { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f32()) } else { 0.0 };
+    let (cx, cy, r) = (50.0, 50.0, 40.0);
+    let angle = t * std::f32::consts::TAU / 60.0;
+    let hand = Path::polyline(&[(cx, cy), (cx + angle.sin() * r * 0.85, cy - angle.cos() * r * 0.85)]);
+    let face = [
+        Mark { shape: Shape::Path(Path::circle(cx, cy, r)), ink: Ink::Rule, stroke: Some(Weight::Regular), id: None },
+        Mark { shape: Shape::Path(hand), ink: Ink::Danger, stroke: Some(Weight::Heavy), id: None },
+    ];
+    s.canvas(clock, Canvas { width: 100.0, height: 100.0, marks: &face, labels: &[], live: on }, |_| None);
 }

@@ -4,7 +4,7 @@ use std::path::Path;
 use usvg::tiny_skia_path::PathSegment;
 use usvg::{FillRule, Node, Paint};
 
-const INKS: [(&str, [u8; 3]); 11] = [
+const INKS: [(&str, [u8; 3]); 12] = [
     ("Ink", [0x1a, 0x1a, 0x1c]),
     ("Ink", [0x00, 0x00, 0x00]),
     ("Muted", [0x73, 0x73, 0x78]),
@@ -14,6 +14,7 @@ const INKS: [(&str, [u8; 3]); 11] = [
     ("Danger", [0xb8, 0x29, 0x21]),
     ("Warn", [0x9e, 0x6b, 0x0d]),
     ("Ok", [0x21, 0x78, 0x40]),
+    ("Field", [0xee, 0xee, 0xed]),
     ("Background", [0xf9, 0xf9, 0xf7]),
     ("Background", [0xff, 0xff, 0xff]),
 ];

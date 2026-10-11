@@ -12,6 +12,7 @@ pub enum Ink {
     Danger,
     Warn,
     Ok,
+    Field,
     Background,
 }
 
@@ -42,6 +43,7 @@ impl Palette {
             Ink::Danger => self.danger,
             Ink::Warn => self.warn,
             Ink::Ok => self.ok,
+            Ink::Field => self.field,
             Ink::Background => self.bg,
         }
     }
@@ -63,7 +65,7 @@ impl<H> Scene<'_, H> {
         for (i, layer) in p.layers.iter().enumerate() {
             let key = (p as *const Picture as u64).rotate_left(17) ^ (i as u64) << 48 ^ scale.to_bits() as u64;
             let color = self.palette.of(layer.ink);
-            let outline = Outline { path: layer.path, stroke: layer.stroke, even_odd: layer.even_odd, scale };
+            let outline = Outline { path: crate::text::Data::Svg(layer.path), stroke: layer.stroke, even_odd: layer.even_odd, scale };
             self.text.shape(&mut self.quads, key, outline, Paint { origin, limit: None, colors: &[color], clip });
         }
         Rect::new(origin.0, origin.1, w, h)

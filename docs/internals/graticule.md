@@ -47,3 +47,7 @@ A proof is a sheet rendered by its own offscreen GPU device at scale 2, 100 colu
 ## Pictures map colors to inks at build time
 
 Engraver doesn't keep an SVG's colors: each fill and stroke takes the semantic ink nearest its color in the light palette (black and near-black are ink, greys are muted, faint or rule, blue is link, red danger, amber warn, green ok, white the background), so a picture follows the theme and the appearance like text does. Draw pictures in those colors to get the ink you mean. Paths are flattened with their transforms at build time; stroke widths stay in picture units, since zeno strokes before it scales. Text and embedded images in an SVG are dropped: a picture with words in it should be text instead.
+
+## A canvas transforms points, not strokes
+
+Canvas paths are kept in the canvas's coordinates and mapped to pixels point by point before they're rasterized, so a chart can stretch differently across and down while its strokes stay one, two or three device pixels wide and its dots stay round. Each mapped path is rasterized once into the glyph atlas and cached by its points; a canvas that changes every frame keeps adding new shapes, and when the atlas fills it is cleared along with the glyphs. A canvas registers its rectangle as sensitive, so moving the pointer inside it repaints and hit testing follows the shape under the pointer, not the canvas's rectangle.

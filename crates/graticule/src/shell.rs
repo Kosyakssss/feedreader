@@ -261,6 +261,8 @@ struct Running<A: App> {
     thumb: Option<(Id, Rect, f32)>,
     runs: Vec<Run>,
     pictures: Vec<(Rect, &'static str)>,
+    sensitive: Vec<Rect>,
+    live: bool,
     picking: bool,
     web: Option<wry::WebView>,
     web_key: Option<String>,
@@ -328,6 +330,8 @@ impl<A: App> Running<A> {
         scene.finish();
         self.runs = std::mem::take(&mut scene.runs);
         self.pictures = std::mem::take(&mut scene.pictures);
+        self.sensitive = std::mem::take(&mut scene.sensitive);
+        self.live = scene.live;
         let quads = std::mem::take(&mut scene.quads);
         self.hits = std::mem::take(&mut scene.hits);
         self.scrollables = std::mem::take(&mut scene.scrollables);
@@ -352,6 +356,9 @@ impl<A: App> Running<A> {
         self.sync_web(painted.web, palette.bg);
         self.sync_ime(self.focused.map(|f| f.caret));
         self.update_access();
+        if self.live && self.visible {
+            self.window.request_redraw();
+        }
         let ms = |a: Instant, b: Instant| (b - a).as_secs_f32() * 1000.0;
         self.frames.push([ms(started, done), ms(done, presented), ms(presented, Instant::now())]);
         profiling::finish_frame!();
@@ -761,6 +768,7 @@ impl<A: App> Running<A> {
             }
         }
         let (x, y) = self.mouse;
+        let probing = self.sensitive.iter().any(|r| r.contains(x, y));
         let hover = self.hits.iter().rev().find(|(r, h)| r.contains(x, y) && A::hoverable(h)).map(|(r, _)| *r);
         let changed = hover != self.hover;
         self.hover = hover;
@@ -768,7 +776,7 @@ impl<A: App> Running<A> {
         let mut cx = cx!(self);
         let cursor = self.app.cursor(hit.as_ref(), &mut cx);
         self.window.set_cursor(cursor);
-        changed
+        changed || probing
     }
 }
 
@@ -836,6 +844,8 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             thumb: None,
             runs: Vec::new(),
             pictures: Vec::new(),
+            sensitive: Vec::new(),
+            live: false,
             picking: false,
             web: None,
             web_key: None,

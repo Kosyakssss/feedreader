@@ -1,4 +1,5 @@
 pub mod access;
+pub mod canvas;
 pub mod chars;
 pub mod commands;
 pub mod field;

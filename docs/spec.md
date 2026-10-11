@@ -435,7 +435,7 @@ Order: Graticule and its tools first (§10.2, §10.3, §10.5, §10.6), with a fi
 
 ### 10.5 Graphics
 11. **Done.** Pictures: EN-01 Engraver (`crates/engraver`) compiles a folder of SVGs in a build script into static shape data, each picture needing a `<title>` for its label; `Scene::picture` rasterizes each layer once per size into the atlas in its semantic ink, shows the label in the ASCII style and adds an image to the accessibility tree. Graticule's own are in `crates/graticule/pictures`.
-12. **Open.** Canvas: shapes, weights, hit testing, ASCII rendering, live frames; charts on top (a posting-frequency sparkline per feed on the Feeds page, the pairing QR code).
+12. **Partial.** Canvas (`graticule::canvas`): paths and dots in the canvas's own coordinates, in semantic ink and thin, regular or heavy weight that stay whole device pixels however the canvas stretches; labels; shapes with ids hit-tested against their outlines, the one under the pointer drawn in ink; braille on the cells in the ASCII style; a live canvas asks for frames only while it says so. Sparklines are built on it. Open: more charts (bars, the pairing QR code).
 
 ### 10.6 Instant
 13. **Partial.** Launch is measured stage by stage (`docs/internals/graticule.md`) and fonts load in parallel with AppKit's startup. Open: stage budgets measured per interaction; memoized components; integer ids; the main thread freed of shaping and waiting; pre-shaping.

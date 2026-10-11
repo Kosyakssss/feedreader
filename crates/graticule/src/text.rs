@@ -77,6 +77,23 @@ struct Slot {
     top: i32,
 }
 
+pub fn mask<D: swash::zeno::PathData>(d: D, o: &Outline) -> (Vec<u8>, swash::zeno::Placement) {
+    let mut mask = swash::zeno::Mask::new(d);
+    match o.stroke {
+        Some(w) => {
+            mask.style(swash::zeno::Stroke::new(w));
+        }
+        None if o.even_odd => {
+            mask.style(swash::zeno::Fill::EvenOdd);
+        }
+        None => {}
+    }
+    if o.scale != 1.0 {
+        mask.transform(Some(swash::zeno::Transform::scale(o.scale, o.scale)));
+    }
+    mask.render()
+}
+
 pub struct Upload {
     pub x: u32,
     pub y: u32,
@@ -137,8 +154,14 @@ pub struct Block<'a> {
     pub wrap: Option<f32>,
 }
 
+#[derive(Clone, Copy)]
+pub enum Data<'a> {
+    Svg(&'a str),
+    Commands(&'a [swash::zeno::Command]),
+}
+
 pub struct Outline<'a> {
-    pub path: &'a str,
+    pub path: Data<'a>,
     pub stroke: Option<f32>,
     pub even_odd: bool,
     pub scale: f32,
@@ -502,20 +525,10 @@ impl Text {
         let slot = match self.shapes.get(&key) {
             Some(slot) => *slot,
             None => {
-                let mut mask = swash::zeno::Mask::new(o.path);
-                match o.stroke {
-                    Some(w) => {
-                        mask.style(swash::zeno::Stroke::new(w));
-                    }
-                    None if o.even_odd => {
-                        mask.style(swash::zeno::Fill::EvenOdd);
-                    }
-                    None => {}
-                }
-                if o.scale != 1.0 {
-                    mask.transform(Some(swash::zeno::Transform::scale(o.scale, o.scale)));
-                }
-                let (data, placement) = mask.render();
+                let (data, placement) = match o.path {
+                    Data::Svg(d) => mask(d, &o),
+                    Data::Commands(d) => mask(d, &o),
+                };
                 let slot = self.store(placement, data);
                 self.shapes.insert(key, slot);
                 slot

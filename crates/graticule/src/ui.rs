@@ -142,6 +142,8 @@ pub struct Scene<'a, H> {
     pub selectable: bool,
     pub runs: Vec<Run>,
     pub pictures: Vec<(Rect, &'static str)>,
+    pub sensitive: Vec<Rect>,
+    pub live: bool,
     shift: (f32, f32),
     clips: Vec<[f32; 4]>,
     pen: Vec<Rect>,
@@ -222,6 +224,8 @@ impl<'a, H> Scene<'a, H> {
             selectable: true,
             runs: Vec::new(),
             pictures: Vec::new(),
+            sensitive: Vec::new(),
+            live: false,
             shift: (0.0, 0.0),
             clips: vec![[0.0, 0.0, m.width, m.height]],
             pen: Vec::new(),
@@ -260,7 +264,7 @@ impl<'a, H> Scene<'a, H> {
                     h.finish()
                 };
                 let clip = self.clip();
-                self.text.shape(&mut self.quads, key, Outline { path: &path, stroke, even_odd: false, scale: 1.0 }, Paint { origin: (r.x, r.y), limit: None, colors: &[color], clip });
+                self.text.shape(&mut self.quads, key, Outline { path: crate::text::Data::Svg(&path), stroke, even_odd: false, scale: 1.0 }, Paint { origin: (r.x, r.y), limit: None, colors: &[color], clip });
                 true
             }
         };
