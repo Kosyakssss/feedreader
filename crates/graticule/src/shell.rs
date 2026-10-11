@@ -640,7 +640,7 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
         };
         let size = window.inner_size();
         let gpu = Gpu::new(Some(window.clone()), (size.width, size.height));
-        let mut text = self.fonts.take().and_then(|t| t.join().ok()).unwrap_or_else(Text::new);
+        let mut text = self.fonts.take().and_then(|t| t.join().ok()).unwrap_or_default();
         let font_size = self.config.font_size;
         let metrics = metrics(&mut text, font_size, window.scale_factor() as f32, size.width, size.height);
         let system_dark = window.theme() == Some(winit::window::Theme::Dark);
