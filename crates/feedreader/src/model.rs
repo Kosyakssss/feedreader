@@ -308,6 +308,7 @@ impl Scroller {
 pub struct Model {
     pub ready: bool,
     pub data_dir: String,
+    pub config: engine::Config,
     pub feeds: Vec<Feed>,
     pub feed_index: HashMap<FeedId, usize>,
     pub entries: Vec<Entry>,
@@ -389,6 +390,7 @@ impl Model {
         Self {
             ready: false,
             data_dir: String::new(),
+            config: Default::default(),
             feeds: Vec::new(),
             feed_index: HashMap::new(),
             entries: Vec::new(),
@@ -725,6 +727,7 @@ impl Model {
                 entries,
                 settings,
                 data_dir,
+                config,
                 folders,
                 rules,
                 recommendations,
@@ -737,6 +740,7 @@ impl Model {
                 }
                 self.ready = true;
                 self.data_dir = data_dir;
+                self.config = config;
                 self.feeds = feeds;
                 self.entries = entries;
                 self.settings = settings;

@@ -12,4 +12,6 @@ The web extractor belongs to a client too. The first client that sent `UseWebExt
 
 ## Ports
 
-The sync listener (8790, `FEEDREADER_SYNC_PORT`) and the public listener (8791, `FEEDREADER_PUBLIC_PORT`) are per engine, not user settings, so they never sync between devices. The engine-wide TOML file in spec §4 is where they will live.
+The sync listener (8790) and the public listener (8791) are per engine, not user settings, so they never sync between devices. They live in `engine.toml` (`engine::Config`) with the Funnel port, the image cache budget and extra host names; the environment variables `FEEDREADER_SYNC_PORT` and `FEEDREADER_PUBLIC_PORT` override the file, which is how tests run engines side by side. The engine reports its config in `Snapshot`, so the app shows the ports the running engine actually uses, not the ones its own environment would pick.
+
+The engine is built, store and config included, before its thread starts, so a bad file or a database that won't open reaches the caller as an error instead of a handle to an engine that never ran.

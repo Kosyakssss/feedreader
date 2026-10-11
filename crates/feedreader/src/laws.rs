@@ -13,6 +13,7 @@ fn snapshot(feeds: Vec<Feed>, entries: Vec<Entry>, folders: Vec<Folder>, rules: 
         entries,
         settings: Settings { merge_duplicates: merge, ..Settings::default() },
         data_dir: String::new(),
+        config: Default::default(),
         folders,
         rules,
         recommendations: Vec::new(),

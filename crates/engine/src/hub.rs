@@ -163,15 +163,12 @@ async fn host(State(names): State<Arc<Vec<String>>>, req: Request, next: Next) -
     next.run(req).await
 }
 
-pub async fn serve(port: u16, api: UnboundedSender<crate::Internal>, changed: watch::Receiver<i64>) -> std::io::Result<()> {
+pub async fn serve(port: u16, mut names: Vec<String>, api: UnboundedSender<crate::Internal>, changed: watch::Receiver<i64>) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
-    let names: Vec<String> = match crate::tailscale::name().await {
-        Some(full) => {
-            let short = full.split('.').next().unwrap_or_default().to_string();
-            vec![full, short]
-        }
-        None => Vec::new(),
-    };
+    if let Some(full) = crate::tailscale::name().await {
+        names.push(full.split('.').next().unwrap_or_default().to_string());
+        names.push(full);
+    }
     let app = Router::new()
         .route("/v1/health", get(health))
         .route("/v1/pair", post(pair))

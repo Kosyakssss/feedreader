@@ -633,6 +633,9 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
         let app = match A::new(waker, &mut cx) {
             Ok(app) => app,
             Err(e) => {
+                if self.config.visible {
+                    rfd::MessageDialog::new().set_level(rfd::MessageLevel::Error).set_title(self.config.title).set_description(&e).show();
+                }
                 self.failed = Some(e);
                 event_loop.exit();
                 return;

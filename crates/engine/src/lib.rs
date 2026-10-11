@@ -1,3 +1,4 @@
+mod config;
 mod net;
 mod parse;
 mod public;
@@ -22,24 +23,13 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::time::Instant;
 use url::Url;
 
+pub use config::Config;
 pub use types::*;
 
 use parse::ParsedFeed;
 use store::Store;
 
-const MEDIA_BUDGET: i64 = 1_000_000_000;
-
-const FUNNEL_PORT: u16 = 10000;
-
-pub const PROTOCOL: u32 = 1;
-
-pub fn sync_port() -> u16 {
-    std::env::var("FEEDREADER_SYNC_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8790)
-}
-
-pub fn public_port() -> u16 {
-    std::env::var("FEEDREADER_PUBLIC_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8791)
-}
+pub const PROTOCOL: u32 = 2;
 
 fn lan_ip() -> Option<std::net::IpAddr> {
     let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
@@ -176,6 +166,7 @@ fn launch(dir: PathBuf, emit: impl Fn(Event, Audience) + Send + 'static) -> Resu
         .open(dir.join("engine.lock"))
         .map_err(|e| e.to_string())?;
     lock.try_lock().map_err(|_| format!("Another Feedreader engine is using {}", dir.display()))?;
+    let engine = Engine::new(dir, Box::new(emit))?;
     let (tx, rx) = unbounded_channel();
     let (stopped, on_stop) = tokio::sync::oneshot::channel();
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().map_err(|e| e.to_string())?;
@@ -186,10 +177,7 @@ fn launch(dir: PathBuf, emit: impl Fn(Event, Audience) + Send + 'static) -> Resu
             profiling::register_thread!("engine");
             rt.block_on(async move {
                 let _lock = lock;
-                match Engine::new(dir, Box::new(emit)) {
-                    Ok(engine) => engine.run(rx).await,
-                    Err(e) => eprintln!("engine failed to start: {e}"),
-                }
+                engine.run(rx).await;
             });
             let _ = stopped.send(());
         })
@@ -239,6 +227,7 @@ enum Reach {
 
 struct Engine {
     dir: PathBuf,
+    config: Config,
     store: Store,
     client: reqwest::Client,
     out: Box<dyn Fn(Event, Audience) + Send>,
@@ -312,6 +301,7 @@ async fn parse_fetched(f: net::Fetched) -> Result<Fetch, String> {
 impl Engine {
     fn new(dir: PathBuf, out: Box<dyn Fn(Event, Audience) + Send>) -> Result<Self, String> {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let config = Config::load(&dir)?;
         let store = Store::open(&dir.join("feedreader.sqlite")).map_err(|e| e.to_string())?;
         let settings = store.settings();
         let device = store.device();
@@ -320,6 +310,7 @@ impl Engine {
         let hub = std::fs::read(dir.join("secrets/hub.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
         Ok(Self {
             dir,
+            config,
             store,
             client: net::client(),
             out,
@@ -363,6 +354,7 @@ impl Engine {
             entries: self.store.entries(),
             settings: self.settings.clone(),
             data_dir: self.dir.display().to_string(),
+            config: self.config.clone(),
             folders: self.store.folders(),
             rules: self.store.rules(),
             recommendations: self.store.recommendations(),
@@ -374,7 +366,7 @@ impl Engine {
     #[profiling::function]
     fn publish(&mut self) {
         let token = self.store.token();
-        let base = self.public_url.clone().unwrap_or_else(|| format!("http://127.0.0.1:{}/{token}/", public_port()));
+        let base = self.public_url.clone().unwrap_or_else(|| format!("http://127.0.0.1:{}/{token}/", self.config.public_port));
         let items = self.store.public_items();
         let (atom, html) = (public::atom(&token, &base, &items), public::page(&base, &items));
         self.published.write().unwrap_or_else(|e| e.into_inner()).set(token, atom, html);
@@ -399,7 +391,7 @@ impl Engine {
         self.itx = Some(itx);
         self.store.begin();
         self.publish();
-        let port = public_port();
+        let port = self.config.public_port;
         match std::net::TcpListener::bind(("127.0.0.1", port)) {
             Ok(listener) => {
                 let shared = self.published.clone();
@@ -429,9 +421,9 @@ impl Engine {
             None => {
                 let api = self.itx.clone().expect("running");
                 let changed = self.changed.subscribe();
-                let port = sync_port();
+                let (port, hosts) = (self.config.sync_port, self.config.hosts.clone());
                 self.listener = Some(tokio::spawn(async move {
-                    if let Err(e) = hub::serve(port, api, changed).await {
+                    if let Err(e) = hub::serve(port, hosts, api, changed).await {
                         eprintln!("sync listener on port {port}: {e}");
                     }
                 }));
@@ -878,13 +870,13 @@ impl Engine {
     }
 
     fn funnel(&mut self, on: bool) {
-        let port = public_port();
+        let (port, funnel) = (self.config.public_port, self.config.funnel_port);
         let token = self.store.token();
         self.spawn(async move {
             let r = if on {
-                tailscale::publish(FUNNEL_PORT, port).await.map(|name| Some(format!("https://{name}:{FUNNEL_PORT}/{token}/")))
+                tailscale::publish(funnel, port).await.map(|name| Some(format!("https://{name}:{funnel}/{token}/")))
             } else {
-                tailscale::unpublish(FUNNEL_PORT).await.map(|_| None)
+                tailscale::unpublish(funnel).await.map(|_| None)
             };
             Internal::Funnel(on, r)
         });
@@ -915,8 +907,8 @@ impl Engine {
     }
 
     fn pairing_link(&self, to: Client, code: String) {
+        let port = self.config.sync_port;
         self.spawn(async move {
-            let port = sync_port();
             let mut hubs = Vec::new();
             if let Some(name) = tailscale::name().await {
                 hubs.push(format!("http://{name}:{port}"));
@@ -1151,7 +1143,7 @@ impl Engine {
                     self.emit(Event::EntriesRemoved(removed));
                 }
                 self.store.purge_removed(now() - 24 * 3600 * 1000);
-                for file in self.store.prune_media(now(), MEDIA_BUDGET) {
+                for file in self.store.prune_media(now(), self.config.media_budget()) {
                     let _ = std::fs::remove_file(self.dir.join("media").join(file));
                 }
                 let wait = Duration::from_secs(self.settings.refresh_minutes.max(1) as u64 * 60);
@@ -1168,7 +1160,7 @@ impl Engine {
             Internal::Api(call) => self.api(call),
             Internal::Pairing(to, link) => self.reply(to, Event::Pairing(link)),
             Internal::Funnel(on, r) => {
-                let local = format!("http://127.0.0.1:{}/{}/", public_port(), self.store.token());
+                let local = format!("http://127.0.0.1:{}/{}/", self.config.public_port, self.store.token());
                 let message = match (on, r) {
                     (_, Ok(Some(url))) => {
                         self.public_url = Some(url.clone());

@@ -176,7 +176,7 @@ The `feedreader` command is the same binary as the desktop app: `serve` (headles
 ## 4. Settings scope
 - Per person, synced: almost everything, including theme and appearance, line style, reading settings, places, reading modes, rules, folders, pins, keys.
 - Per device: the active tab, window size and layout, the strip arrangement, the local cache, OS permissions.
-- Engine-wide, in a strict TOML file written atomically (mode 0600): ports, retention, trusted origins, refresh limits, background engine on/off. Unknown keys are rejected and limits enforced. Until the file exists, ports come from `FEEDREADER_SYNC_PORT` and `FEEDREADER_PUBLIC_PORT`.
+- Engine-wide, in `engine.toml` in the data folder, read when the engine starts: the sync, public and Funnel ports, the image cache budget, and extra host names the sync API answers to. Every key is optional. Unknown keys and out-of-range values stop the engine with a message naming the file, shown in an alert when the app can't start. `FEEDREADER_SYNC_PORT` and `FEEDREADER_PUBLIC_PORT` override the ports. Refresh limits and turning the background engine off are Open. Retention stays a synced setting, because it describes what the person keeps rather than what one machine can hold.
 
 ## 5. The engine
 
@@ -429,7 +429,7 @@ Status: done, partial, open, paused or later. We are restarting the interface on
 15. **Open.** The ticker board.
 
 ### 10.8 Engine and platform
-16. **Open.** Sync: households, the engine-wide TOML file.
+16. **Open.** Sync: households; refresh limits and the background engine switch in `engine.toml`.
 17. **Partial.** Engine errors: a failed write in the store is recorded, the whole message rolls back, and the failure is logged and shown, followed by a fresh snapshot so no app shows a change that didn't stick; the migration refuses to run if it can't back up; `serve` exits with an error if the engine thread dies, so launchd restarts it. Open: statement preparation still panics on a malformed query (a programming error, 36 places).
 18. **Partial.** Media: images and pruning done; attachments are data shown in every reading mode; unread entries up to 30 days old are prepared in the background (§5.6). Open: attachments cached for offline (limits are Open, §9), favicons, attachments in the public I recommend feed.
 19. **Partial.** Discovery. Open: JSON-LD, h-feed, sitemaps.

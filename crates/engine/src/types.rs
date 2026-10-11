@@ -416,6 +416,7 @@ pub enum Event {
         entries: Vec<Entry>,
         settings: Settings,
         data_dir: String,
+        config: crate::Config,
         folders: Vec<Folder>,
         rules: Vec<Rule>,
         recommendations: Vec<Recommendation>,
