@@ -20,7 +20,7 @@ enum Kind {
     Moved,
     Typing,
     Deleting,
-    Whole,
+    Alone,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -97,19 +97,19 @@ impl Field {
     }
 
     pub fn undo(&mut self) -> bool {
-        let Some(state) = self.history.pop() else { return false };
-        self.future.push((std::mem::replace(&mut self.text, state.0), self.caret));
-        self.caret = state.1;
-        self.anchor = state.1;
-        self.last = Kind::Moved;
-        true
+        self.travel(true)
     }
 
     pub fn redo(&mut self) -> bool {
-        let Some(state) = self.future.pop() else { return false };
-        self.history.push((std::mem::replace(&mut self.text, state.0), self.caret));
-        self.caret = state.1;
-        self.anchor = state.1;
+        self.travel(false)
+    }
+
+    fn travel(&mut self, back: bool) -> bool {
+        let (from, to) = if back { (&mut self.history, &mut self.future) } else { (&mut self.future, &mut self.history) };
+        let Some((text, caret)) = from.pop() else { return false };
+        to.push((std::mem::replace(&mut self.text, text), self.caret));
+        self.caret = caret;
+        self.anchor = caret;
         self.last = Kind::Moved;
         true
     }
@@ -125,7 +125,7 @@ impl Field {
             (Key::Char('c'), true, false, false) if selecting => return Edit::Copy(self.selected().to_string()),
             (Key::Char('x'), true, false, false) if selecting => {
                 let cut = self.selected().to_string();
-                self.replace(self.selection(), "", Kind::Whole);
+                self.replace(self.selection(), "", Kind::Alone);
                 return Edit::Cut(cut);
             }
             (Key::Char('v'), true, false, false) => return Edit::Paste,
@@ -144,7 +144,7 @@ impl Field {
             }
             (Key::Char('y'), false, false, true) if !self.kill.is_empty() => {
                 let kill = self.kill.clone();
-                self.replace(self.selection(), &kill, Kind::Whole);
+                self.replace(self.selection(), &kill, Kind::Alone);
                 return Edit::Changed;
             }
             (Key::Left, false, false, false) | (Key::Char('b'), false, false, true) if selecting && !extend => self.selection().start,
@@ -170,7 +170,7 @@ impl Field {
     }
 
     fn replace(&mut self, range: Range<usize>, with: &str, kind: Kind) {
-        if kind != self.last || kind == Kind::Whole {
+        if kind != self.last || kind == Kind::Alone {
             self.history.push((self.text.clone(), self.caret));
         }
         self.future.clear();
