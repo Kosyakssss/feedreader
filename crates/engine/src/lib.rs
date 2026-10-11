@@ -1226,7 +1226,7 @@ impl Engine {
                 self.emit(Event::PublicUrl(self.public_url.clone()));
                 if self.public_url.as_deref().is_some_and(|u| u.starts_with("https://")) {
                     self.set_outside(Outside::Checking);
-                    self.check_outside(Duration::ZERO, 20);
+                    self.check_outside(Duration::ZERO, 60);
                 } else {
                     self.checks += 1;
                     self.set_outside(Outside::Unchecked);
