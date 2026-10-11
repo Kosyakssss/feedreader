@@ -624,15 +624,13 @@ impl Engine {
                     }
                 };
                 if !folders.is_empty() {
-                    let pairs: Vec<(String, String)> = folders.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).map(|n| (store::folder_id(n), n.to_string())).collect();
-                    self.membership(&id, &pairs, at, dev);
+                    self.membership(&id, &store::legacy_folders(folders), at, dev);
                 }
                 self.materialize(&id);
                 if self.batching {
                     return;
                 }
                 self.feeds_changed();
-                self.folders_changed();
                 if !subscribed {
                     return;
                 }
@@ -665,10 +663,7 @@ impl Engine {
                     self.feeds_changed();
                 }
             }
-            Command::Folders(feed, names) => {
-                let pairs: Vec<(String, String)> = names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).map(|n| (store::folder_id(n), n.to_string())).collect();
-                self.membership(feed, &pairs, at, dev);
-            }
+            Command::Folders(feed, names) => self.membership(feed, &store::legacy_folders(names), at, dev),
             Command::Membership(feed, pairs) => self.membership(feed, pairs, at, dev),
             Command::RenameFolder(id, name) => {
                 if self.store.claim(&format!("folder:{id}"), at, dev, &format!("+{name}")) {

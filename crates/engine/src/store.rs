@@ -154,17 +154,24 @@ pub fn folder_id(name: &str) -> String {
     digest[..8].iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn free_folder_id(db: &Connection, name: &str) -> String {
-    let taken = |id: &str| -> Option<String> { db.query_row("select name from folders where id = ?1", [id], |r| r.get(0)).optional().ok().flatten() };
+pub fn legacy_folders(names: &[String]) -> Vec<(String, String)> {
+    names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).map(|n| (folder_id(n), n.to_string())).collect()
+}
+
+fn pick_folder_id(name: &str, holder: impl Fn(&str) -> Option<String>) -> String {
     let mut n = 0;
     loop {
         let id = if n == 0 { folder_id(name) } else { folder_id(&format!("{name}\u{0}{n}")) };
-        match taken(&id) {
+        match holder(&id) {
             None => return id,
             Some(existing) if existing.eq_ignore_ascii_case(name.trim()) => return id,
             Some(_) => n += 1,
         }
     }
+}
+
+fn free_folder_id(db: &Connection, name: &str) -> String {
+    pick_folder_id(name, |id| db.query_row("select name from folders where id = ?1", [id], |r| r.get(0)).optional().ok().flatten())
 }
 
 pub fn new_id() -> String {
@@ -755,15 +762,7 @@ impl Store {
     }
 
     pub fn new_folder_id(&self, name: &str) -> String {
-        let mut n = 0;
-        loop {
-            let id = if n == 0 { folder_id(name) } else { folder_id(&format!("{name}\u{0}{n}")) };
-            match self.register(&format!("folder:{id}")) {
-                None => return id,
-                Some((_, v)) if v.strip_prefix('+').is_some_and(|x| x.eq_ignore_ascii_case(name.trim())) => return id,
-                Some(_) => n += 1,
-            }
-        }
+        pick_folder_id(name, |id| self.register(&format!("folder:{id}")).map(|(_, v)| v.strip_prefix('+').unwrap_or_default().to_string()))
     }
 
     pub fn rebuild_folders(&mut self) {
