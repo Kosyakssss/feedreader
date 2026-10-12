@@ -14,7 +14,7 @@ A key reaches the focused field before the command registry, and only keys the f
 
 ## Launch
 
-On an M1 with a warm cache, a window shows its first frame about 160 ms after the process starts: about 15 ms before `main`, about 75 ms for AppKit to finish launching, about 40 ms to create the window, 5 ms for the GPU surface and about 20 ms for the app to attach to the engine, take its snapshot and paint.
+On an M1 with a warm cache, a Graticule window shows its first frame about 155 ms after the process is spawned, and Scope shows the stages (`GRATICULE_SCOPE=1` also prints them once): about 7 ms before `main`, 65 ms to create the event loop (AppKit connecting to the window server), 28 ms for AppKit to finish launching, 38 ms to create and show the window, 4 ms for the GPU surface, 3 ms for fonts and the menu, 1 ms for Feedreader to attach to its engine and 1.5 ms for the first frame. About 10 ms of that is Graticule and the app; the rest is macOS, so running our part in parallel with it would save little.
 
 ## Fonts are the bundled ones, the system's only as a fallback
 

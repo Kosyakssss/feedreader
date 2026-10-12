@@ -227,10 +227,12 @@ pub fn open_external(target: &str) {
 type Make<A> = Box<dyn FnOnce(Waker<<A as App>::Wake>, &mut Ctx) -> Result<A, String>>;
 
 pub fn run<A: App>(config: Config, make: impl FnOnce(Waker<A::Wake>, &mut Ctx) -> Result<A, String> + 'static) -> Result<(), String> {
+    let started = Instant::now();
     let event_loop = EventLoop::<Signal<A::Wake>>::with_user_event().build().map_err(|e| e.to_string())?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let proxy = event_loop.create_proxy();
-    let mut shell = Shell::<A> { config, proxy, running: None, failed: None, make: Some(Box::new(make)) };
+    let loop_ready = Instant::now();
+    let mut shell = Shell::<A> { config, proxy, running: None, failed: None, make: Some(Box::new(make)), started, loop_ready };
     event_loop.run_app(&mut shell).map_err(|e| e.to_string())?;
     match shell.failed {
         Some(e) => Err(e),
@@ -244,6 +246,8 @@ struct Shell<A: App> {
     running: Option<Running<A>>,
     failed: Option<String>,
     make: Option<Make<A>>,
+    started: Instant,
+    loop_ready: Instant,
 }
 
 struct Running<A: App> {
@@ -287,6 +291,7 @@ struct Running<A: App> {
     access: Option<accesskit_winit::Adapter>,
     title: &'static str,
     scope: bool,
+    launch: Vec<(&'static str, f32)>,
 }
 
 fn mods(m: ModifiersState) -> Mods {
@@ -329,7 +334,7 @@ impl<A: App> Running<A> {
         let painted = self.app.paint(&mut scene, stats);
         scene.finish();
         if self.scope {
-            scene.scope(crate::scope::Probe { frames: &self.frames });
+            scene.scope(crate::scope::Probe { frames: &self.frames, launch: &self.launch });
         }
         self.runs = std::mem::take(&mut scene.runs);
         self.pictures = std::mem::take(&mut scene.pictures);
@@ -786,6 +791,7 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
         if self.running.is_some() {
             return;
         }
+        let mut marks = vec![("event loop", self.loop_ready), ("AppKit", Instant::now())];
         let attributes = Window::default_attributes()
             .with_title(self.config.title)
             .with_inner_size(LogicalSize::new(self.config.size.0, self.config.size.1))
@@ -803,8 +809,10 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
         if self.config.visible {
             window.set_visible(true);
         }
+        marks.push(("window", Instant::now()));
         let size = window.inner_size();
         let gpu = Gpu::new(Some(window.clone()), (size.width, size.height));
+        marks.push(("gpu", Instant::now()));
         let mut text = Text::new();
         let redraw = self.proxy.clone();
         text.set_wake(move || {
@@ -822,6 +830,7 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
         } else {
             None
         };
+        marks.push(("fonts and menu", Instant::now()));
         let waker = Waker { proxy: self.proxy.clone() };
         let mut cx = Ctx {
             window: &window,
@@ -843,6 +852,7 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
                 return;
             }
         };
+        marks.push(("app", Instant::now()));
         let mut running = Running {
             app,
             window,
@@ -884,10 +894,26 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             access,
             title: self.config.title,
             scope,
+            launch: Vec::new(),
         };
         running.settle();
         if self.config.visible {
             running.render();
+        }
+        marks.push(("first frame", Instant::now()));
+        let mut last = self.started;
+        running.launch = marks
+            .into_iter()
+            .map(|(stage, at)| {
+                let ms = (at - last).as_secs_f32() * 1000.0;
+                last = at;
+                (stage, ms)
+            })
+            .collect();
+        if running.scope {
+            let stages: Vec<String> = running.launch.iter().map(|(stage, ms)| format!("{stage} {ms:.1}")).collect();
+            eprintln!("launch {:.1} ms from main: {}", (last - self.started).as_secs_f32() * 1000.0, stages.join(", "));
+            running.window.request_redraw();
         }
         self.running = Some(running);
     }

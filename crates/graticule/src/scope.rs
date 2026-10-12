@@ -4,6 +4,7 @@ pub const BUDGET_MS: f32 = 1.0;
 
 pub struct Probe<'a> {
     pub frames: &'a [[f32; 3]],
+    pub launch: &'a [(&'static str, f32)],
 }
 
 fn outline<H: Clone>(s: &mut Scene<H>, r: Rect, mut color: [f32; 4], alpha: f32) {
@@ -67,6 +68,19 @@ impl<H: Clone> Scene<'_, H> {
         let worst = paint.iter().copied().fold(0.0, f32::max);
         lines.push(format!("paint {:.2} ms  gpu {:.2} ms  present {:.2} ms", last[0], last[1], last[2]));
         lines.push(format!("worst paint {worst:.2} ms of {} frames, budget {BUDGET_MS:.2} ms", paint.len()));
+        if !probe.launch.is_empty() {
+            let total: f32 = probe.launch.iter().map(|(_, ms)| ms).sum();
+            lines.push(format!("launch {total:.0} ms from main"));
+            let mut line = String::from(" ");
+            for (stage, ms) in probe.launch {
+                let part = format!(" {stage} {ms:.0}");
+                if line.len() + part.len() > 46 {
+                    lines.push(std::mem::replace(&mut line, String::from(" ")));
+                }
+                line.push_str(&part);
+            }
+            lines.push(line);
+        }
         lines.push(format!("{} quads  {} runs  {} hits", self.quads.len(), self.runs.len(), hits.len()));
         let cols = 50;
         let rows = lines.len() as i32 + 6;

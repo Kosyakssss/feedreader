@@ -587,7 +587,7 @@ fn snapshot(title: &'static str, sheets: Vec<Sheet>, args: &[String], out: &Path
         let (quads, ms) = screen.paint(bench.style, palette, pointer, |s| {
             bench.paint(s, &mut images);
             if scope {
-                s.scope(crate::scope::Probe { frames: &[] });
+                s.scope(crate::scope::Probe { frames: &[], launch: &[] });
             }
         });
         frames.push((quads, ms));
