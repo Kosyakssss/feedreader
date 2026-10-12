@@ -166,10 +166,10 @@ impl Bench {
 
     pub fn palette(&self, system_dark: bool) -> Palette {
         match self.appearance {
-            Appearance::Light => LIGHT,
-            Appearance::Dark => DARK,
-            Appearance::System if system_dark => DARK,
-            Appearance::System => LIGHT,
+            Appearance::Light => *LIGHT,
+            Appearance::Dark => *DARK,
+            Appearance::System if system_dark => *DARK,
+            Appearance::System => *LIGHT,
         }
     }
 
@@ -266,7 +266,7 @@ impl Bench {
 
     pub fn paint(&mut self, s: &mut Scene<Hit>, images: &mut Images) {
         s.state.scrolling = self.scrolling;
-        let variant = self.variant(s.palette == DARK);
+        let variant = self.variant(s.palette == *DARK);
         self.variant = Some(variant);
         if let Some(sheet) = self.sheets.get(self.current) {
             self.proofs.check(self.current, sheet, variant);

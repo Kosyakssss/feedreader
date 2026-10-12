@@ -50,7 +50,7 @@ pub(super) fn links(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
     caption(s, a.take_top(1), "Links go somewhere; they are underlined in the link ink.");
     a.take_top(1);
     let id = Id::new("sheet.links");
-    state_rows(s, &mut a, "a link", |s, at, _| {
-        s.link(at, "usgraphics.com", Hit::Bump(id));
+    state_rows(s, &mut a, "a link", |s, at, enabled| {
+        s.link(at, "usgraphics.com", enabled.then_some(Hit::Bump(id)));
     });
 }

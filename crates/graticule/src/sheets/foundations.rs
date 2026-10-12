@@ -31,30 +31,58 @@ pub(super) fn grid(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
 pub(super) fn ink(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
     let pal = s.palette;
     let mono = s.m.mono();
-    let inks = [
-        ("ink", pal.ink),
-        ("muted", pal.muted),
-        ("faint", pal.faint),
-        ("rule", pal.rule),
-        ("link", pal.link),
-        ("danger", pal.danger),
-        ("warn", pal.warn),
-        ("ok", pal.ok),
-        ("cursor", pal.cursor),
-        ("hover", pal.hover),
-        ("selection", pal.selection),
-        ("field", pal.field),
-        ("background", pal.bg),
-    ];
-    for (name, color) in inks {
+    let prop = s.m.prop(400.0);
+    let lch = |c: [f32; 4]| {
+        let (l, c, h) = to_oklch(c);
+        if c < 0.001 { format!("{l:.3} {c:.3}    -") } else { format!("{l:.3} {c:.3} {h:>4.0}") }
+    };
+    let verdict = |ratio: f32, target: f32| if ratio >= target { ("passes", pal.ok) } else { ("fails", pal.danger) };
+    caption(s, a.take_top(1), "Inks are defined in OKLCH: lightness, chroma, hue. Accents share one lightness and differ only in hue.");
+    caption(s, a.take_top(1), "Contrast on the background and on the cursor row: text needs 4.5:1, faint (hints, disabled) 3:1.");
+    a.take_top(1);
+    let head = a.take_top(2);
+    s.write(head.at(16, 0, 18, 1), "L     C      H", mono, pal.muted);
+    s.write(head.at(84, 0, 20, 1), "bg · cursor", mono, pal.muted);
+    let texts = [("ink", pal.ink, 4.5), ("muted", pal.muted, 4.5), ("faint", pal.faint, 3.0), ("link", pal.link, 4.5), ("visited", pal.visited, 4.5), ("danger", pal.danger, 4.5), ("warn", pal.warn, 4.5), ("ok", pal.ok, 4.5)];
+    for (name, color, target) in texts {
         let row = a.take_top(2);
-        let swatch = s.rect(row.at(0, 0, 6, 1));
+        let swatch = s.rect(row.at(0, 0, 4, 1));
         s.fill(swatch, color);
-        s.frame(row.at(0, 0, 6, 1));
-        s.write(row.at(8, 0, 14, 1), name, mono, pal.ink);
-        let hex: String = color[..3].iter().map(|c| format!("{:02x}", (c * 255.0).round() as u8)).collect();
-        s.write(row.at(22, 0, 10, 1), &format!("#{hex}"), mono, pal.muted);
-        s.write(row.at(34, 0, 30, 1), "Sample text in this ink", s.m.prop(400.0), color);
+        s.write(row.at(6, 0, 10, 1), name, mono, pal.ink);
+        s.write(row.at(16, 0, 18, 1), &lch(color), mono, pal.muted);
+        s.write(row.at(35, 0, 24, 1), "Sample text in this ink", prop, color);
+        let cursor = s.rect(row.at(60, 0, 22, 1));
+        s.fill(cursor, pal.cursor);
+        s.write(row.at(60, 0, 22, 1), "on the cursor row", prop, color);
+        let (on_bg, on_cursor) = (contrast(color, pal.bg), contrast(color, pal.cursor));
+        let (word, tone) = verdict(on_bg.min(on_cursor), target);
+        s.write(row.at(84, 0, 16, 1), &format!("{on_bg:.1} · {on_cursor:.1}"), mono, pal.ink);
+        s.write(row.at(100, 0, 8, 1), word, mono, tone);
+    }
+    caption(s, a.take_top(1), "Lines");
+    a.take_top(1);
+    let row = a.take_top(2);
+    s.write(row.at(6, 0, 10, 1), "rule", mono, pal.ink);
+    s.write(row.at(16, 0, 18, 1), &lch(pal.rule), mono, pal.muted);
+    s.rule(row.at(35, 0, 47, 1));
+    s.write(row.at(84, 0, 16, 1), &format!("{:.1}", contrast(pal.rule, pal.bg)), mono, pal.ink);
+    caption(s, a.take_top(1), "Surfaces sit behind ink; each shows ink and muted text on it.");
+    a.take_top(1);
+    let surfaces = [("cursor", pal.cursor), ("hover", pal.hover), ("selection", pal.selection), ("field", pal.field), ("background", pal.bg)];
+    for (name, color) in surfaces {
+        let row = a.take_top(2);
+        let swatch = s.rect(row.at(0, 0, 4, 1));
+        s.fill(swatch, color);
+        s.frame(row.at(0, 0, 4, 1));
+        s.write(row.at(6, 0, 10, 1), name, mono, pal.ink);
+        s.write(row.at(16, 0, 18, 1), &lch(color), mono, pal.muted);
+        let r = s.rect(row.at(35, 0, 47, 1));
+        s.fill(r, color);
+        s.write(row.at(36, 0, 14, 1), "Ink on it", prop, pal.ink);
+        s.write(row.at(52, 0, 20, 1), "muted on it", prop, pal.muted);
+        let (word, tone) = verdict(contrast(pal.muted, color), 4.5);
+        s.write(row.at(84, 0, 16, 1), &format!("{:.1} · {:.1}", contrast(pal.ink, color), contrast(pal.muted, color)), mono, pal.ink);
+        s.write(row.at(100, 0, 8, 1), word, mono, tone);
     }
 }
 

@@ -1,3 +1,4 @@
+use std::sync::LazyLock;
 use crate::chars::{self, Pen, Shape};
 use crate::gpu::Quad;
 use crate::field::Field;
@@ -52,42 +53,92 @@ pub struct Palette {
     pub selection: [f32; 4],
     pub field: [f32; 4],
     pub link: [f32; 4],
+    pub visited: [f32; 4],
     pub danger: [f32; 4],
     pub warn: [f32; 4],
     pub ok: [f32; 4],
 }
 
-pub const LIGHT: Palette = Palette {
-    bg: [0.976, 0.976, 0.969, 1.0],
-    ink: [0.102, 0.102, 0.11, 1.0],
-    muted: [0.45, 0.45, 0.47, 1.0],
-    faint: [0.62, 0.62, 0.64, 1.0],
-    rule: [0.72, 0.72, 0.73, 1.0],
-    cursor: [0.905, 0.905, 0.9, 1.0],
-    hover: [0.94, 0.94, 0.935, 1.0],
-    selection: [0.8, 0.86, 0.97, 1.0],
-    field: [0.935, 0.935, 0.93, 1.0],
-    link: [0.13, 0.32, 0.66, 1.0],
-    danger: [0.72, 0.16, 0.13, 1.0],
-    warn: [0.62, 0.42, 0.05, 1.0],
-    ok: [0.13, 0.47, 0.25, 1.0],
-};
+pub static LIGHT: LazyLock<Palette> = LazyLock::new(|| Palette {
+    bg: oklch(0.98, 0.003, 100.0),
+    ink: oklch(0.22, 0.005, 285.0),
+    muted: oklch(0.5, 0.008, 285.0),
+    faint: oklch(0.6, 0.008, 285.0),
+    rule: oklch(0.78, 0.005, 285.0),
+    cursor: oklch(0.925, 0.003, 100.0),
+    hover: oklch(0.955, 0.003, 100.0),
+    selection: oklch(0.92, 0.035, 262.0),
+    field: oklch(0.95, 0.003, 100.0),
+    link: oklch(0.48, 0.15, 262.0),
+    visited: oklch(0.48, 0.15, 305.0),
+    danger: oklch(0.48, 0.17, 28.0),
+    warn: oklch(0.48, 0.11, 70.0),
+    ok: oklch(0.48, 0.12, 150.0),
+});
 
-pub const DARK: Palette = Palette {
-    bg: [0.086, 0.086, 0.094, 1.0],
-    ink: [0.902, 0.902, 0.89, 1.0],
-    muted: [0.604, 0.604, 0.62, 1.0],
-    faint: [0.424, 0.424, 0.44, 1.0],
-    rule: [0.29, 0.29, 0.306, 1.0],
-    cursor: [0.165, 0.165, 0.18, 1.0],
-    hover: [0.133, 0.133, 0.145, 1.0],
-    selection: [0.176, 0.267, 0.4, 1.0],
-    field: [0.133, 0.133, 0.145, 1.0],
-    link: [0.541, 0.706, 0.973, 1.0],
-    danger: [0.949, 0.545, 0.51, 1.0],
-    warn: [0.878, 0.706, 0.353, 1.0],
-    ok: [0.42, 0.78, 0.52, 1.0],
-};
+pub static DARK: LazyLock<Palette> = LazyLock::new(|| Palette {
+    bg: oklch(0.2, 0.004, 285.0),
+    ink: oklch(0.925, 0.004, 100.0),
+    muted: oklch(0.7, 0.006, 285.0),
+    faint: oklch(0.58, 0.008, 285.0),
+    rule: oklch(0.41, 0.007, 285.0),
+    cursor: oklch(0.285, 0.007, 285.0),
+    hover: oklch(0.25, 0.006, 285.0),
+    selection: oklch(0.32, 0.055, 262.0),
+    field: oklch(0.25, 0.006, 285.0),
+    link: oklch(0.77, 0.11, 260.0),
+    visited: oklch(0.77, 0.12, 305.0),
+    danger: oklch(0.77, 0.13, 26.0),
+    warn: oklch(0.77, 0.12, 80.0),
+    ok: oklch(0.77, 0.13, 151.0),
+});
+
+fn oklab_to_linear(l: f32, a: f32, b: f32) -> [f32; 3] {
+    let l_ = (l + 0.396_337_78 * a + 0.215_803_76 * b).powi(3);
+    let m_ = (l - 0.105_561_346 * a - 0.063_854_17 * b).powi(3);
+    let s_ = (l - 0.089_484_18 * a - 1.291_485_5 * b).powi(3);
+    [
+        4.076_741_7 * l_ - 3.307_711_6 * m_ + 0.230_969_94 * s_,
+        -1.268_438 * l_ + 2.609_757_4 * m_ - 0.341_319_38 * s_,
+        -0.004_196_086_3 * l_ - 0.703_418_6 * m_ + 1.707_614_7 * s_,
+    ]
+}
+
+pub fn oklch(l: f32, c: f32, h: f32) -> [f32; 4] {
+    let (sin, cos) = h.to_radians().sin_cos();
+    let mut chroma = c;
+    let mut rgb = oklab_to_linear(l, chroma * cos, chroma * sin);
+    while chroma > 0.0 && rgb.iter().any(|v| !(-0.0001..=1.0001).contains(v)) {
+        chroma = (chroma - 0.002).max(0.0);
+        rgb = oklab_to_linear(l, chroma * cos, chroma * sin);
+    }
+    let encode = |v: f32| {
+        let v = v.clamp(0.0, 1.0);
+        if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
+    };
+    [encode(rgb[0]), encode(rgb[1]), encode(rgb[2]), 1.0]
+}
+
+pub fn to_oklch(c: [f32; 4]) -> (f32, f32, f32) {
+    let f = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+    let (r, g, b) = (f(c[0]), f(c[1]), f(c[2]));
+    let l = (0.412_221_46 * r + 0.536_332_55 * g + 0.051_445_995 * b).cbrt();
+    let m = (0.211_903_5 * r + 0.680_699_5 * g + 0.107_396_96 * b).cbrt();
+    let s = (0.088_302_46 * r + 0.281_718_85 * g + 0.629_978_7 * b).cbrt();
+    let lightness = 0.210_454_26 * l + 0.793_617_8 * m - 0.004_072_047 * s;
+    let a = 1.977_998_5 * l - 2.428_592_2 * m + 0.450_593_7 * s;
+    let bb = 0.025_904_037 * l + 0.782_771_77 * m - 0.808_675_77 * s;
+    (lightness, a.hypot(bb), bb.atan2(a).to_degrees().rem_euclid(360.0))
+}
+
+pub fn contrast(a: [f32; 4], b: [f32; 4]) -> f32 {
+    let lum = |c: [f32; 4]| {
+        let f = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+        0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2])
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Metrics {
@@ -289,11 +340,18 @@ impl<'a, H> Scene<'a, H> {
                 end = i;
                 break;
             }
-            if chars::drawn(c) {
+            if chars::drawn(c) || !c.is_ascii() {
                 if let Some((from, at)) = run.take() {
                     self.plain_text(&s[from..i], style, r.x + at as f32 * cw, r.y, None, color);
                 }
-                self.cell(c, Rect::new(r.x + col as f32 * cw, r.y, cw, ch), color);
+                let x = r.x + col as f32 * cw;
+                if chars::drawn(c) {
+                    self.cell(c, Rect::new(x, r.y, cw, ch), color);
+                } else {
+                    let one = &s[i..i + c.len_utf8()];
+                    let w = self.measure(one, style);
+                    self.plain_text(one, style, (x + (cw - w) / 2.0).round(), r.y, None, color);
+                }
             } else if run.is_none() {
                 run = Some((i, col));
             }

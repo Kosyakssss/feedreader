@@ -131,7 +131,7 @@ impl Stage {
     fn paint(&mut self, model: &mut Model) -> f32 {
         let started = Instant::now();
         model.images.begin_frame();
-        let palette = if model.settings.appearance == engine::Appearance::Dark { DARK } else { LIGHT };
+        let palette = if model.settings.appearance == engine::Appearance::Dark { *DARK } else { *LIGHT };
         let (painted, _) = self.screen.paint(model.line_style(), palette, self.pointer, |scene| {
             view::paint(model, cmds::registry(), scene, FrameStats::default());
         });
@@ -380,7 +380,7 @@ impl graticule::shell::App for Probe {
     }
 
     fn style(&self, _: bool) -> (LineStyle, Palette) {
-        (LineStyle::Light, LIGHT)
+        (LineStyle::Light, *LIGHT)
     }
 
     fn paint(&mut self, _: &mut Scene<()>, _: FrameStats) -> Painted {

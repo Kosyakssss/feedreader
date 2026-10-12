@@ -80,16 +80,16 @@ impl<H: Clone> Scene<'_, H> {
             let label = (c.label)(model);
             let available = (c.available)(model);
             let line = at.line(row);
+            let r = self.rect(line);
+            if available && self.hovered(r) {
+                self.fill(r, pal.hover);
+            }
             let mut col = 0;
             for k in c.keys.iter().take(3) {
                 col += self.key_label(line.at(col, 0, line.cols - col, 1), k) + 1;
             }
             let style = self.m.prop(400.0);
             let a = line.at(16, 0, line.cols - 16, 1);
-            let r = self.rect(line);
-            if available && self.hovered(r) {
-                self.fill(r, pal.hover);
-            }
             self.write(a, &label, style, if available { pal.ink } else { pal.faint });
             if available {
                 self.hit(r, hit(c.id));

@@ -48,7 +48,7 @@ impl<H: Clone> Scene<'_, H> {
         self.write(at.at(2, 0, room, 1), text, style, pal.ink);
         if let Some(h) = dismiss {
             let col = at.cols - label.len() as i32;
-            self.link(at.at(col, 0, label.len() as i32, 1), label, h);
+            self.link(at.at(col, 0, label.len() as i32, 1), label, Some(h));
         }
     }
 

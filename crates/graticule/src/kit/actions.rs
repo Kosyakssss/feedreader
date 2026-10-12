@@ -61,23 +61,37 @@ impl<H: Clone> Scene<'_, H> {
         let t = self.hair();
         self.border(r, t, pal.rule);
         let mono = self.m.mono();
-        self.centered(r, &label, mono, pal.ink);
+        let y = (r.y + (r.h - self.m.cell_h) / 2.0).round();
+        self.text(&label, mono, (r.x + self.m.cell_w / 2.0).round(), y, Some(r.w), pal.ink);
         cols
     }
 
-    pub fn link(&mut self, at: Area, label: &str, hit: H) -> i32 {
+    pub fn link(&mut self, at: Area, label: &str, hit: Option<H>) -> i32 {
         let pal = self.palette;
         let style = self.m.prop(400.0);
         let cols = self.cols(label, style).min(at.cols);
         let a = at.at(0, 0, cols, 1);
         let r = self.rect(a);
-        let hovered = self.hovered(r);
-        self.write(a, label, style, if hovered { pal.ink } else { pal.link });
-        let t = self.hair();
-        let y = (r.y + self.m.cell_h * 0.82).round();
-        let w = self.measure(label, style).min(r.w);
-        self.fill(Rect::new(r.x, y, w, t), if hovered { pal.ink } else { pal.link });
-        self.hit(r, hit);
+        let hovered = hit.is_some() && self.hovered(r);
+        let pressed = hovered && self.pressed;
+        let ink = match (hit.is_some(), pressed) {
+            (false, _) => pal.faint,
+            (true, true) => pal.visited,
+            (true, false) => pal.link,
+        };
+        if hovered {
+            self.fill(r, pal.hover);
+        }
+        self.write(a, label, style, ink);
+        if hit.is_some() {
+            let t = if hovered { self.hair() * 2.0 } else { self.hair() };
+            let y = (r.y + self.m.cell_h * 0.82).round();
+            let w = self.measure(label, style).min(r.w);
+            self.fill(Rect::new(r.x, y, w, t), ink);
+        }
+        if let Some(h) = hit {
+            self.hit(r, h);
+        }
         cols
     }
 

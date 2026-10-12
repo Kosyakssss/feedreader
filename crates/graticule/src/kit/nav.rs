@@ -76,7 +76,7 @@ impl<H: Clone> Scene<'_, H> {
                 col += 2;
             }
             match (last, hit(i)) {
-                (false, Some(h)) => col += self.link(at.at(col, 0, at.cols - col, 1), part, h),
+                (false, Some(h)) => col += self.link(at.at(col, 0, at.cols - col, 1), part, Some(h)),
                 _ => {
                     let style = self.m.prop(if last { 600.0 } else { 400.0 });
                     let cols = self.cols(part, style);

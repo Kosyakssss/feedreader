@@ -1,7 +1,7 @@
 use crate::ui::Rect;
 
 pub fn drawn(c: char) -> bool {
-    matches!(c as u32, 0x2500..=0x259F | 0x2800..=0x28FF) || matches!(c, '\u{21E7}' | '\u{2325}' | '\u{2303}' | '\u{25B4}' | '\u{25B8}' | '\u{25BE}' | '\u{25C2}')
+    matches!(c as u32, 0x2500..=0x259F | 0x2800..=0x28FF) || matches!(c, '\u{2318}' | '\u{21E7}' | '\u{2325}' | '\u{2303}' | '\u{25B4}' | '\u{25B8}' | '\u{25BE}' | '\u{25C2}')
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -248,6 +248,24 @@ pub fn draw(c: char, r: Rect, pen: &mut Pen) -> Option<Shape> {
             let (l, r, top, mid, bottom) = (w * 0.12, w * 0.88, h * 0.28, h * 0.52, h * 0.74);
             let (sl, sr) = (w * 0.34, w * 0.66);
             format!("M {cx} {top} L {r} {mid} L {sr} {mid} L {sr} {bottom} L {sl} {bottom} L {sl} {mid} L {l} {mid} Z")
+        }
+        '\u{2318}' => {
+            let (half, rr) = (w * 0.12, w * 0.15);
+            let k = rr * 0.552_284_8;
+            let (x0, x1, y0, y1) = (cx - half, cx + half, cy - half, cy + half);
+            let (e, mut d) = (half + rr, String::new());
+            d.push_str(&format!("M {x0} {} L {x0} {} M {x1} {} L {x1} {} M {} {y0} L {} {y0} M {} {y1} L {} {y1} ", cy - e, cy + e, cy - e, cy + e, cx - e, cx + e, cx - e, cx + e));
+            for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                let (ox, oy) = (cx + sx * e, cy + sy * e);
+                d.push_str(&format!(
+                    "M {} {oy} C {} {} {} {} {ox} {} C {} {} {} {} {} {oy} C {} {} {} {} {ox} {} C {} {} {} {} {} {oy} ",
+                    ox + rr, ox + rr, oy + k, ox + k, oy + rr, oy + rr,
+                    ox - k, oy + rr, ox - rr, oy + k, ox - rr,
+                    ox - rr, oy - k, ox - k, oy - rr, oy - rr,
+                    ox + k, oy - rr, ox + rr, oy - k, ox + rr
+                ));
+            }
+            d
         }
         '\u{2325}' => {
             let (l, r, top, bottom) = (w * 0.1, w * 0.9, h * 0.34, h * 0.68);

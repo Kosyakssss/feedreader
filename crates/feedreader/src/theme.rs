@@ -46,8 +46,8 @@ pub struct Theme {
 impl Theme {
     pub fn new(dir: &Path) -> Self {
         Self {
-            light: LIGHT,
-            dark: DARK,
+            light: *LIGHT,
+            dark: *DARK,
             path: dir.join("theme.toml"),
         }
     }
@@ -57,8 +57,8 @@ impl Theme {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let changed = self.light.bg != LIGHT.bg || self.dark.bg != DARK.bg;
-                self.light = LIGHT;
-                self.dark = DARK;
+                self.light = *LIGHT;
+                self.dark = *DARK;
                 return Ok(changed);
             }
             Err(e) => return Err(e.to_string()),
@@ -70,8 +70,8 @@ impl Theme {
                 p
             }
             Err(e) => {
-                if self.light == LIGHT
-                    && self.dark == DARK
+                if self.light == *LIGHT
+                    && self.dark == *DARK
                     && let Some(p) = std::fs::read_to_string(&good).ok().and_then(|t| parse(&t).ok())
                 {
                     self.light = p.0;
@@ -100,7 +100,7 @@ impl Theme {
 
 fn parse(text: &str) -> Result<(Palette, Palette), String> {
     let table: toml::Table = text.parse().map_err(|e: toml::de::Error| format!("theme.toml: {}", e.message()))?;
-    let mut out = (LIGHT, DARK);
+    let mut out = (*LIGHT, *DARK);
     for (key, value) in &table {
         let target = match key.as_str() {
             "light" => &mut out.0,

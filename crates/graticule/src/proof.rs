@@ -95,7 +95,7 @@ impl Proofs {
         let screen = self.screen.get_or_insert_with(|| Offscreen::new(64, 64, SCALE, 13.0));
         let (cw, ch) = (screen.metrics.cell_w, screen.metrics.cell_h);
         screen.resize((v.cols as f32 * cw) as u32, (ROWS as f32 * ch) as u32);
-        let palette = if v.dark { DARK } else { LIGHT };
+        let palette = if v.dark { *DARK } else { *LIGHT };
         let sandbox = Sandbox::default();
         let mut images = Images::new(|| {});
         let (quads, ms) = screen.paint(v.lines, palette, None, |s| {
