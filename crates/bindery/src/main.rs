@@ -224,6 +224,12 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
     run(Command::new("cp").arg("-R").arg(from).arg(to)).map(|_| ())
 }
 
+fn preflight(app: &Path, package: &str) {
+    let lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+    let _ = run(Command::new(lsregister).arg("-f").arg(app));
+    let _ = run(Command::new(app.join("Contents").join("MacOS").join(package)).env("GRATICULE_PREFLIGHT", "1"));
+}
+
 fn commit(root: &Path) -> Option<String> {
     run(Command::new("git").arg("-C").arg(root).args(["rev-parse", "--short", "HEAD"])).ok()
 }
@@ -250,6 +256,7 @@ fn install_from(source: Source, package: Option<&str>, to: Option<PathBuf>) -> R
     let dest = dest_dir.join(format!("{}.app", m.name));
     let _ = std::fs::remove_dir_all(&dest);
     copy_dir(&built, &dest)?;
+    preflight(&dest, &m.package);
     let command = match &m.command {
         Some(cmd) => {
             let bin = dirs::home_dir().unwrap_or_default().join(".local").join("bin");

@@ -228,6 +228,9 @@ type Make<A> = Box<dyn FnOnce(Waker<<A as App>::Wake>, &mut Ctx) -> Result<A, St
 
 pub fn run<A: App>(config: Config, make: impl FnOnce(Waker<A::Wake>, &mut Ctx) -> Result<A, String> + 'static) -> Result<(), String> {
     let started = Instant::now();
+    if std::env::var_os("GRATICULE_PREFLIGHT").is_some() {
+        return Ok(());
+    }
     let event_loop = EventLoop::<Signal<A::Wake>>::with_user_event().build().map_err(|e| e.to_string())?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let proxy = event_loop.create_proxy();
@@ -806,9 +809,6 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             }
         };
         let access = self.config.visible.then(|| accesskit_winit::Adapter::with_event_loop_proxy(event_loop, &window, self.proxy.clone()));
-        if self.config.visible {
-            window.set_visible(true);
-        }
         marks.push(("window", Instant::now()));
         let size = window.inner_size();
         let gpu = Gpu::new(Some(window.clone()), (size.width, size.height));
@@ -899,6 +899,8 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
         running.settle();
         if self.config.visible {
             running.render();
+            running.window.set_visible(true);
+            running.window.request_redraw();
         }
         marks.push(("first frame", Instant::now()));
         let mut last = self.started;

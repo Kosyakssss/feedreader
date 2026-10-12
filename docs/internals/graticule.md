@@ -14,7 +14,9 @@ A key reaches the focused field before the command registry, and only keys the f
 
 ## Launch
 
-On an M1 with a warm cache, a Graticule window shows its first frame about 155 ms after the process is spawned, and Scope shows the stages (`GRATICULE_SCOPE=1` also prints them once): about 7 ms before `main`, 65 ms to create the event loop (AppKit connecting to the window server), 28 ms for AppKit to finish launching, 38 ms to create and show the window, 4 ms for the GPU surface, 3 ms for fonts and the menu, 1 ms for Feedreader to attach to its engine and 1.5 ms for the first frame. About 10 ms of that is Graticule and the app; the rest is macOS, so running our part in parallel with it would save little.
+On an M1 with a warm cache, a Graticule window shows its first frame about 155 ms after the process is spawned, and Scope shows the stages (`GRATICULE_SCOPE=1` also prints them once): about 7 ms before `main`, 65 ms to create the event loop (AppKit connecting to the window server), 28 ms for AppKit to finish launching, 38 ms to create and show the window, 4 ms for the GPU surface, 3 ms for fonts and the menu, 1 ms for Feedreader to attach to its engine and 1.5 ms for the first frame. About 10 ms of that is Graticule and the app; the rest is macOS, so running our part in parallel with it would save little. The window stays hidden until its first frame is drawn, so the first thing on screen is the finished UI, never an empty window.
+
+The first launch of a newly built binary takes about 0.8 s more: macOS checks a binary it hasn't seen before. Bindery pays that during the install by running the new binary once with `GRATICULE_PREFLIGHT=1`, which returns from `shell::run` before AppKit starts, and registers the app with Launch Services, so the first launch from the Dock is as fast as the rest.
 
 ## Fonts are the bundled ones, the system's only as a fallback
 
