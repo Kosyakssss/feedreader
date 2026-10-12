@@ -36,7 +36,9 @@ Box drawing (U+2500–U+257F), block elements (U+2580–U+259F) and braille (U+2
 
 ## Moves that need the layout go through the shell
 
-`Field` is a pure editing model and doesn't know where its text wrapped. In a multi-line field, up, down and the line ends return `Edit::Line`, and the shell answers them from the layout the field was last painted with (`Focused.wrap`), using parley's line navigation. Everything else, including Return, Cmd with the arrows and Ctrl-K up to the end of the line, stays in the model, so the field law covers it.
+`Field` is a pure editing model and doesn't know where its text wrapped. In a multi-line field, up, down and the line ends return `Edit::Line`, and the shell answers them from the layout the field was last painted with (`Focused.wrap`), using parley's line navigation. Everything else, including Return, Cmd with the arrows and Ctrl-K up to the end of the line, stays in the model, so the field law covers it. Keys map to editing operations through `field::bind`, transcribed from AppKit's `StandardKeyBinding.dict`, the table native text fields use, so a key does what it does in any Mac text field. With Option held, the shell reads the key without modifiers, because macOS turns Option-B into ∫ before it reaches us. Tab focuses the next painted field the way a click would and selects its text.
+
+An empty string measures zero: parley gives an empty line the width of a caret, which once pushed a field's text right whenever the caret sat at its start.
 
 ## Selection is resolved after the frame
 

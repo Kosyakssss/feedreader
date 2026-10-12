@@ -25,7 +25,6 @@ pub struct Table<'a> {
 pub struct Node<'a> {
     pub label: &'a str,
     pub depth: usize,
-    pub last: bool,
     pub open: Option<bool>,
 }
 
@@ -88,37 +87,48 @@ impl<H: Clone> Scene<'_, H> {
     pub fn tree(&mut self, at: Area, nodes: &[Node], cursor: Option<usize>, hit: impl Fn(usize) -> H) -> i32 {
         let pal = self.palette;
         let mono = self.m.mono();
-        let mut open_lines: Vec<bool> = Vec::new();
-        for (i, n) in nodes.iter().enumerate().take(at.rows.max(0) as usize) {
-            open_lines.truncate(n.depth);
+        let last: Vec<bool> = (0..nodes.len()).map(|i| nodes[i + 1..].iter().find(|n| n.depth <= nodes[i].depth).is_none_or(|n| n.depth < nodes[i].depth)).collect();
+        let mut more: Vec<bool> = Vec::new();
+        let mut folded: Option<usize> = None;
+        let mut row = 0;
+        for (i, n) in nodes.iter().enumerate() {
+            if folded.is_some_and(|d| n.depth > d) {
+                continue;
+            }
+            folded = (n.open == Some(false)).then_some(n.depth);
+            if row >= at.rows {
+                break;
+            }
+            more.truncate(n.depth);
             let mut prefix = String::new();
-            for &more in &open_lines {
-                prefix.push_str(if more { "\u{2502}  " } else { "   " });
+            for &m in more.iter().skip(1) {
+                prefix.push_str(if m { "\u{2502}  " } else { "   " });
             }
-            if n.depth > 0 || i > 0 {
-                prefix.push_str(if n.last { "\u{2514}\u{2500} " } else { "\u{251C}\u{2500} " });
+            if n.depth > 0 {
+                prefix.push_str(if last[i] { "\u{2514}\u{2500} " } else { "\u{251C}\u{2500} " });
             }
-            open_lines.push(!n.last);
+            more.push(!last[i]);
             let marker = match n.open {
                 Some(true) => "\u{25BE} ",
                 Some(false) => "\u{25B8} ",
                 None => "",
             };
-            let row = at.line(i as i32);
-            let r = self.rect(row);
+            let line = at.line(row);
+            let r = self.rect(line);
             if Some(i) == cursor {
                 self.fill(r, pal.cursor);
             } else {
                 self.hover(r);
             }
             let pc = prefix.chars().count() as i32;
-            self.write(row.at(0, 0, pc, 1), &prefix, mono, pal.rule);
+            self.write(line.at(0, 0, pc, 1), &prefix, mono, pal.rule);
             let mc = marker.chars().count() as i32;
-            self.write(row.at(pc, 0, mc, 1), marker, mono, pal.muted);
-            let style = self.m.prop(if n.open.is_some() { 600.0 } else { 400.0 });
-            self.write(row.at(pc + mc, 0, row.cols - pc - mc, 1), n.label, style, pal.ink);
+            self.write(line.at(pc, 0, mc, 1), marker, mono, pal.muted);
+            let style = self.m.prop(if n.depth == 0 { 600.0 } else { 400.0 });
+            self.write(line.at(pc + mc, 0, line.cols - pc - mc, 1), n.label, style, pal.ink);
             self.hit(r, hit(i));
+            row += 1;
         }
-        nodes.len().min(at.rows.max(0) as usize) as i32
+        row
     }
 }

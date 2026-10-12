@@ -7,6 +7,7 @@ use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key as WKey, ModifiersState, NamedKey};
+use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::window::WindowId;
 
 pub use winit::window::{CursorIcon as Cursor, Window};
@@ -452,6 +453,25 @@ impl<A: App> Running<A> {
         }
     }
 
+    fn tab(&mut self, back: bool) -> bool {
+        let Some(focused) = self.focused else { return false };
+        if self.app.field().is_none() || self.fields.len() < 2 {
+            return false;
+        }
+        let Some(i) = self.fields.iter().position(|r| *r == focused.rect) else { return false };
+        let n = self.fields.len();
+        let next = self.fields[if back { (i + n - 1) % n } else { (i + 1) % n }];
+        let (x, y) = (next.x + next.w / 2.0, next.y + next.h / 2.0);
+        let hit = self.hit_at(x, y);
+        let mut cx = cx!(self);
+        self.app.press(hit, &mut cx);
+        self.app.release();
+        if let Some(f) = self.app.field() {
+            f.select_all();
+        }
+        true
+    }
+
     fn hit_at(&self, x: f32, y: f32) -> Option<A::Hit> {
         self.hits.iter().rev().find(|(r, _)| r.contains(x, y)).map(|(_, h)| h.clone())
     }
@@ -487,7 +507,14 @@ impl<A: App> Running<A> {
     fn key(&mut self, event: &winit::event::KeyEvent) -> bool {
         let control = foreign(self.modifiers);
         let m = mods(self.modifiers);
-        let key = match &event.logical_key {
+        let unshifted;
+        let logical = if m.alt {
+            unshifted = event.key_without_modifiers();
+            &unshifted
+        } else {
+            &event.logical_key
+        };
+        let key = match logical {
             WKey::Named(NamedKey::ArrowDown) => Some(Key::Down),
             WKey::Named(NamedKey::ArrowUp) => Some(Key::Up),
             WKey::Named(NamedKey::ArrowLeft) => Some(Key::Left),
@@ -501,6 +528,7 @@ impl<A: App> Running<A> {
             WKey::Named(NamedKey::Home) => Some(Key::Home),
             WKey::Named(NamedKey::End) => Some(Key::End),
             WKey::Named(NamedKey::Space) => Some(Key::Char(' ')),
+            WKey::Named(NamedKey::Tab) => Some(Key::Tab),
             WKey::Character(s) => s
                 .chars()
                 .next()
@@ -527,6 +555,9 @@ impl<A: App> Running<A> {
         {
             f.insert(&t);
             self.app.field_changed();
+            return true;
+        }
+        if key == Key::Tab && !m.primary && self.tab(m.shift) {
             return true;
         }
         if let Some(f) = self.app.field()
@@ -1059,7 +1090,8 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
                 r.selecting = false;
                 r.picking = false;
                 r.app.release();
-                r.thumb.take().is_some()
+                r.thumb = None;
+                true
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let (dx, dy) = match delta {

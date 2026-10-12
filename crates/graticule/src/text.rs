@@ -344,6 +344,9 @@ impl Text {
     }
 
     pub fn measure(&mut self, text: &str, style: TextStyle, line: f32) -> f32 {
+        if text.is_empty() {
+            return 0.0;
+        }
         let span = SpanStyle { weight: style.weight as u16, ..SpanStyle::plain(style.face) };
         self.layout(&[(text, span)], style.size, line, None).full_width()
     }

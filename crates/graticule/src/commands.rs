@@ -13,6 +13,7 @@ pub enum Key {
     Home,
     End,
     Delete,
+    Tab,
     F(u8),
 }
 
@@ -75,6 +76,7 @@ impl Chord {
             Key::Home => s.push_str("home"),
             Key::End => s.push_str("end"),
             Key::Delete => s.push_str("del"),
+            Key::Tab => s.push_str("tab"),
             Key::F(n) => s.push_str(&format!("F{n}")),
         }
         s

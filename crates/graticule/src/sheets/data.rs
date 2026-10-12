@@ -56,19 +56,28 @@ pub(super) fn table(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
 }
 
 pub(super) fn tree(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
-    caption(s, a.take_top(1), "A tree draws everything at once, like a sitemap; the help page and the folder tree can be one.");
+    caption(s, a.take_top(1), "Which nodes fold is the app's choice: here the root stays put, places and folders fold.");
     a.take_top(1);
     let id = Id::new("sheet.tree");
-    let nodes = [
-        Node { label: "Feedreader", depth: 0, last: true, open: Some(true) },
-        Node { label: "Places", depth: 1, last: false, open: Some(true) },
-        Node { label: "Home", depth: 2, last: false, open: None },
-        Node { label: "Bookmarks", depth: 2, last: false, open: None },
-        Node { label: "I recommend", depth: 2, last: true, open: None },
-        Node { label: "Folders", depth: 1, last: false, open: Some(true) },
-        Node { label: "Friends", depth: 2, last: false, open: None },
-        Node { label: "Work", depth: 2, last: true, open: Some(false) },
-        Node { label: "Settings", depth: 1, last: true, open: None },
+    let items: [(&str, usize, Option<bool>); 12] = [
+        ("Feedreader", 0, None),
+        ("Places", 1, Some(true)),
+        ("Home", 2, None),
+        ("Bookmarks", 2, None),
+        ("I recommend", 2, None),
+        ("Folders", 1, Some(true)),
+        ("Friends", 2, None),
+        ("Work", 2, Some(false)),
+        ("Clients", 3, None),
+        ("Industry news", 3, None),
+        ("Reading list", 2, None),
+        ("Settings", 1, None),
     ];
-    s.tree(a, &nodes, sb.pick(id), |i| Hit::Pick(id, i));
+    let nodes: Vec<Node> = items
+        .iter()
+        .enumerate()
+        .map(|(i, (label, depth, open))| Node { label, depth: *depth, open: open.map(|o| o != sb.on(id.child(i as u64))) })
+        .collect();
+    let foldable: Vec<bool> = items.iter().map(|(_, _, open)| open.is_some()).collect();
+    s.tree(a, &nodes, sb.pick(id), |i| if foldable[i] { Hit::Toggle(id.child(i as u64)) } else { Hit::Pick(id, i) });
 }

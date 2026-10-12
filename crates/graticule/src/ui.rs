@@ -626,10 +626,6 @@ impl<'a, H> Scene<'a, H> {
         let pal = self.palette;
         self.fill(r, pal.field);
         self.fields.push(r);
-        if focused {
-            let t = self.m.scale.round().max(1.0);
-            self.fill(Rect::new(r.x, r.bottom() - t, r.w, t), pal.ink);
-        }
         self.push_clip(r);
         let tx = r.x + self.m.cell_w * 0.5;
         if f.text.is_empty() && f.preedit.is_empty() && !focused {
@@ -664,6 +660,10 @@ impl<'a, H> Scene<'a, H> {
             }
         }
         self.pop_clip();
+        if focused {
+            let t = self.hair();
+            self.fill(Rect::new(r.x, r.bottom() - t, r.w, t), pal.ink);
+        }
     }
 
     pub fn text_area(&mut self, id: Id, r: Rect, f: &Field, focused: bool, placeholder: &str) {
@@ -681,10 +681,6 @@ impl<'a, H> Scene<'a, H> {
         self.fill(r, pal.field);
         self.fields.push(r);
         self.scrollables.push((r, id));
-        if focused {
-            let t = self.hair();
-            self.fill(Rect::new(r.x, r.bottom() - t, r.w, t), pal.ink);
-        }
         let composing = !f.preedit.is_empty();
         let shown = if composing { format!("{}{}{}", &f.text[..f.caret], f.preedit, &f.text[f.caret..]) } else { String::new() };
         let text = if composing { shown.as_str() } else { f.text.as_str() };
@@ -734,6 +730,10 @@ impl<'a, H> Scene<'a, H> {
             self.focused = Some(Focused { rect: r, origin, wrap: Some(wrap), caret });
         }
         self.pop_clip();
+        if focused {
+            let t = self.hair();
+            self.fill(Rect::new(r.x, r.bottom() - t, r.w, t), pal.ink);
+        }
     }
 
     pub fn measure(&mut self, s: &str, style: TextStyle) -> f32 {
