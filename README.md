@@ -25,6 +25,8 @@ or, without installing anything, `cargo run --release` (run `cargo run -p binder
 cargo run -p graticule --bin specimen            # SP-01 Specimen: every component in every state
 cargo run -p graticule --bin specimen -- --out target/specimen   # the same, as a page of images
 GRATICULE_SCOPE=1 cargo run --release            # SC-01 Scope over Feedreader, also under View in the menu bar
+cargo run -p bindery -- dev -p graticule         # Specimen, rebuilt and reloaded in place on every saved change
+cargo run -p bindery -- dev -- --in-process      # the same for Feedreader, with the engine in the app so engine changes reload too
 ```
 
 Pictures in `crates/graticule/pictures` are compiled at build time by EN-01 Engraver (`crates/engraver`).

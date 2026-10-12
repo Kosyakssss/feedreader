@@ -74,7 +74,7 @@ impl<H: Clone> Scene<'_, H> {
     pub fn centered(&mut self, r: Rect, text: &str, style: TextStyle, color: [f32; 4]) {
         let w = self.measure(text, style);
         let x = (r.x + (r.w - w) / 2.0).round();
-        let y = (r.y + (r.h - self.m.cell_h) / 2.0).round();
+        let y = (r.y + (r.h - self.m.cell_h) / 2.0).floor();
         self.text(text, style, x, y, Some(r.w), color);
     }
 }

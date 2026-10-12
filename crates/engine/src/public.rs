@@ -1,18 +1,17 @@
-use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::Instant;
+use std::net::SocketAddr;
+use std::sync::{Arc, RwLock};
 
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::{ConnectInfo, Path, Request, State};
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
-use axum::middleware::{Next, from_fn_with_state};
+use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use chrono::{DateTime, Utc};
 use tokio::net::TcpListener;
 
+use crate::limit::{Limits, Peers, limit};
 use crate::store::PublicItem;
 
 #[derive(Default)]
@@ -161,51 +160,6 @@ async fn serve_feed(State(shared): State<Shared>, Path(token): Path<String>, hea
     current(&shared, &token, Doc::Feed, &headers)
 }
 
-const BURST: f64 = 20.0;
-const PER_SECOND: f64 = 1.0;
-const CLIENTS: usize = 4096;
-
-#[derive(Clone, Copy)]
-struct Bucket {
-    tokens: f64,
-    at: Instant,
-}
-
-fn take(bucket: Option<Bucket>, now: Instant) -> Result<Bucket, u64> {
-    let tokens = bucket.map_or(BURST, |b| (b.tokens + now.duration_since(b.at).as_secs_f64() * PER_SECOND).min(BURST));
-    if tokens >= 1.0 { Ok(Bucket { tokens: tokens - 1.0, at: now }) } else { Err(((1.0 - tokens) / PER_SECOND).ceil() as u64) }
-}
-
-type Limits = Arc<Mutex<HashMap<IpAddr, Bucket>>>;
-
-fn client(peer: SocketAddr, headers: &HeaderMap) -> IpAddr {
-    let forwarded = || headers.get("x-forwarded-for")?.to_str().ok()?.rsplit(',').next()?.trim().parse().ok();
-    if peer.ip().is_loopback() { forwarded().unwrap_or(peer.ip()) } else { peer.ip() }
-}
-
-async fn limit(State(limits): State<Limits>, ConnectInfo(peer): ConnectInfo<SocketAddr>, request: Request, next: Next) -> Response {
-    let who = client(peer, request.headers());
-    let now = Instant::now();
-    let verdict = {
-        let mut map = limits.lock().unwrap_or_else(|e| e.into_inner());
-        if map.len() >= CLIENTS {
-            map.retain(|_, b| take(Some(*b), now).is_ok_and(|b| b.tokens + 1.0 < BURST));
-        }
-        if map.len() >= CLIENTS {
-            map.clear();
-        }
-        let verdict = take(map.get(&who).copied(), now);
-        if let Ok(b) = verdict {
-            map.insert(who, b);
-        }
-        verdict
-    };
-    match verdict {
-        Ok(_) => next.run(request).await,
-        Err(wait) => (StatusCode::TOO_MANY_REQUESTS, [(header::RETRY_AFTER, wait.to_string())], "Too many requests").into_response(),
-    }
-}
-
 pub async fn serve(listener: std::net::TcpListener, shared: Shared) -> std::io::Result<()> {
     listener.set_nonblocking(true)?;
     let listener = TcpListener::from_std(listener)?;
@@ -214,6 +168,6 @@ pub async fn serve(listener: std::net::TcpListener, shared: Shared) -> std::io::
         .route("/{token}/", get(serve_page))
         .route("/{token}/feed.xml", get(serve_feed))
         .with_state(shared)
-        .layer(from_fn_with_state(Limits::default(), limit));
+        .layer(from_fn_with_state(Limits::new(Peers::BehindLocalProxy), limit));
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await
 }

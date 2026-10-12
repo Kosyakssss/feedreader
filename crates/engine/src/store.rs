@@ -642,6 +642,15 @@ impl Store {
         doomed
     }
 
+    pub fn named_hosts(&self) -> std::collections::HashSet<String> {
+        let Ok(mut q) = self.db.prepare("select url from feeds where removed_at is null union all select url from entries where feed_id = ?1") else {
+            return Default::default();
+        };
+        q.query_map([SAVED], |r| r.get::<_, String>(0))
+            .map(|rows| rows.filter_map(Result::ok).filter_map(|u| url::Url::parse(&u).ok().as_ref().and_then(crate::net::host_key)).collect())
+            .unwrap_or_default()
+    }
+
     pub fn next_prefetch(&self, since: i64, retry_before: i64) -> Option<(EntryId, String)> {
         self.db
             .query_row(

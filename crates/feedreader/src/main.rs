@@ -471,7 +471,7 @@ fn cli(args: &[String]) -> bool {
                 eprintln!("usage: feedreader extract <url> [--local]");
                 return true;
             };
-            let config = Config { title: "Feedreader", size: (400.0, 300.0), min_size: (100.0, 100.0), font_size: BASE_SIZE, visible: false };
+            let config = Config { title: "Feedreader", size: (400.0, 300.0), min_size: (100.0, 100.0), font_size: BASE_SIZE, visible: false, web_guard: engine::may_navigate };
             if let Err(e) = graticule::shell::run(config, Probe::start) {
                 eprintln!("Couldn't extract {url}: {e}");
             }
@@ -551,7 +551,7 @@ fn main() {
     if cli(&args) {
         return;
     }
-    let config = Config { title: "Feedreader", size: (1180.0, 760.0), min_size: (380.0, 300.0), font_size: BASE_SIZE, visible: true };
+    let config = Config { title: "Feedreader", size: (1180.0, 760.0), min_size: (380.0, 300.0), font_size: BASE_SIZE, visible: true, web_guard: engine::may_navigate };
     if let Err(e) = graticule::shell::run(config, app::Feed::start) {
         eprintln!("{e}");
         std::process::exit(1);

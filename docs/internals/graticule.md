@@ -63,3 +63,13 @@ Canvas paths are kept in the canvas's coordinates and mapped to pixels point by 
 ## Menu choices arrive as events
 
 muda delivers both menu bar and context menu choices through one event handler, which the shell turns into an event-loop signal. A context menu's choice therefore reaches `App::context_chosen` just after the menu closes, not as the menu call's return value; the View menu's Scope item toggles the inspector the same way.
+
+## Reloading replaces the process in place
+
+`bindery dev` watches the workspace (everything outside the target folder and dot folders), runs `cargo build` on each change and starts the app with `GRATICULE_RELOAD` naming a handoff file and its stdin a pipe. When a build changes the binary, Bindery writes a line to that pipe. The shell writes the window's frame, every scroll position in `State` and `App::keep` to the handoff file, leaves the event loop the normal way (so `App::exiting` runs and Feedreader closes its engine link), then execs its own binary with the same arguments. The new image reads the handoff, deletes it, opens the window at the same frame and hands the app's part to `App::restore`.
+
+Exec, not a second process, because the pid stays the same: Bindery keeps watching its child, the terminal stays attached, Ctrl-C still stops it, and quitting the app ends the session. The price is the window disappearing for one launch (about 155 ms, see Launch). A failed build never reaches the app, and a binary that crashes at start is started again by Bindery after the next change.
+
+Patching code into the running process (Subsecond) was turned down: it needs the `dx` tool to drive builds and cannot follow a change to a type's layout, and Graticule's state is already small enough to carry across a restart.
+
+Feedreader's background engine is a separate process that a reload doesn't touch, so engine changes reach it only when `PROTOCOL` changes; `bindery dev -- --in-process` runs the engine inside the app instead.

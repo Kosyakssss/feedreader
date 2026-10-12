@@ -1,5 +1,8 @@
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, SystemTime};
 
 const USAGE: &str = "BD-01 BINDERY: builds, installs and updates Graticule apps
 
@@ -11,6 +14,7 @@ const USAGE: &str = "BD-01 BINDERY: builds, installs and updates Graticule apps
   bindery remove NAME
   bindery fonts [PATH]
   bindery service install | uninstall
+  bindery dev [PATH] [-p PACKAGE] [--bin NAME] [-- APP ARGUMENTS]
 
 An app describes itself in its Cargo.toml:
 
@@ -84,11 +88,14 @@ fn run(cmd: &mut Command) -> Result<String, String> {
     }
 }
 
-fn manifest(root: &Path, package: Option<&str>) -> Result<Manifest, String> {
+fn metadata(root: &Path) -> Result<serde_json::Value, String> {
     let out = run(Command::new("cargo").args(["metadata", "--no-deps", "--format-version", "1", "--manifest-path"]).arg(root.join("Cargo.toml")))?;
-    let meta: serde_json::Value = serde_json::from_str(&out).map_err(|e| e.to_string())?;
+    serde_json::from_str(&out).map_err(|e| e.to_string())
+}
+
+fn package<'a>(meta: &'a serde_json::Value, root: &Path, package: Option<&str>) -> Result<&'a serde_json::Value, String> {
     let packages = meta["packages"].as_array().ok_or("cargo metadata listed no packages")?;
-    let pkg = packages
+    packages
         .iter()
         .find(|p| match package {
             Some(name) => p["name"] == name,
@@ -97,7 +104,12 @@ fn manifest(root: &Path, package: Option<&str>) -> Result<Manifest, String> {
         .ok_or_else(|| match package {
             Some(name) => format!("no package named {name} in {}", root.display()),
             None => format!("no package in {} has [package.metadata.graticule]", root.display()),
-        })?;
+        })
+}
+
+fn manifest(root: &Path, package: Option<&str>) -> Result<Manifest, String> {
+    let meta = metadata(root)?;
+    let pkg = self::package(&meta, root, package)?;
     let g = &pkg["metadata"]["graticule"];
     let text = |key: &str| g[key].as_str().map(str::to_string);
     let package = pkg["name"].as_str().unwrap_or_default().to_string();
@@ -426,8 +438,97 @@ fn service(install: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn fingerprint(dir: &Path, skip: &Path, hasher: &mut DefaultHasher) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let mut entries: Vec<_> = entries.filter_map(Result::ok).map(|e| e.path()).collect();
+    entries.sort();
+    for path in entries {
+        if path == skip || path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) {
+            continue;
+        }
+        let Ok(meta) = std::fs::metadata(&path) else { continue };
+        if meta.is_dir() {
+            fingerprint(&path, skip, hasher);
+        } else {
+            (&path, meta.modified().ok(), meta.len()).hash(hasher);
+        }
+    }
+}
+
+fn sources(root: &Path, target: &Path) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    fingerprint(root, target, &mut hasher);
+    hasher.finish()
+}
+
+fn modified(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+fn dev(root: &Path, package: Option<&str>, bin: Option<&str>, app_args: &[String]) -> Result<(), String> {
+    let meta = metadata(root)?;
+    let pkg = self::package(&meta, root, package)?;
+    let name = pkg["name"].as_str().unwrap_or_default();
+    let bins: Vec<&str> = pkg["targets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|t| t["kind"].as_array().is_some_and(|k| k.iter().any(|k| k == "bin")))
+        .filter_map(|t| t["name"].as_str())
+        .collect();
+    let bin = match (bin, &bins[..]) {
+        (Some(b), _) if bins.contains(&b) => b,
+        (None, [b]) => b,
+        _ => return Err(format!("which binary of {name}? --bin {}", bins.join(" | "))),
+    };
+    let workspace = PathBuf::from(meta["workspace_root"].as_str().unwrap_or_default());
+    let target = PathBuf::from(meta["target_directory"].as_str().unwrap_or("target"));
+    let exe = target.join("debug").join(bin);
+    let handoff = target.join("debug").join(format!("{bin}.handoff"));
+    let _ = std::fs::remove_file(&handoff);
+    let mut seen = sources(&workspace, &target);
+    let mut app: Option<Child> = None;
+    loop {
+        let before = modified(&exe);
+        let built = Command::new("cargo").args(["build", "-p", name, "--bin", bin]).current_dir(root).status().is_ok_and(|s| s.success());
+        match &mut app {
+            Some(child) if built && modified(&exe) != before => {
+                if let Some(stdin) = &mut child.stdin {
+                    let _ = writeln!(stdin, "reload");
+                }
+            }
+            None if built => {
+                let child = Command::new(&exe).args(app_args).env("GRATICULE_RELOAD", &handoff).stdin(Stdio::piped()).spawn().map_err(|e| format!("{}: {e}", exe.display()))?;
+                app = Some(child);
+            }
+            _ => {}
+        }
+        loop {
+            std::thread::sleep(Duration::from_millis(250));
+            if let Some(child) = &mut app
+                && let Ok(Some(status)) = child.try_wait()
+            {
+                if status.success() {
+                    return Ok(());
+                }
+                eprintln!("bindery: {bin} stopped ({status}); it starts again after the next change");
+                app = None;
+            }
+            let now = sources(&workspace, &target);
+            if now != seen {
+                seen = now;
+                break;
+            }
+        }
+    }
+}
+
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let all: Vec<String> = std::env::args().skip(1).collect();
+    let (args, app_args) = match all.iter().position(|a| a == "--") {
+        Some(i) => (all[..i].to_vec(), all[i + 1..].to_vec()),
+        None => (all, Vec::new()),
+    };
     let flag = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
     let positional: Vec<&String> = {
         let mut out = Vec::new();
@@ -435,7 +536,7 @@ fn main() {
         for a in args.iter().skip(1) {
             if skip {
                 skip = false;
-            } else if a == "-p" || a == "--to" {
+            } else if a == "-p" || a == "--to" || a == "--bin" {
                 skip = true;
             } else {
                 out.push(a);
@@ -461,6 +562,7 @@ fn main() {
             Some(name) => remove(name),
             None => Err("which app? `bindery list` shows them".into()),
         },
+        Some("dev") => dev(Path::new(positional.first().map(|s| s.as_str()).unwrap_or(".")), package.as_deref(), flag("--bin").as_deref(), &app_args),
         Some("fonts") => fonts(Path::new(positional.first().map(|s| s.as_str()).unwrap_or("."))),
         Some("service") => match positional.first().map(|s| s.as_str()) {
             Some("install") => service(true),

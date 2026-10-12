@@ -5,6 +5,7 @@ mod public;
 pub mod rules;
 pub mod serve;
 mod hub;
+mod limit;
 #[cfg(test)]
 mod laws;
 mod sat;
@@ -24,6 +25,7 @@ use tokio::time::Instant;
 use url::Url;
 
 pub use config::Config;
+pub use net::may_navigate;
 pub use types::*;
 
 use parse::ParsedFeed;
@@ -237,7 +239,7 @@ struct Engine {
     dir: PathBuf,
     config: Config,
     store: Store,
-    client: reqwest::Client,
+    net: net::Net,
     out: Box<dyn Fn(Event, Audience) + Send>,
     settings: Settings,
     status: RefreshStatus,
@@ -281,12 +283,12 @@ fn wait_hint(f: &net::Fetched) -> Option<i64> {
     retry.map(|ms| ms.min(24 * 3_600_000)).or(max_age).filter(|&ms| ms > 0)
 }
 
-async fn fetch_feed(client: &reqwest::Client, url: &str, validators: (Option<String>, Option<String>)) -> (Result<Fetch, String>, Option<i64>) {
+async fn fetch_feed(net: &net::Net, url: &str, validators: (Option<String>, Option<String>)) -> (Result<Fetch, String>, Option<i64>) {
     let u = match Url::parse(url) {
         Ok(u) => u,
         Err(e) => return (Err(e.to_string()), None),
     };
-    let f = match net::fetch(client, &u, work::FEED_ACCEPT, Some(validators), Duration::from_secs(8), 10_000_000).await {
+    let f = match net::fetch(net, &u, net::Zone::Local, work::FEED_ACCEPT, Some(validators), Duration::from_secs(8), 10_000_000).await {
         Ok(f) => f,
         Err(e) => return (Err(e), None),
     };
@@ -323,7 +325,7 @@ impl Engine {
             dir,
             config,
             store,
-            client: net::client(),
+            net: net::Net::default(),
             out,
             settings,
             status: RefreshStatus::default(),
@@ -471,9 +473,13 @@ impl Engine {
     }
 
     fn fetch_page(&self, job: Job, url: String) {
-        let client = self.client.clone();
+        let bound = match &job {
+            Job::Save(_) | Job::Probe(..) => net::Zone::Local,
+            Job::Entry(_) | Job::Prefetch(_) => net::bound(&url, &self.store.named_hosts()),
+        };
+        let net = self.net.clone();
         self.spawn(async move {
-            let r = work::fetch_page(&client, &url).await;
+            let r = work::fetch_page(&net, &url, bound).await;
             Internal::Page(job, r)
         });
     }
@@ -531,11 +537,11 @@ impl Engine {
                     if let Some(host) = url::Url::parse(&url).ok().and_then(|u| u.host_str().map(str::to_string))
                         && !self.store.offered(&host)
                     {
-                        let client = self.client.clone();
+                        let net = self.net.clone();
                         let known = self.known();
                         let root = format!("https://{host}/");
                         self.spawn(async move {
-                            let r = work::discover(&client, &root, &known).await;
+                            let r = work::discover(&net, &root, &known).await;
                             Internal::Offer(host, r)
                         });
                     }
@@ -680,10 +686,10 @@ impl Engine {
                 }
                 self.emit(Event::EntriesAdded(self.store.removed_entries(&feed.id)));
                 if self.fetches() {
-                    let client = self.client.clone();
+                    let net = self.net.clone();
                     let v = self.store.validators(&feed.id);
                     self.spawn(async move {
-                        let (r, _) = fetch_feed(&client, &feed.url, v).await;
+                        let (r, _) = fetch_feed(&net, &feed.url, v).await;
                         Internal::Added(feed.id, r)
                     });
                 }
@@ -917,9 +923,10 @@ impl Engine {
         self.checks += 1;
         let Some(url) = self.public_url.clone().filter(|u| u.starts_with("https://")) else { return };
         let check = self.checks;
+        let net = self.net.clone();
         self.spawn(async move {
             tokio::time::sleep(after).await;
-            Internal::Outside(check, tries, tailscale::reachable(&url).await)
+            Internal::Outside(check, tries, tailscale::reachable(&net, &url).await)
         });
     }
 
@@ -1055,14 +1062,14 @@ impl Engine {
                 (f.id, f.url, v)
             })
             .collect();
-        let client = self.client.clone();
+        let net = self.net.clone();
         let tx = self.itx.clone().expect("running");
         let run = self.status.run;
         tokio::spawn(async move {
             let hosts: std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Semaphore>>> = Default::default();
             futures::stream::iter(list)
                 .map(|(id, url, v)| {
-                    let c = client.clone();
+                    let c = net.clone();
                     let host = Url::parse(&url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
                     let gate = hosts.lock().unwrap_or_else(|e| e.into_inner()).entry(host).or_insert_with(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2))).clone();
                     async move {
@@ -1098,6 +1105,7 @@ impl Engine {
 
     fn want_media(&mut self, urls: Vec<String>, reply: bool) {
         let t = now();
+        let named = self.store.named_hosts();
         for url in urls {
             if let Some(row) = self.store.media(&url) {
                 let path = self.dir.join("media").join(&row.file);
@@ -1121,7 +1129,8 @@ impl Engine {
             if !self.media_inflight.insert(url.clone()) {
                 continue;
             }
-            let client = self.client.clone();
+            let net = self.net.clone();
+            let bound = net::bound(&url, &named);
             let dir = self.dir.join("media");
             let gate = self.media_gate.clone();
             let hub = self.hub.clone().filter(|_| self.reach == Reach::Online);
@@ -1132,7 +1141,7 @@ impl Engine {
                 {
                     return Internal::MediaFetched(url.clone(), work::store_media(&dir, &url, &bytes, "").await);
                 }
-                let r = work::fetch_media(&client, &url, &dir).await;
+                let r = work::fetch_media(&net, &url, bound, &dir).await;
                 Internal::MediaFetched(url, r)
             });
         }
@@ -1381,10 +1390,10 @@ impl Engine {
             Request::SetBookmarked(ids, v) => self.local(Command::Bookmark(ids, v)),
             Request::Refresh => self.start_refresh(true),
             Request::Discover(q) => {
-                let client = self.client.clone();
+                let net = self.net.clone();
                 let known = self.known();
                 self.spawn(async move {
-                    let r = work::discover(&client, &q, &known).await;
+                    let r = work::discover(&net, &q, &known).await;
                     Internal::Discovered(from, q, r)
                 });
             }

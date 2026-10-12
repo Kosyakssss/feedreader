@@ -29,8 +29,7 @@ impl<H: Clone> Scene<'_, H> {
             return cols + 1;
         }
         let d = self.shadow();
-        let i = (d / 2.0).round();
-        let body = Rect::new(outer.x, outer.y + i, outer.w - d, outer.h - i * 2.0 - d);
+        let body = Rect::new(outer.x, outer.y, outer.w - d, outer.h - d);
         let hovered = hit.is_some() && self.hovered(outer);
         let pressed = hovered && self.pressed;
         let r = if pressed { Rect::new(body.x + d, body.y + d, body.w, body.h) } else { body };

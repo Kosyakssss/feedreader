@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -18,6 +20,7 @@ use crate::ui::Focused;
 use crate::gpu::{Gpu, Quad};
 use crate::images::Images;
 use crate::menu;
+use crate::reload::{Handoff, Reload};
 use crate::state::{Id, Selected, Spot, State};
 use crate::ui::Run;
 use crate::text::{Face, Text, TextStyle};
@@ -29,6 +32,7 @@ pub struct Config {
     pub min_size: (f64, f64),
     pub font_size: f32,
     pub visible: bool,
+    pub web_guard: fn(&str, &str) -> bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -115,6 +119,7 @@ enum Signal<W> {
     Images,
     Access(accesskit_winit::Event),
     Menu(String),
+    Reload,
 }
 
 impl<W> From<accesskit_winit::Event> for Signal<W> {
@@ -196,6 +201,10 @@ pub trait App: Sized + 'static {
     fn dropped(&mut self, _: PathBuf) {}
     fn chosen(&mut self, _: u32, _: Option<PathBuf>) {}
     fn web_closed(&mut self) {}
+    fn keep(&self) -> String {
+        String::new()
+    }
+    fn restore(&mut self, _: &str) {}
     fn exiting(self) {}
 }
 
@@ -235,12 +244,21 @@ pub fn run<A: App>(config: Config, make: impl FnOnce(Waker<A::Wake>, &mut Ctx) -
     let event_loop = EventLoop::<Signal<A::Wake>>::with_user_event().build().map_err(|e| e.to_string())?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let proxy = event_loop.create_proxy();
+    let reload = Reload::from_env();
+    let handoff = reload.as_ref().and_then(Reload::take);
+    if let Some(reload) = &reload {
+        let proxy = proxy.clone();
+        reload.listen(move || {
+            let _ = proxy.send_event(Signal::Reload);
+        });
+    }
     let loop_ready = Instant::now();
-    let mut shell = Shell::<A> { config, proxy, running: None, failed: None, make: Some(Box::new(make)), started, loop_ready };
+    let mut shell = Shell::<A> { config, proxy, running: None, failed: None, make: Some(Box::new(make)), started, loop_ready, reload, handoff, reloading: false };
     event_loop.run_app(&mut shell).map_err(|e| e.to_string())?;
-    match shell.failed {
-        Some(e) => Err(e),
-        None => Ok(()),
+    match (shell.failed, shell.reload) {
+        (Some(e), _) => Err(e),
+        (None, Some(reload)) if shell.reloading => reload.relaunch(),
+        (None, _) => Ok(()),
     }
 }
 
@@ -252,6 +270,9 @@ struct Shell<A: App> {
     make: Option<Make<A>>,
     started: Instant,
     loop_ready: Instant,
+    reload: Option<Reload>,
+    handoff: Option<Handoff>,
+    reloading: bool,
 }
 
 struct Running<A: App> {
@@ -274,6 +295,8 @@ struct Running<A: App> {
     picking: bool,
     web: Option<wry::WebView>,
     web_key: Option<String>,
+    web_opened: Rc<RefCell<String>>,
+    web_guard: fn(&str, &str) -> bool,
     web_visible: bool,
     mouse: (f32, f32),
     pointer_inside: bool,
@@ -415,6 +438,7 @@ impl<A: App> Running<A> {
                 let _ = w.set_bounds(bounds);
                 let _ = w.set_visible(true);
                 if self.web_key.as_deref() != Some(content.key()) {
+                    content.key().clone_into(&mut self.web_opened.borrow_mut());
                     let _ = match &content {
                         Web::Url(u) => w.load_url(u),
                         Web::Html { html, .. } => w.load_html(html),
@@ -423,6 +447,9 @@ impl<A: App> Running<A> {
             }
             None => {
                 let proxy = self.proxy.clone();
+                content.key().clone_into(&mut self.web_opened.borrow_mut());
+                let opened = self.web_opened.clone();
+                let guard = self.web_guard;
                 let builder = match &content {
                     Web::Url(u) => wry::WebViewBuilder::new().with_url(u.clone()),
                     Web::Html { html, .. } => wry::WebViewBuilder::new().with_html(html.clone()),
@@ -437,6 +464,7 @@ impl<A: App> Running<A> {
                     .with_ipc_handler(move |_| {
                         let _ = proxy.send_event(Signal::WebClose);
                     })
+                    .with_navigation_handler(move |to| guard(&opened.borrow(), &to))
                     .build_as_child(&*self.window)
                     .ok();
             }
@@ -832,11 +860,15 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             return;
         }
         let mut marks = vec![("event loop", self.loop_ready), ("AppKit", Instant::now())];
-        let attributes = Window::default_attributes()
+        let handoff = self.handoff.take();
+        let mut attributes = Window::default_attributes()
             .with_title(self.config.title)
             .with_inner_size(LogicalSize::new(self.config.size.0, self.config.size.1))
             .with_min_inner_size(LogicalSize::new(self.config.min_size.0, self.config.min_size.1))
             .with_visible(false);
+        if let Some((position, size)) = handoff.as_ref().and_then(|h| h.frame) {
+            attributes = attributes.with_position(position).with_inner_size(size);
+        }
         let window = match event_loop.create_window(attributes) {
             Ok(w) => Arc::new(w),
             Err(e) => {
@@ -878,7 +910,7 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             clicks: 0,
         };
         let Some(make) = self.make.take() else { return };
-        let app = match make(waker, &mut cx) {
+        let mut app = match make(waker, &mut cx) {
             Ok(app) => app,
             Err(e) => {
                 if self.config.visible {
@@ -889,6 +921,13 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
                 return;
             }
         };
+        let state = match handoff {
+            Some(h) => {
+                app.restore(&h.app);
+                h.state
+            }
+            None => State::default(),
+        };
         marks.push(("app", Instant::now()));
         let mut running = Running {
             app,
@@ -898,7 +937,7 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             metrics,
             font_size,
             hits: Vec::new(),
-            state: State::default(),
+            state,
             scrollables: Vec::new(),
             tracks: Vec::new(),
             jumps: Vec::new(),
@@ -910,6 +949,8 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             picking: false,
             web: None,
             web_key: None,
+            web_opened: Rc::default(),
+            web_guard: self.config.web_guard,
             web_visible: false,
             mouse: (0.0, 0.0),
             pointer_inside: false,
@@ -1000,6 +1041,18 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
                 }
                 Err(_) => false,
             },
+            Signal::Reload => {
+                if let Some(reload) = &self.reload {
+                    match reload.save(&r.window, &r.state, &r.app.keep()) {
+                        Ok(()) => {
+                            self.reloading = true;
+                            event_loop.exit();
+                        }
+                        Err(e) => eprintln!("reload: {e}"),
+                    }
+                }
+                false
+            }
         };
         if redraw {
             r.settle();

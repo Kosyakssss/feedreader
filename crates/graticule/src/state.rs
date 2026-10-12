@@ -236,4 +236,19 @@ impl State {
     pub fn scroll_to(&mut self, id: Id, total: f32) {
         self.scroll_mut(id).set_total(total);
     }
+
+    pub(crate) fn keep(&self, out: &mut String) {
+        let key = |k: Option<u64>| k.map_or("-".to_string(), |k| k.to_string());
+        for (id, s) in &self.scrolls {
+            out.push_str(&format!("scroll {} {} {} {} {}\n", id.0, s.top, s.offset, key(s.key), key(s.cursor)));
+        }
+    }
+
+    pub(crate) fn restore(&mut self, scroll: &str) {
+        let mut parts = scroll.split(' ');
+        let mut next = || parts.next().unwrap_or_default();
+        let (Ok(id), Ok(top), Ok(offset)) = (next().parse(), next().parse(), next().parse()) else { return };
+        let (key, cursor) = (next().parse().ok(), next().parse().ok());
+        self.scrolls.insert(Id(id), Scroll { top, offset, key, cursor, ..Scroll::default() });
+    }
 }

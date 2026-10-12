@@ -1,4 +1,4 @@
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,6 +12,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use tokio::sync::{mpsc::UnboundedSender, oneshot, watch};
 
+use crate::limit::{Limits, Peers, limit};
 use crate::store::{WireEntry, WireFeed};
 use crate::types::Change;
 
@@ -171,11 +172,11 @@ pub async fn serve(port: u16, mut names: Vec<String>, api: UnboundedSender<crate
     }
     let app = Router::new()
         .route("/v1/health", get(health))
-        .route("/v1/pair", post(pair))
+        .route("/v1/pair", post(pair).layer(from_fn_with_state(Limits::new(Peers::Direct), limit)))
         .route("/v1/sync", post(sync))
         .route("/v1/content", get(content))
         .route("/v1/media", get(media))
         .with_state(Hub { api, changed })
         .layer(from_fn_with_state(Arc::new(names), host));
-    axum::serve(listener, app).await
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await
 }

@@ -14,6 +14,7 @@ pub mod kit;
 mod menu;
 pub mod picture;
 pub mod proof;
+mod reload;
 pub mod sheets;
 pub mod scope;
 pub mod shell;

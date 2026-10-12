@@ -5,7 +5,7 @@ use futures::future::join_all;
 use scraper::{Html, Selector};
 use url::Url;
 
-use crate::net::{self, fetch};
+use crate::net::{self, Net, Zone, fetch};
 use crate::parse::{ParsedFeed, parse_feed};
 use crate::store::feed_id;
 use crate::types::{Candidate, Extracted, Feed};
@@ -43,8 +43,8 @@ fn candidate(url: &Url, parsed: &ParsedFeed, kind: &str, known: &HashSet<String>
     }
 }
 
-async fn probe(client: &reqwest::Client, url: Url, kind: String, known: &HashSet<String>) -> Option<Candidate> {
-    let f = fetch(client, &url, FEED_ACCEPT, None, Duration::from_secs(5), 10_000_000).await.ok()?;
+async fn probe(net: &Net, url: Url, bound: Zone, kind: String, known: &HashSet<String>) -> Option<Candidate> {
+    let f = fetch(net, &url, bound, FEED_ACCEPT, None, Duration::from_secs(5), 10_000_000).await.ok()?;
     if f.status >= 400 {
         return None;
     }
@@ -129,9 +129,9 @@ fn link_tags(page: &str, base: &Url) -> Vec<(Url, String)> {
         .collect()
 }
 
-pub async fn discover(client: &reqwest::Client, input: &str, known: &HashSet<String>) -> Result<Vec<Candidate>, String> {
+pub async fn discover(net: &Net, input: &str, known: &HashSet<String>) -> Result<Vec<Candidate>, String> {
     let url = net::parse_url(input)?;
-    let f = fetch(client, &url, FEED_ACCEPT, None, Duration::from_secs(10), 10_000_000).await?;
+    let f = fetch(net, &url, Zone::Local, FEED_ACCEPT, None, Duration::from_secs(10), 10_000_000).await?;
     if f.status >= 400 && platform(&url, None).is_empty() {
         return Err(format!("HTTP {}", f.status));
     }
@@ -144,20 +144,22 @@ pub async fn discover(client: &reqwest::Client, input: &str, known: &HashSet<Str
     let base = f.url.clone();
     let mut links = platform(&base, Some(&page));
     links.extend(link_tags(&page, &base));
+    let mut bound = f.zone;
     let root = base.join("/").ok().filter(|r| r.as_str() != base.as_str());
     if let Some(root) = &root
-        && let Ok(rf) = fetch(client, root, PAGE_ACCEPT, None, Duration::from_secs(10), 2_000_000).await
+        && let Ok(rf) = fetch(net, root, bound, PAGE_ACCEPT, None, Duration::from_secs(10), 2_000_000).await
         && rf.status < 400
     {
         let rp = String::from_utf8_lossy(&rf.body).to_string();
         links.extend(link_tags(&rp, &rf.url));
+        bound = bound.min(rf.zone);
     }
     let probe_base = root.unwrap_or_else(|| base.clone());
     links.extend(PROBES.iter().filter_map(|p| probe_base.join(p).ok().map(|u| (u, "feed".to_string()))));
     links.extend(base.join("feed/").ok().filter(|_| base.path().len() > 1).map(|u| (u, "category".to_string())));
     let mut seen = HashSet::new();
     links.retain(|(u, _)| seen.insert(feed_id(u.as_str())));
-    let found: Vec<Candidate> = join_all(links.into_iter().map(|(u, k)| probe(client, u, k, known)))
+    let found: Vec<Candidate> = join_all(links.into_iter().map(|(u, k)| probe(net, u, bound, k, known)))
         .await
         .into_iter()
         .flatten()
@@ -176,9 +178,9 @@ pub async fn discover(client: &reqwest::Client, input: &str, known: &HashSet<Str
     }
 }
 
-pub async fn fetch_page(client: &reqwest::Client, url: &str) -> Result<(String, String), String> {
+pub async fn fetch_page(net: &Net, url: &str, bound: Zone) -> Result<(String, String), String> {
     let u = Url::parse(url).map_err(|e| e.to_string())?;
-    let f = fetch(client, &u, PAGE_ACCEPT, None, Duration::from_secs(12), 8_000_000).await?;
+    let f = fetch(net, &u, bound, PAGE_ACCEPT, None, Duration::from_secs(12), 8_000_000).await?;
     if f.status >= 400 {
         return Err(format!("HTTP {}", f.status));
     }
@@ -197,9 +199,9 @@ pub fn readability(url: &str, html: String) -> Result<Extracted, String> {
 
 const MEDIA_ACCEPT: &str = "image/webp, image/png, image/jpeg, image/gif, image/*;q=0.8, */*;q=0.1";
 
-pub async fn fetch_media(client: &reqwest::Client, url: &str, dir: &std::path::Path) -> Result<(String, String, i64), String> {
+pub async fn fetch_media(net: &Net, url: &str, bound: Zone, dir: &std::path::Path) -> Result<(String, String, i64), String> {
     let u = Url::parse(url).map_err(|e| e.to_string())?;
-    let f = fetch(client, &u, MEDIA_ACCEPT, None, Duration::from_secs(15), 10_000_000).await?;
+    let f = fetch(net, &u, bound, MEDIA_ACCEPT, None, Duration::from_secs(15), 10_000_000).await?;
     if f.status >= 400 {
         return Err(format!("HTTP {}", f.status));
     }

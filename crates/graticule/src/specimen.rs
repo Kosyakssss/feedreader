@@ -178,6 +178,54 @@ impl Bench {
         }
     }
 
+    fn controls(&self) -> [(Cmd, &'static str, String); 7] {
+        let width = match self.frame.cols() {
+            Some(cols) => format!("{cols} cols"),
+            None => "window".into(),
+        };
+        [
+            (Cmd::Style, "lines", lines_name(self.style).into()),
+            (Cmd::Appearance, "appearance", format!("{:?}", self.appearance).to_lowercase()),
+            (Cmd::Frame, "width", width),
+            (Cmd::Scrolling, "scrolling", format!("{:?}", self.scrolling).to_lowercase()),
+            (Cmd::Date, "date", format!("{:?}", self.dates.date).to_lowercase()),
+            (Cmd::Time, "time", format!("{:?}", self.dates.time).to_lowercase()),
+            (Cmd::Grid, "grid", if self.grid { "on".into() } else { "off".into() }),
+        ]
+    }
+
+    pub fn keep(&self) -> String {
+        let mut out = format!("sheet {}\n", self.sheets.get(self.current).map_or("", |s| s.name));
+        for (_, label, value) in self.controls() {
+            out.push_str(&format!("{label} {value}\n"));
+        }
+        for id in &self.sandbox.on {
+            out.push_str(&format!("on {}\n", id.0));
+        }
+        for (id, i) in &self.sandbox.picks {
+            out.push_str(&format!("pick {} {i}\n", id.0));
+        }
+        out
+    }
+
+    pub fn restore(&mut self, kept: &str) {
+        for (label, value) in kept.lines().filter_map(|l| l.split_once(' ')) {
+            match (label, value.split_once(' ')) {
+                ("sheet", _) => self.current = self.sheets.iter().position(|s| s.name == value).unwrap_or(self.current),
+                ("on", _) => self.sandbox.on.extend(value.parse().ok().map(Id)),
+                ("pick", Some((id, i))) => self.sandbox.picks.extend(id.parse().ok().map(Id).zip(i.parse().ok())),
+                _ => {
+                    for _ in 0..STYLES.len() {
+                        match self.controls().into_iter().find(|(_, l, _)| *l == label) {
+                            Some((cmd, _, now)) if now != value => self.exec(cmd),
+                            _ => break,
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub fn exec(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Next => self.current = (self.current + 1).min(self.sheets.len().saturating_sub(1)),
@@ -315,20 +363,7 @@ impl Bench {
         let cols = s.cols(&of, prop);
         s.write(Area::new(x, top.row, cols, 1), &of, prop, pal.muted);
         x += cols + 4;
-        let width = match self.frame.cols() {
-            Some(cols) => format!("{cols} cols"),
-            None => "window".into(),
-        };
-        let controls: [(Cmd, &str, String); 7] = [
-            (Cmd::Style, "lines", lines_name(self.style).into()),
-            (Cmd::Appearance, "appearance", format!("{:?}", self.appearance).to_lowercase()),
-            (Cmd::Frame, "width", width),
-            (Cmd::Scrolling, "scrolling", format!("{:?}", self.scrolling).to_lowercase()),
-            (Cmd::Date, "date", format!("{:?}", self.dates.date).to_lowercase()),
-            (Cmd::Time, "time", format!("{:?}", self.dates.time).to_lowercase()),
-            (Cmd::Grid, "grid", if self.grid { "on".into() } else { "off".into() }),
-        ];
-        for (cmd, label, value) in controls {
+        for (cmd, label, value) in self.controls() {
             x += s.cycle(Area::new(x, top.row, top.right() - x, 1), label, &value, Some(Hit::Run(cmd))) + 3;
         }
         s.rule(rule);
@@ -543,6 +578,14 @@ impl App for Runner {
         self.bench.field()
     }
 
+    fn keep(&self) -> String {
+        self.bench.keep()
+    }
+
+    fn restore(&mut self, kept: &str) {
+        self.bench.restore(kept);
+    }
+
     fn cursor(&mut self, hit: Option<&Hit>, _: &mut Ctx) -> Cursor {
         match hit {
             Some(Hit::Focus(..)) => Cursor::Text,
@@ -565,7 +608,7 @@ pub fn main(title: &'static str, sheets: impl Fn() -> Vec<Sheet> + 'static) {
         export(title, sheets(), Path::new(&out))
     } else {
         shell::run(
-            Config { title: Box::leak(format!("SP-01 Specimen \u{00B7} {title}").into_boxed_str()), size: (1280.0, 820.0), min_size: (640.0, 400.0), font_size: 13.0, visible: true },
+            Config { title: Box::leak(format!("SP-01 Specimen \u{00B7} {title}").into_boxed_str()), size: (1280.0, 820.0), min_size: (640.0, 400.0), font_size: 13.0, visible: true, web_guard: |_, _| true },
             move |_, _| Ok(Runner { bench: Bench::new(title, sheets()), images: Images::new(|| {}) }),
         )
     };
@@ -602,7 +645,7 @@ fn snapshot(title: &'static str, sheets: Vec<Sheet>, args: &[String], out: &Path
         bench.proofs.approve(bench.current, sheet, v)?;
     }
     let pointer = arg("--pointer").and_then(|s| s.split_once(',').and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?))));
-    let mut screen = Offscreen::new(w * scale as u32, h * scale as u32, scale, 13.0);
+    let mut screen = Offscreen::new((w as f32 * scale).round() as u32, (h as f32 * scale).round() as u32, scale, 13.0);
     let palette = bench.palette(false);
     let drag = arg("--drag").and_then(|s| {
         let n: Vec<f32> = s.split([',', ':']).filter_map(|v| v.parse().ok()).collect();

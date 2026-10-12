@@ -88,13 +88,14 @@ pub async fn unpublish(public: u16) -> Result<(), String> {
     run(&["funnel", &format!("--https={public}"), "off"]).await.map(|_| ())
 }
 
-pub async fn reachable(url: &str) -> Result<(), String> {
+pub async fn reachable(net: &crate::net::Net, url: &str) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|e| e.to_string())?;
     let host = parsed.host_str().ok_or("the public link has no host")?.to_string();
     let port = parsed.port_or_known_default().unwrap_or(443);
     let mut ask = url::Url::parse("https://cloudflare-dns.com/dns-query").map_err(|e| e.to_string())?;
     ask.query_pairs_mut().append_pair("name", &host).append_pair("type", "A");
-    let answer: serde_json::Value = crate::net::client()
+    let answer: serde_json::Value = net
+        .client(crate::net::Zone::Public)
         .get(ask)
         .header("accept", "application/dns-json")
         .send()

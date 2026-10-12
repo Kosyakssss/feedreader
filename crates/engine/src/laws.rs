@@ -3,7 +3,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use proptest::prelude::*;
 
-use crate::net::{check_url, parse_url, public_ip, public_v4};
+use crate::net::{check_url, may_navigate, parse_url, written_zone, zone_ip, zone_v4};
 use crate::parse::{NewEntry, parse_feed};
 use crate::store::feed_id;
 use crate::types::{Appearance, Change, Command, Lines, Mode, Rule, Scope, Settings};
@@ -178,18 +178,19 @@ proptest! {
     }
 
     #[test]
-    fn outbound_never_reaches_private_ipv4(octets in any::<[u8; 4]>()) {
+    fn outbound_zone_is_the_same_however_ipv4_is_written(octets in any::<[u8; 4]>()) {
         let ip = Ipv4Addr::from(octets);
-        let allowed = check_url(&url::Url::parse(&format!("http://{ip}/")).expect("url")).is_ok();
-        prop_assert_eq!(allowed, public_v4(ip));
+        let dotted = url::Url::parse(&format!("http://{ip}/")).expect("url");
+        prop_assert_eq!(written_zone(&dotted), zone_v4(ip));
+        prop_assert!(check_url(&dotted).is_ok());
         let decimal = u32::from(ip);
         if let Ok(u) = url::Url::parse(&format!("http://{decimal}/")) {
-            prop_assert_eq!(check_url(&u).is_ok(), public_v4(ip));
+            prop_assert_eq!(written_zone(&u), zone_v4(ip));
         }
     }
 
     #[test]
-    fn outbound_never_reaches_private_ipv4_through_ipv6(octets in any::<[u8; 4]>(), form in 0u8..4) {
+    fn outbound_ipv4_inside_ipv6_keeps_its_zone(octets in any::<[u8; 4]>(), form in 0u8..4) {
         let v4 = Ipv4Addr::from(octets);
         let n = u32::from(v4) as u128;
         let v6 = match form {
@@ -198,11 +199,15 @@ proptest! {
             2 => Ipv6Addr::from((0x2002u128 << 112) | (n << 80)),
             _ => Ipv6Addr::from((0x2001_0000u128 << 96) | (!(n as u32)) as u128),
         };
-        if !public_v4(v4) {
-            prop_assert!(!public_ip(v6.into()));
-            let u = url::Url::parse(&format!("http://[{v6}]/")).expect("url");
-            prop_assert!(check_url(&u).is_err());
-        }
+        prop_assert_eq!(zone_ip(v6.into()), zone_v4(v4));
+        let u = url::Url::parse(&format!("http://[{v6}]/")).expect("url");
+        prop_assert_eq!(written_zone(&u), zone_v4(v4));
+    }
+
+    #[test]
+    fn web_pane_never_goes_deeper_than_where_it_opened(from in any::<[u8; 4]>(), to in any::<[u8; 4]>()) {
+        let (from, to) = (Ipv4Addr::from(from), Ipv4Addr::from(to));
+        prop_assert_eq!(may_navigate(&format!("http://{from}/"), &format!("https://{to}/x")), zone_v4(to) <= zone_v4(from));
     }
 
     #[test]
