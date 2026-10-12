@@ -42,6 +42,7 @@ pub struct Scroll {
     pub item: f32,
     pub count: usize,
     pub view: f32,
+    pub above: usize,
     pub(crate) key: Option<u64>,
     pub(crate) cursor: Option<u64>,
     pending: f32,
@@ -65,6 +66,9 @@ impl Scroll {
             && !(self.top < l.count && key(self.top) == k)
             && let Some(i) = (0..l.count).find(|&i| key(i) == k)
         {
+            if i > self.top {
+                self.above += i - self.top;
+            }
             self.top = i;
         }
         let cursor = l.cursor.filter(|&c| c < l.count);
@@ -79,6 +83,7 @@ impl Scroll {
             self.set_total(self.total());
         }
         self.key = (l.count > 0).then(|| key(self.top));
+        self.above = self.above.min(self.top);
     }
 
     pub fn total(&self) -> f32 {
@@ -119,16 +124,20 @@ impl Scroll {
 
     pub fn wheel(&mut self, dy: f32, step: Option<f32>) -> bool {
         let before = self.total();
-        match step {
-            Some(step) if step > 0.0 => {
-                self.pending -= dy;
-                let steps = (self.pending / step).trunc();
-                self.pending -= steps * step;
-                let target = ((before / step).round() + steps) * step;
-                self.set_total(target);
-            }
-            _ => self.set_total(before - dy),
+        let Some(step) = step.filter(|s| *s > 0.0) else {
+            self.set_total(before - dy);
+            return self.total() != before;
+        };
+        if self.pending * dy > 0.0 {
+            self.pending = 0.0;
         }
+        self.pending -= dy;
+        let steps = (self.pending / step).trunc();
+        if steps == 0.0 {
+            return false;
+        }
+        self.pending -= steps * step;
+        self.set_total(((before / step).round() + steps) * step);
         let moved = self.total() != before;
         if !moved {
             self.pending = 0.0;

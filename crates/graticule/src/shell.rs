@@ -265,6 +265,7 @@ struct Running<A: App> {
     state: State,
     scrollables: Vec<(Rect, Id)>,
     tracks: Vec<(Rect, Id)>,
+    jumps: Vec<(Rect, Id)>,
     thumb: Option<(Id, Rect, f32)>,
     runs: Vec<Run>,
     pictures: Vec<(Rect, &'static str)>,
@@ -348,6 +349,7 @@ impl<A: App> Running<A> {
         self.hits = std::mem::take(&mut scene.hits);
         self.scrollables = std::mem::take(&mut scene.scrollables);
         self.tracks = std::mem::take(&mut scene.tracks);
+        self.jumps = std::mem::take(&mut scene.jumps);
         self.focused = scene.focused.take();
         self.fields = std::mem::take(&mut scene.fields);
         drop(scene);
@@ -641,6 +643,10 @@ impl<A: App> Running<A> {
             let _ = w.focus_parent();
         }
         let (x, y) = self.mouse;
+        if let Some(&(_, id)) = self.jumps.iter().rev().find(|(r, _)| r.contains(x, y)) {
+            self.state.scroll_to(id, 0.0);
+            return;
+        }
         if let Some(&(track, id)) = self.tracks.iter().rev().find(|(r, _)| r.contains(x, y)) {
             self.left_down = true;
             let min = self.metrics.cell_h;
@@ -895,6 +901,7 @@ impl<A: App> ApplicationHandler<Signal<A::Wake>> for Shell<A> {
             state: State::default(),
             scrollables: Vec::new(),
             tracks: Vec::new(),
+            jumps: Vec::new(),
             thumb: None,
             runs: Vec::new(),
             pictures: Vec::new(),

@@ -11,6 +11,7 @@ use crate::kit::{Kind, Tone, Value};
 use crate::proof::{Proofs, Status, Variant, file_name, lines_name, write_png};
 use crate::shell::{self, App, Config, Ctx, Cursor, Effect, FrameStats, Offscreen, Painted};
 use crate::state::{Id, Scrolling, State};
+use crate::dates::{DateForm, Dates, TimeForm};
 use crate::ui::{DARK, LIGHT, LineStyle, List, Palette, Scene};
 
 pub type Paint = Box<dyn Fn(&mut Scene<Hit>, Area, &Sandbox)>;
@@ -84,6 +85,8 @@ pub enum Cmd {
     Grid,
     Frame,
     Scrolling,
+    Date,
+    Time,
     Blur,
     Approve,
     Diff,
@@ -122,6 +125,7 @@ pub struct Bench {
     pub grid: bool,
     pub frame: Frame,
     pub scrolling: Scrolling,
+    pub dates: Dates,
     pub sandbox: Sandbox,
     pub proofs: Proofs,
     diff: bool,
@@ -145,6 +149,7 @@ impl Bench {
             grid: false,
             frame: Frame::Fit,
             scrolling: Scrolling::Smooth,
+            dates: Dates::default(),
             sandbox: Sandbox::default(),
             proofs: Proofs::new(title),
             diff: false,
@@ -200,6 +205,19 @@ impl Bench {
                 self.scrolling = match self.scrolling {
                     Scrolling::Rows => Scrolling::Smooth,
                     Scrolling::Smooth => Scrolling::Rows,
+                }
+            }
+            Cmd::Date => {
+                self.dates.date = match self.dates.date {
+                    DateForm::Absolute => DateForm::Relative,
+                    DateForm::Relative => DateForm::Absolute,
+                }
+            }
+            Cmd::Time => {
+                self.dates.time = match self.dates.time {
+                    TimeForm::Absolute => TimeForm::Off,
+                    TimeForm::Off => TimeForm::Relative,
+                    TimeForm::Relative => TimeForm::Absolute,
                 }
             }
             Cmd::Blur => self.sandbox.focused = None,
@@ -266,6 +284,7 @@ impl Bench {
 
     pub fn paint(&mut self, s: &mut Scene<Hit>, images: &mut Images) {
         s.state.scrolling = self.scrolling;
+        s.dates = self.dates;
         let variant = self.variant(s.palette == *DARK);
         self.variant = Some(variant);
         if let Some(sheet) = self.sheets.get(self.current) {
@@ -295,11 +314,17 @@ impl Bench {
         let cols = s.cols(&of, prop);
         s.write(Area::new(x, top.row, cols, 1), &of, prop, pal.muted);
         x += cols + 4;
-        let controls: [(Cmd, &str, String); 5] = [
+        let width = match self.frame.cols() {
+            Some(cols) => format!("{cols} cols"),
+            None => "window".into(),
+        };
+        let controls: [(Cmd, &str, String); 7] = [
             (Cmd::Style, "lines", lines_name(self.style).into()),
             (Cmd::Appearance, "appearance", format!("{:?}", self.appearance).to_lowercase()),
-            (Cmd::Frame, "frame", format!("{:?}", self.frame).to_lowercase()),
+            (Cmd::Frame, "width", width),
             (Cmd::Scrolling, "scrolling", format!("{:?}", self.scrolling).to_lowercase()),
+            (Cmd::Date, "date", format!("{:?}", self.dates.date).to_lowercase()),
+            (Cmd::Time, "time", format!("{:?}", self.dates.time).to_lowercase()),
             (Cmd::Grid, "grid", if self.grid { "on".into() } else { "off".into() }),
         ];
         for (cmd, label, value) in controls {
@@ -457,7 +482,9 @@ pub fn registry() -> &'static Registry<Cmd, Bench> {
                 c(Cmd::Blur, vec![Chord::key(Key::Escape)], |_| "leave the field".into(), |b| !idle(b)),
                 c(Cmd::Style, vec![], |_| "next line style".into(), |_| true),
                 c(Cmd::Appearance, vec![], |_| "next appearance".into(), |_| true),
-                c(Cmd::Frame, vec![], |_| "next frame".into(), |_| true),
+                c(Cmd::Frame, vec![], |_| "next width".into(), |_| true),
+                c(Cmd::Date, vec![], |_| "switch dates between absolute and relative".into(), |_| true),
+                c(Cmd::Time, vec![], |_| "show times, hide them or make them relative".into(), |_| true),
                 c(Cmd::Scrolling, vec![], |_| "switch scrolling".into(), |_| true),
                 c(Cmd::Grid, vec![], |_| "show or hide the grid".into(), |_| true),
                 c(Cmd::Approve, vec![], |_| "approve this sheet as its proof".into(), |_| true),

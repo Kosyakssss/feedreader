@@ -1,3 +1,4 @@
+use crate::dates::Moment;
 use crate::grid::Area;
 use crate::ui::{Rect, Scene};
 
@@ -13,7 +14,7 @@ pub enum Tone {
 pub enum Value<'a> {
     Text(&'a str),
     Count(&'a str),
-    Date(&'a str),
+    Date(Moment),
     Version(&'a str),
     State(&'a str, Tone),
     Product(&'a str),
@@ -53,11 +54,12 @@ impl<H: Clone> Scene<'_, H> {
                 self.write(at.at(0, 0, cols, 1), t, self.m.prop(400.0), pal.danger);
                 cols
             }
-            Value::Date(t) => {
-                let a = at.at(0, 0, boxed(t), 1);
+            Value::Date(m) => {
+                let t = self.dates.format(m, self.now);
+                let a = at.at(0, 0, boxed(&t), 1);
                 let r = self.chip(a);
                 self.fill(r, pal.link);
-                self.centered(r, t, mono, pal.bg);
+                self.centered(r, &t, mono, pal.bg);
                 a.cols
             }
             Value::State(t, tone) => {

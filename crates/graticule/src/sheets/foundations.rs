@@ -171,7 +171,7 @@ pub(super) fn values(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
     let rows: [(&str, Value); 12] = [
         ("text", Value::Text("Plain facts are plain text")),
         ("count", Value::Count("1,284")),
-        ("date", Value::Date("2026-10-11")),
+        ("date", Value::Date(Moment(s.now.0 - 7_200))),
         ("version", Value::Version("v0.1.0")),
         ("state, ok", Value::State("prod", Tone::Ok)),
         ("state, neutral", Value::State("hub", Tone::Neutral)),
@@ -190,8 +190,30 @@ pub(super) fn values(s: &mut Scene<Hit>, mut a: Area, _: &Sandbox) {
     let row = a.take_top(2);
     caption(s, row.at(0, 0, 18, 1), "in a line");
     let mut col = 20;
-    for v in [Value::Product("SP-01"), Value::State("prod", Tone::Ok), Value::Version("v0.1.0"), Value::Date("2026-10-11"), Value::Count("3 feeds")] {
+    for v in [Value::Product("SP-01"), Value::State("prod", Tone::Ok), Value::Version("v0.1.0"), Value::Date(Moment(s.now.0 - 90_000)), Value::Count("3 feeds")] {
         col += s.value(row.at(col, 0, row.cols - col, 1), v) + 1;
+    }
+    a.take_top(1);
+    caption(s, a.take_top(1), "Dates in every form; \"date\" and \"time\" above choose the one used everywhere.");
+    let forms = [
+        ("date and time", Dates { date: DateForm::Absolute, time: TimeForm::Absolute }),
+        ("date only", Dates { date: DateForm::Absolute, time: TimeForm::Off }),
+        ("relative date, time", Dates { date: DateForm::Relative, time: TimeForm::Absolute }),
+        ("relative date", Dates { date: DateForm::Relative, time: TimeForm::Off }),
+        ("relative", Dates { date: DateForm::Relative, time: TimeForm::Relative }),
+    ];
+    let head = a.take_top(1);
+    for (j, (name, _)) in forms.iter().enumerate() {
+        caption(s, head.at(j as i32 * 22, 0, 21, 1), name);
+    }
+    let mono = s.m.mono();
+    let ink = s.palette.ink;
+    for ago in [20, 1_500, 18_000, 86_400, 345_600, 1_814_400, 13_000_000, 70_000_000] {
+        let row = a.take_top(1);
+        for (j, (_, form)) in forms.iter().enumerate() {
+            let text = form.format(Moment(s.now.0 - ago), s.now);
+            s.write(row.at(j as i32 * 22, 0, 21, 1), &text, mono, ink);
+        }
     }
 }
 

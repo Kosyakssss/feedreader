@@ -27,7 +27,8 @@ impl<H: Clone> Scene<'_, H> {
                 self.cols(t, style)
             }
             Value::Count(t) => t.chars().count() as i32,
-            Value::Date(t) | Value::Version(t) | Value::State(t, _) | Value::Product(t) | Value::Code(t) | Value::Mode(t) => t.chars().count() as i32 + 1,
+            Value::Date(m) => self.dates.format(m, self.now).chars().count() as i32 + 1,
+            Value::Version(t) | Value::State(t, _) | Value::Product(t) | Value::Code(t) | Value::Mode(t) => t.chars().count() as i32 + 1,
         }
     }
 

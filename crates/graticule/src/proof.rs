@@ -100,6 +100,7 @@ impl Proofs {
         let mut images = Images::new(|| {});
         let (quads, ms) = screen.paint(v.lines, palette, None, |s| {
             let area = s.screen();
+            s.now = crate::dates::Moment(1_791_806_400);
             (sheet.paint)(s, area, &sandbox);
         });
         let pixels = screen.capture(&quads, palette.bg, &mut images);

@@ -189,12 +189,15 @@ pub struct Scene<'a, H> {
     pub fields: Vec<Rect>,
     pub scrollables: Vec<(Rect, Id)>,
     pub tracks: Vec<(Rect, Id)>,
+    pub jumps: Vec<(Rect, Id)>,
     pub pressed: bool,
     pub selectable: bool,
     pub runs: Vec<Run>,
     pub pictures: Vec<(Rect, &'static str)>,
     pub sensitive: Vec<Rect>,
     pub live: bool,
+    pub dates: crate::dates::Dates,
+    pub now: crate::dates::Moment,
     shift: (f32, f32),
     clips: Vec<[f32; 4]>,
     pen: Vec<Rect>,
@@ -271,12 +274,15 @@ impl<'a, H> Scene<'a, H> {
             fields: Vec::new(),
             scrollables: Vec::new(),
             tracks: Vec::new(),
+            jumps: Vec::new(),
             pressed: false,
             selectable: true,
             runs: Vec::new(),
             pictures: Vec::new(),
             sensitive: Vec::new(),
             live: false,
+            dates: crate::dates::Dates::default(),
+            now: crate::dates::Moment::now(),
             shift: (0.0, 0.0),
             clips: vec![[0.0, 0.0, m.width, m.height]],
             pen: Vec::new(),
@@ -446,10 +452,26 @@ impl<'a, H> Scene<'a, H> {
             item(self, i, a);
         }
         self.shift = shift;
+        if s.above > 0 {
+            self.new_above(body, rect, list.id, s.above);
+        }
         self.pop_clip();
         let track = self.rect(bar);
         self.scrollbar(track, s.total(), s.content());
         self.tracks.push((track, list.id));
+    }
+
+    fn new_above(&mut self, body: Area, rect: Rect, id: Id, above: usize) {
+        let pal = self.palette;
+        let band = Rect::new(rect.x, rect.y, rect.w, self.m.cell_h);
+        self.fill(band, if self.hovered(band) { pal.hover } else { pal.bg });
+        let t = self.hair();
+        self.fill(Rect::new(band.x, band.bottom() - t, band.w, t), pal.rule);
+        let text = format!("\u{25B4} {above} new above \u{00B7} go to the top");
+        let mono = self.m.mono();
+        let cols = text.chars().count() as i32;
+        self.write(Area::new(body.col + 1, body.row, cols.min(body.cols - 1), 1), &text, mono, pal.link);
+        self.jumps.push((band, id));
     }
 
     pub fn scroll(&mut self, id: Id, area: Area, content: f32, f: impl FnOnce(&mut Self, Area)) {

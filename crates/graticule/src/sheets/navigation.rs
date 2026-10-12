@@ -29,7 +29,7 @@ pub(super) fn feedback(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
     a.take_top(1);
     caption(s, a.take_top(1), "status line");
     let line = a.take_top(1);
-    s.status_line(line, &[Value::State("hub", Tone::Neutral), Value::Count("1,284 entries")], "j k move   / filter", &[Value::Date("10:52"), Value::Product("DK-01")]);
+    s.status_line(line, &[Value::State("hub", Tone::Neutral), Value::Count("1,284 entries")], "j k move   / filter", &[Value::Date(Moment(s.now.0 - 420)), Value::Product("DK-01")]);
     a.take_top(2);
     caption(s, a.take_top(1), "message line");
     let msg = Id::new("sheet.message");
