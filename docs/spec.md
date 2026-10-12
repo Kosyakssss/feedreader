@@ -241,7 +241,7 @@ crates/feedreader  the binary: desktop app, headless `serve`, command line
 - Original pages, embeds, audio and video live in the web pane: a child web view placed over the reading area. It is the only place third-party content loads.
 
 ### 5.8 Outbound fetching safety
-- Only http/https; no credentials in URLs. Block `localhost`, `*.localhost`, `.local`, and 0.0.0.0/8, 10/8, 100.64/10, 127/8, 169.254/16, 172.16/12, 192.0.0/24, 192.0.2/24, 192.88.99/24, 192.168/16, 198.18/15, 198.51.100/24, 203.0.113/24, 224/3, ::/128, ::1/128, fc00::/7, fe80::/10, fec0::/10, ff00::/8, 100::/64, 2001:db8::/32, including IPv4 embedded in IPv6 transition ranges (6to4, Teredo, NAT64, mapped/compatible).
+- Only http/https; no credentials in URLs. Block `localhost`, `*.localhost`, `.local`, and 0.0.0.0/8, 10/8, 100.64/10, 127/8, 169.254/16, 172.16/12, 192.0.0/24, 192.0.2/24, 192.88.99/24, 192.168/16, 198.51.100/24, 203.0.113/24, 224/3, ::/128, ::1/128, fc00::/7, fe80::/10, fec0::/10, ff00::/8, 100::/64, 2001:db8::/32, including IPv4 embedded in IPv6 transition ranges (6to4, Teredo, NAT64, mapped/compatible). 198.18/15 stays allowed: fake-IP proxies (Clash, Surge and the like) answer every DNS lookup from it.
 - Resolve every A/AAAA record and require all public; connect to the resolved address (no rebinding window). Redirects at most 5, each checked.
 - Timeouts: feed 8 s, discovery 10 s, probes 5 s. Body caps: 10 MB feeds, 2 MB HTML discovery; media caps per §5.6.
 - Every engine uses this fetcher. Original pages are real web views and are not proxied.
