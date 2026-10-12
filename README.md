@@ -17,7 +17,7 @@ Install [Rust](https://rustup.rs), then from the repository:
 cargo run -p bindery -- install -p feedreader   # builds Feedreader.app into ~/Applications and links ~/.local/bin/feedreader
 ```
 
-or, without installing anything, `cargo run --release`. Bindery (BD-01) is Graticule's packager; `cargo install --path crates/bindery` puts it on your path, and then `bindery list`, `bindery check` and `bindery update` keep installed apps current (`bindery service install` checks once a day, quietly).
+or, without installing anything, `cargo run --release` (run `cargo run -p bindery -- fonts` once first so Chinese, Japanese and Korean paint in Plex). Bindery (BD-01) is Graticule's packager; `cargo install --path crates/bindery` puts it on your path, and then `bindery list`, `bindery check` and `bindery update` keep installed apps current (`bindery service install` checks once a day, quietly).
 
 ## Graticule's tools
 

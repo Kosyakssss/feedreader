@@ -9,6 +9,7 @@ const USAGE: &str = "BD-01 BINDERY: builds, installs and updates Graticule apps
   bindery check
   bindery update [NAME]
   bindery remove NAME
+  bindery fonts [PATH]
   bindery service install | uninstall
 
 An app describes itself in its Cargo.toml:
@@ -140,6 +141,55 @@ fn plist(m: &Manifest, executable: &str) -> String {
     )
 }
 
+fn font_list(root: &Path) -> Result<Option<PathBuf>, String> {
+    let out = run(Command::new("cargo").args(["metadata", "--format-version", "1", "--manifest-path"]).arg(root.join("Cargo.toml")))?;
+    let meta: serde_json::Value = serde_json::from_str(&out).map_err(|e| e.to_string())?;
+    let graticule = meta["packages"].as_array().and_then(|p| p.iter().find(|p| p["name"] == "graticule"));
+    Ok(graticule.and_then(|g| g["manifest_path"].as_str()).map(|m| Path::new(m).with_file_name("assets").join("fonts")))
+}
+
+fn sha256(path: &Path) -> Option<String> {
+    let out = run(Command::new("shasum").args(["-a", "256"]).arg(path)).ok()?;
+    out.split_whitespace().next().map(str::to_string)
+}
+
+fn fetch_fonts(assets: &Path) -> Result<Vec<PathBuf>, String> {
+    let Ok(list) = std::fs::read_to_string(assets.join("fetched.txt")) else { return Ok(Vec::new()) };
+    let cache = dirs::data_dir().ok_or("no data folder on this system")?.join("Graticule").join("Fonts");
+    std::fs::create_dir_all(&cache).map_err(|e| format!("{}: {e}", cache.display()))?;
+    let mut fonts = Vec::new();
+    for line in list.lines().filter(|l| !l.trim().is_empty()) {
+        let (sum, url) = line.split_once(' ').ok_or(format!("{}: unreadable line {line}", assets.display()))?;
+        let name = url.rsplit('/').next().unwrap_or(url);
+        let path = cache.join(name);
+        if sha256(&path).as_deref() != Some(sum) {
+            println!("fetching {name}");
+            let part = cache.join(format!("{name}.part"));
+            run(Command::new("curl").args(["--fail", "--silent", "--show-error", "--location", "--retry", "3", "--output"]).arg(&part).arg(url))?;
+            if sha256(&part).as_deref() != Some(sum) {
+                let _ = std::fs::remove_file(&part);
+                return Err(format!("{name} from {url} doesn't match its checksum"));
+            }
+            std::fs::rename(&part, &path).map_err(|e| e.to_string())?;
+        }
+        fonts.push(path);
+    }
+    let license = assets.join("OFL.txt");
+    if license.is_file() {
+        let to = cache.join("OFL.txt");
+        std::fs::copy(&license, &to).map_err(|e| e.to_string())?;
+        fonts.push(to);
+    }
+    Ok(fonts)
+}
+
+fn fonts(root: &Path) -> Result<(), String> {
+    let assets = font_list(root)?.ok_or(format!("{} doesn't use Graticule", root.display()))?;
+    let fonts = fetch_fonts(&assets)?;
+    println!("{} files in {}", fonts.len(), fonts.first().and_then(|f| f.parent()).unwrap_or(Path::new(".")).display());
+    Ok(())
+}
+
 fn bundle(m: &Manifest) -> Result<PathBuf, String> {
     if !cfg!(target_os = "macos") {
         return Err("Bindery bundles macOS apps for now; Linux and Windows come later".into());
@@ -153,6 +203,17 @@ fn bundle(m: &Manifest) -> Result<PathBuf, String> {
     std::fs::create_dir_all(app.join("Contents").join("Resources")).map_err(|e| e.to_string())?;
     std::fs::copy(m.target.join("release").join(&m.package), macos.join(&m.package)).map_err(|e| format!("copying the binary: {e}"))?;
     std::fs::write(app.join("Contents").join("Info.plist"), plist(m, &m.package)).map_err(|e| e.to_string())?;
+    match font_list(&m.root).and_then(|assets| assets.map_or(Ok(Vec::new()), |a| fetch_fonts(&a))) {
+        Ok(fonts) if !fonts.is_empty() => {
+            let dir = app.join("Contents").join("Resources").join("Fonts");
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            for font in fonts {
+                std::fs::copy(&font, dir.join(font.file_name().unwrap_or_default())).map_err(|e| format!("copying {}: {e}", font.display()))?;
+            }
+        }
+        Ok(_) => {}
+        Err(e) => eprintln!("fonts not included, Chinese, Japanese and Korean will use the system's until the next update: {e}"),
+    }
     if let Err(e) = run(Command::new("codesign").args(["--force", "--sign", "-"]).arg(&app)) {
         eprintln!("not signed: {e}");
     }
@@ -393,6 +454,7 @@ fn main() {
             Some(name) => remove(name),
             None => Err("which app? `bindery list` shows them".into()),
         },
+        Some("fonts") => fonts(Path::new(positional.first().map(|s| s.as_str()).unwrap_or("."))),
         Some("service") => match positional.first().map(|s| s.as_str()) {
             Some("install") => service(true),
             Some("uninstall") => service(false),

@@ -9,7 +9,7 @@ use parley::{
 use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use swash::zeno::{Format, Vector};
 
-use crate::fonts::Fonts;
+use crate::fonts::{Fonts, Han};
 use crate::gpu::{ATLAS, Quad};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -199,18 +199,19 @@ impl Text {
     }
 
     fn prepare(&mut self, spans: &[(&str, SpanStyle)]) {
+        let han = Han::of(&spans.iter().map(|(t, _)| *t).collect::<String>());
         let mut complete = true;
         for (t, _) in spans {
-            complete &= self.fonts.prepare(t);
+            complete &= self.fonts.prepare(t, han);
         }
         if complete || !matches!(self.fallback, Fallback::Off) {
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
         let wake = self.wake.clone();
-        let loaded = self.fonts.loaded();
+        let seed = self.fonts.seed();
         let started = std::thread::Builder::new().name("font fallback".into()).spawn(move || {
-            let _ = tx.send(Fonts::with_system(loaded));
+            let _ = tx.send(Fonts::with_system(seed));
             if let Some(w) = wake {
                 w();
             }
@@ -286,6 +287,9 @@ impl Text {
             b.push_default(StyleProperty::FontFamily(FontFamily::named(sans)));
             b.push_default(StyleProperty::FontSize(size));
             b.push_default(StyleProperty::LineHeight(LineHeight::Absolute(line)));
+            if let Some(locale) = Han::of(&text).locale() {
+                b.push_default(StyleProperty::Locale(Some(locale)));
+            }
             let mut at = 0;
             for (t, s) in spans {
                 let r = at..at + t.len();
