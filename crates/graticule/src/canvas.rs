@@ -132,6 +132,58 @@ fn key(commands: &[Command], stroke: Option<f32>) -> u64 {
     h.finish()
 }
 
+fn flatten(commands: &[Command]) -> Vec<Vec<Point>> {
+    let mut lines: Vec<Vec<Point>> = Vec::new();
+    let mut start = Point::new(0.0, 0.0);
+    let mut at = start;
+    let curve = |lines: &mut Vec<Vec<Point>>, f: &dyn Fn(f32) -> Point| {
+        if let Some(line) = lines.last_mut() {
+            for i in 1..=12 {
+                line.push(f(i as f32 / 12.0));
+            }
+        }
+    };
+    for c in commands {
+        match *c {
+            Command::MoveTo(p) => {
+                lines.push(vec![p]);
+                start = p;
+                at = p;
+            }
+            Command::LineTo(p) => {
+                if let Some(line) = lines.last_mut() {
+                    line.push(p);
+                }
+                at = p;
+            }
+            Command::QuadTo(c1, p) => {
+                let a = at;
+                curve(&mut lines, &|t| {
+                    let u = 1.0 - t;
+                    Point::new(u * u * a.x + 2.0 * u * t * c1.x + t * t * p.x, u * u * a.y + 2.0 * u * t * c1.y + t * t * p.y)
+                });
+                at = p;
+            }
+            Command::CurveTo(c1, c2, p) => {
+                let a = at;
+                curve(&mut lines, &|t| {
+                    let u = 1.0 - t;
+                    let (b0, b1, b2, b3) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+                    Point::new(b0 * a.x + b1 * c1.x + b2 * c2.x + b3 * p.x, b0 * a.y + b1 * c1.y + b2 * c2.y + b3 * p.y)
+                });
+                at = p;
+            }
+            Command::Close => {
+                if let Some(line) = lines.last_mut() {
+                    line.push(start);
+                }
+                at = start;
+            }
+        }
+    }
+    lines
+}
+
 impl<H: Clone> Scene<'_, H> {
     fn commands(&self, shape: &Shape, sx: f32, sy: f32, dot: f32) -> Vec<Command> {
         match shape {
@@ -203,23 +255,36 @@ impl<H: Clone> Scene<'_, H> {
         }
         let mut dots = vec![0u8; w * h];
         let mut inks: Vec<Option<Ink>> = vec![None; cols * rows];
-        let (sx, sy) = (w as f32 / c.width.max(1e-6), h as f32 / c.height.max(1e-6));
+        let (sx, sy) = ((w - 1) as f32 / c.width.max(1e-6), (h - 1) as f32 / c.height.max(1e-6));
+        let mut set = |x: f32, y: f32, ink: Ink| {
+            let (x, y) = (x.round(), y.round());
+            if x < 0.0 || y < 0.0 || x >= w as f32 || y >= h as f32 {
+                return;
+            }
+            let (x, y) = (x as usize, y as usize);
+            dots[y * w + x] = 1;
+            let cell = &mut inks[(y / 4) * cols + x / 2];
+            if ink != Ink::Rule || cell.is_none() {
+                *cell = Some(ink);
+            }
+        };
         for m in c.marks {
-            let cmds = self.commands(&m.shape, sx, sy, 0.75);
-            let outline = Outline { path: Data::Commands(&cmds), stroke: m.stroke.map(|_| 1.0), even_odd: false, scale: 1.0 };
-            let (data, place) = crate::text::mask(cmds.as_slice(), &outline);
-            for y in 0..place.height as i32 {
-                for x in 0..place.width as i32 {
-                    let (dx, dy) = (x + place.left, y + place.top);
-                    if dx < 0 || dy < 0 || dx as usize >= w || dy as usize >= h {
-                        continue;
-                    }
-                    if data[(y * place.width as i32 + x) as usize] > 96 {
-                        dots[dy as usize * w + dx as usize] = 1;
-                        let cell = (dy as usize / 4) * cols + dx as usize / 2;
-                        inks[cell] = Some(if under.is_some() && m.id == under { Ink::Ink } else { m.ink });
+            let ink = if under.is_some() && m.id == under { Ink::Ink } else { m.ink };
+            match &m.shape {
+                Shape::Dot(x, y) => set(x * sx, y * sy, ink),
+                Shape::Path(p) if m.stroke.is_some() => {
+                    for line in flatten(&p.mapped(|q| Point::new(q.x * sx, q.y * sy))) {
+                        for pair in line.windows(2) {
+                            let (a, b) = (pair[0], pair[1]);
+                            let steps = (b.x - a.x).abs().max((b.y - a.y).abs()).ceil().max(1.0) as usize;
+                            for i in 0..=steps {
+                                let t = i as f32 / steps as f32;
+                                set(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, ink);
+                            }
+                        }
                     }
                 }
+                Shape::Path(_) => {}
             }
         }
         const BITS: [[u32; 2]; 4] = [[0x01, 0x08], [0x02, 0x10], [0x04, 0x20], [0x40, 0x80]];

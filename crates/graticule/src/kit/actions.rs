@@ -13,10 +13,11 @@ impl<H: Clone> Scene<'_, H> {
     pub fn button(&mut self, at: Area, label: &str, kind: Kind, hit: Option<H>) -> i32 {
         let pal = self.palette;
         let mono = self.m.mono();
-        let cols = label.chars().count() as i32 + 3;
+        let ascii = self.style == LineStyle::Ascii;
+        let cols = label.chars().count() as i32 + if ascii { 4 } else { 3 };
         let a = at.at(0, 0, cols, 1);
         let outer = self.rect(a);
-        if self.style == LineStyle::Ascii {
+        if ascii {
             let ink = if hit.is_none() { pal.faint } else if kind == Kind::Danger { pal.danger } else { pal.ink };
             if hit.is_some() && self.hovered(outer) {
                 self.fill(outer, pal.hover);

@@ -1,6 +1,13 @@
 use crate::grid::Area;
 use crate::ui::{LineStyle, Rect, Scene};
 
+pub struct Choice<'a> {
+    pub label: &'a str,
+    pub options: &'a [&'a str],
+    pub current: usize,
+    pub open: bool,
+}
+
 impl<H: Clone> Scene<'_, H> {
     fn labelled(&mut self, at: Area, lead: i32, label: &str, enabled: bool, hit: Option<H>) -> (Rect, i32) {
         let style = self.m.prop(400.0);
@@ -95,6 +102,44 @@ impl<H: Clone> Scene<'_, H> {
             self.hit(r, h);
         }
         a.cols
+    }
+
+    pub fn choice(&mut self, at: Area, c: Choice, toggle: H, pick: impl Fn(usize) -> H) -> i32 {
+        let pal = self.palette;
+        let mono = self.m.mono();
+        let lc = c.label.chars().count() as i32;
+        let value = c.options.get(c.current).copied().unwrap_or("");
+        let vc = value.chars().count() as i32 + 2;
+        let a = at.at(0, 0, lc + 1 + vc, 1);
+        let r = self.rect(a);
+        if self.hovered(r) {
+            self.fill(r, pal.hover);
+        }
+        self.write(at.at(0, 0, lc, 1), c.label, mono, pal.muted);
+        let chip = self.chip(at.at(lc + 1, 0, vc, 1));
+        let t = self.hair();
+        self.fill(Rect::new(chip.x, chip.bottom() - t, chip.w, t), pal.ink);
+        let shown = format!("{value} {}", if c.open { '\u{25B4}' } else { '\u{25BE}' });
+        self.text(&shown, mono, chip.x, (chip.y + (chip.h - self.m.cell_h) / 2.0).round(), None, pal.ink);
+        self.hit(r, toggle);
+        if !c.open {
+            return 1;
+        }
+        let n = c.options.len();
+        for (i, option) in c.options.iter().enumerate() {
+            let line = at.at(lc + 1, 1 + i as i32, at.cols - lc - 1, 1);
+            let branch = if i + 1 == n { "\u{2514}\u{2500} " } else { "\u{251C}\u{2500} " };
+            let oc = option.chars().count() as i32;
+            let row = self.rect(line.at(0, 0, 3 + oc + 1, 1));
+            if self.hovered(row) {
+                self.fill(row, pal.hover);
+            }
+            self.write(line.at(0, 0, 3, 1), branch, mono, pal.rule);
+            let style = if i == c.current { crate::text::TextStyle { weight: 600.0, ..mono } } else { mono };
+            self.write(line.at(3, 0, oc, 1), option, style, pal.ink);
+            self.hit(row, pick(i));
+        }
+        1 + n as i32
     }
 
     pub fn stepper(&mut self, at: Area, value: &str, less: Option<H>, more: Option<H>) -> i32 {

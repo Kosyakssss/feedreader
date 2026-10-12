@@ -9,7 +9,7 @@ mod commands;
 use crate::commands::{Chord, Command, Key, Registry};
 use crate::dates::{DateForm, Dates, Moment, TimeForm};
 use crate::field::Field;
-use crate::kit::{Align, Column, Found, Kind, Node, Palette, Place, Table, Tone, Value};
+use crate::kit::{Align, Choice, Column, Found, Kind, Node, Palette, Place, Table, Tone, Value};
 use crate::grid::Area;
 use crate::specimen::{Hit, Sandbox, Sheet};
 use crate::state::Id;

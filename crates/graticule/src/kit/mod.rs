@@ -9,6 +9,7 @@ mod values;
 pub use actions::Kind;
 pub use data::{Align, Column, Node, Table};
 pub use commands::{Found, Palette};
+pub use controls::Choice;
 pub use nav::Place;
 pub use values::{Tone, Value};
 

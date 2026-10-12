@@ -249,6 +249,7 @@ impl Bench {
             }
             Some(Hit::Pick(id, i)) => {
                 self.sandbox.picks.insert(id, i);
+                self.sandbox.on.remove(&id.named("open"));
             }
             Some(Hit::Bump(id)) => *self.sandbox.bumps.entry(id).or_default() += 1,
             Some(Hit::Focus(id, seed)) => {

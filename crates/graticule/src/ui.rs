@@ -888,8 +888,8 @@ impl<'a, H> Scene<'a, H> {
                 let mut y = track.y;
                 while y + self.m.cell_h <= track.bottom() + 0.5 {
                     let on = y + self.m.cell_h > thumb_y && y < thumb_y + thumb_h;
-                    let x = track.x + (track.w - self.m.cell_w * 2.0) / 2.0;
-                    self.text(if on { "##" } else { ".." }, mono, x, y, None, if on { ink } else { rule });
+                    let x = (track.x + (track.w - self.m.cell_w) / 2.0).round();
+                    self.text(if on { "#" } else { "|" }, mono, x, y, None, if on { ink } else { rule });
                     y += self.m.cell_h;
                 }
             }

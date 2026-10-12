@@ -44,7 +44,7 @@ pub(super) fn text_area(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
 }
 
 pub(super) fn choices(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
-    caption(s, a.take_top(1), "Click to change. A dropdown becomes a value that cycles in place.");
+    caption(s, a.take_top(1), "Click to change. A dropdown becomes a value that cycles in place, or a choice that opens inline.");
     a.take_top(1);
     let radio = Id::new("sheet.radio");
     caption(s, a.take_top(1), "radio");
@@ -64,6 +64,16 @@ pub(super) fn choices(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
     let i = sb.pick(cy).unwrap_or(0);
     s.cycle(a.take_top(1), "lines", options[i % options.len()], Some(Hit::Pick(cy, (i + 1) % options.len())));
     s.cycle(a.take_top(1), "disabled", "fixed", None);
+    a.take_top(1);
+    caption(s, a.take_top(1), "a choice opens into its options, pushing what's below down");
+    let ch = Id::new("sheet.choice");
+    let open = ch.named("open");
+    let options = ["follows the system", "light", "dark", "high contrast light", "high contrast dark", "sepia"];
+    let c = Choice { label: "appearance", options: &options, current: sb.pick(ch).unwrap_or(0), open: sb.on(open) };
+    let rows = s.choice(a, c, Hit::Toggle(open), |i| Hit::Pick(ch, i));
+    a.take_top(rows);
+    a.take_top(1);
+    caption(s, a.take_top(1), "this line moves down while the choice is open");
 }
 
 pub(super) fn steppers(s: &mut Scene<Hit>, mut a: Area, sb: &Sandbox) {
