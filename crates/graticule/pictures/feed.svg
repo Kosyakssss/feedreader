@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <title>Feed</title>
-  <circle cx="7" cy="25" r="3.5" fill="#1a1a1c"/>
-  <path d="M4 14a14 14 0 0 1 14 14" fill="none" stroke="#1a1a1c" stroke-width="3.5"/>
-  <path d="M4 4a24 24 0 0 1 24 24" fill="none" stroke="#1a1a1c" stroke-width="3.5"/>
-</svg>
