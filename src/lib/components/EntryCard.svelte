@@ -62,14 +62,14 @@
   </div>
   <div class="entry-actions">
     <button
-      class="btn-icon btn-star"
-      class:starred={entry.state.starred}
-      aria-pressed={!!entry.state.starred}
-      title={entry.state.starred ? 'Unstar' : 'Star'}
-      aria-label="Star entry"
-      onclick={() => reader.toggle(entry.id, 'starred')}
+      class="btn-icon btn-bookmark"
+      class:bookmarked={entry.state.bookmarked}
+      aria-pressed={!!entry.state.bookmarked}
+      title={entry.state.bookmarked ? 'Remove bookmark' : 'Bookmark'}
+      aria-label="Bookmark entry"
+      onclick={() => reader.toggle(entry.id, 'bookmarked')}
     >
-      <Icon name={entry.state.starred ? 'star-filled' : 'star'} />
+      <Icon name={entry.state.bookmarked ? 'bookmark-filled' : 'bookmark'} />
     </button>
     <button
       class="btn-icon btn-mark"
@@ -94,6 +94,11 @@
     display: flex;
     align-items: center;
     flex-shrink: 0;
+    margin-right: calc(var(--spacing-md) - var(--spacing-sm));
+  }
+
+  .entry-checkbox input {
+    margin: 0;
   }
 
   .entry-content {
@@ -124,12 +129,12 @@
     padding: 0;
   }
 
-  .btn-star.starred {
-    color: var(--star-accent);
+  .btn-bookmark.bookmarked {
+    color: var(--bookmark-accent);
   }
 
-  .btn-star.starred:hover {
-    color: var(--star-accent);
+  .btn-bookmark.bookmarked:hover {
+    color: var(--bookmark-accent);
   }
 
   .entry-card {

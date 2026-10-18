@@ -4,13 +4,13 @@
   import Icon from './Icon.svelte';
   let { selection }: { selection: Selection } = $props();
   const reader = useReader();
-  async function perform(action: 'read' | 'unread' | 'open' | 'star' | 'cancel') {
+  async function perform(action: 'read' | 'unread' | 'open' | 'bookmark' | 'cancel') {
     const entries = reader.entries.filter((entry) => selection.ids.has(entry.id));
     if (action === 'open') await reader.openMany(entries, 'selected');
     else if (action !== 'cancel')
       await reader.mark(
         entries.map((entry) => entry.id),
-        action === 'star' ? { starred: true } : { read: action === 'read' },
+        action === 'bookmark' ? { bookmarked: true } : { read: action === 'read' },
       );
     selection.clear();
   }
@@ -23,8 +23,8 @@
     <button class="btn" onclick={() => perform('open')}
       >Open<Icon name="external-link" class="ui-icon button-icon" /></button
     >
-    <button class="btn" onclick={() => perform('star')}
-      ><Icon name="star" class="ui-icon button-icon" />Star</button
+    <button class="btn" onclick={() => perform('bookmark')}
+      ><Icon name="bookmark" class="ui-icon button-icon" />Bookmark</button
     >
     <button class="btn" id="bulk-cancel" onclick={() => perform('cancel')}>Cancel</button>
   </div>{/if}

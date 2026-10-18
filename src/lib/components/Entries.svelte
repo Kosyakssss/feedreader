@@ -6,17 +6,17 @@
   import EntryCard from './EntryCard.svelte';
   import BulkActions from './BulkActions.svelte';
   import Icon from './Icon.svelte';
-  let { feedId, starred = false }: { feedId?: string; starred?: boolean } = $props();
+  let { feedId, bookmarked = false }: { feedId?: string; bookmarked?: boolean } = $props();
   const reader = useReader();
   let filter = $state<'all' | 'unread' | 'read'>('all'),
     limit = $state(50),
     root = $state<HTMLDivElement>();
   const source = $derived(
     reader.entries.filter(
-      (entry) => (!feedId || entry.feedId === feedId) && (!starred || entry.state.starred),
+      (entry) => (!feedId || entry.feedId === feedId) && (!bookmarked || entry.state.bookmarked),
     ),
   );
-  const counts = $derived(reader.counts(feedId, starred));
+  const counts = $derived(reader.counts(feedId, bookmarked));
   const filteredCount = $derived(
     filter === 'all' ? counts.total : filter === 'unread' ? counts.unread : counts.total - counts.unread,
   );
@@ -29,11 +29,11 @@
   const visible = $derived(filtered.slice(0, limit));
   const selection = new Selection(() => visible);
   const title = $derived(
-    starred ? 'Starred' : reader.feeds.feeds.find((feed) => feed.id === feedId)?.label || 'Feed',
+    bookmarked ? 'Bookmarks' : reader.feeds.feeds.find((feed) => feed.id === feedId)?.label || 'Feed',
   );
   $effect(() => {
     void feedId;
-    void starred;
+    void bookmarked;
     untrack(() => {
       filter = 'all';
       limit = 50;
@@ -93,9 +93,9 @@
       selection.move(key === 'j' ? 1 : -1, event.shiftKey);
       await tick();
       root?.querySelector('.entry-focused')?.scrollIntoView({ block: 'nearest' });
-    } else if (!starred && (key === 'h' || key === 'l')) {
+    } else if (!bookmarked && (key === 'h' || key === 'l')) {
       moveFilter(key === 'l' ? 1 : -1);
-    } else if (!starred && event.key === 'O') {
+    } else if (!bookmarked && event.key === 'O') {
       void reader.openMany(unread, 'unread');
     } else if (key === 'a') void markAll();
     else if (key === 'escape') {
@@ -106,7 +106,7 @@
       if (!entry) return;
       if (key === 'o') reader.open(entry);
       else if (key === 'm') reader.toggle(entry.id, 'read');
-      else if (key === 's') reader.toggle(entry.id, 'starred');
+      else if (key === 'b') reader.toggle(entry.id, 'bookmarked');
       else if (key === 'x') selection.toggle(entry.id, visible.indexOf(entry));
       else return;
     }
@@ -124,9 +124,13 @@
   onpointerup={(event) => selection.up(event)}
   onpointercancel={(event) => selection.up(event)}
 />
-<div class="page" data-page={starred ? 'starred' : feedId ? `feed:${feedId}` : 'timeline'} bind:this={root}>
-  {#if starred || feedId}<div class="page-header"><h1 class="page-title">{title}</h1></div>{/if}
-  {#if !starred}<div class="toolbar">
+<div
+  class="page"
+  data-page={bookmarked ? 'bookmarks' : feedId ? `feed:${feedId}` : 'timeline'}
+  bind:this={root}
+>
+  {#if bookmarked || feedId}<div class="page-header"><h1 class="page-title">{title}</h1></div>{/if}
+  {#if !bookmarked}<div class="toolbar">
       <div class="filter-tabs" role="group" aria-label="Filter entries">
         {#each ['all', 'unread', 'read'] as value}<button
             type="button"

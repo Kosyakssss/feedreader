@@ -8,7 +8,7 @@ export const load: LayoutServerLoad = ({ params, route, untrack }) => {
   return {
     initial: {
       entries:
-        path === '/' || path === '/starred' || feed ? store.entries(feed, path === '/starred', 50) : [],
+        path === '/' || path === '/bookmarks' || feed ? store.entries(feed, path === '/bookmarks', 50) : [],
       feeds: store.health(),
       config: config.read(),
       themes: themes.list(),

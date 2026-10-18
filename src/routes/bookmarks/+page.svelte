@@ -2,4 +2,4 @@
   import Entries from '$lib/components/Entries.svelte';
 </script>
 
-<Entries starred />
+<Entries bookmarked />

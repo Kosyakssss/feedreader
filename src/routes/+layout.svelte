@@ -30,7 +30,7 @@
       shortcuts?.toggle();
       event.preventDefault();
     } else if (!dialogOpen && ['1', '2', '3', '4'].includes(event.key)) {
-      const routes = ['/', '/starred', '/feeds', '/settings'];
+      const routes = ['/', '/bookmarks', '/feeds', '/settings'];
       void goto(base + routes[Number(event.key) - 1]);
       event.preventDefault();
     } else if (event.key.toLowerCase() === 'r' && !dialogOpen) {

@@ -8,9 +8,9 @@ export function mergeEntryState(current: EntryState = {}, incoming: EntryState =
     merged.read = incoming.read;
     merged.readAt = incoming.readAt;
   }
-  if (incoming.starred !== undefined && acceptsEntryState(current.starredAt, incoming.starredAt)) {
-    merged.starred = incoming.starred;
-    merged.starredAt = incoming.starredAt;
+  if (incoming.bookmarked !== undefined && acceptsEntryState(current.bookmarkedAt, incoming.bookmarkedAt)) {
+    merged.bookmarked = incoming.bookmarked;
+    merged.bookmarkedAt = incoming.bookmarkedAt;
   }
   return merged;
 }

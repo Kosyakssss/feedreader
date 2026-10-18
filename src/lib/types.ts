@@ -15,8 +15,8 @@ export interface Entry {
 export interface EntryState {
   read?: boolean;
   readAt?: number;
-  starred?: boolean;
-  starredAt?: number;
+  bookmarked?: boolean;
+  bookmarkedAt?: number;
 }
 export interface Config {
   maxBulkOpen: number;
@@ -85,7 +85,7 @@ export interface InitialData {
   feeds: FeedData;
   config: Config;
   themes: Theme[];
-  counts: { feedId: string; total: number; unread: number; starred: number; starredUnread: number }[];
+  counts: { feedId: string; total: number; unread: number; bookmarked: number; bookmarkedUnread: number }[];
   status: RefreshStatus;
 }
 export interface Snapshot extends Omit<InitialData, 'counts'> {

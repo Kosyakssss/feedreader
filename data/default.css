@@ -14,7 +14,7 @@
   --selection-background: light-dark(#dad8ce, #403e3c);
   --selection-foreground: light-dark(#282726, #cecdc3);
   --border: light-dark(rgba(40, 39, 38, 0.16), rgba(206, 205, 195, 0.17));
-  --star-accent: light-dark(#bc5215, #da702c);
+  --bookmark-accent: light-dark(#bc5215, #da702c);
   --danger: light-dark(#af3029, #d14d41);
   --warning: light-dark(#ad8301, #d0a215);
   --field-background: light-dark(rgba(40, 39, 38, 0.06), rgba(206, 205, 195, 0.08));

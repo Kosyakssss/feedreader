@@ -1,6 +1,6 @@
 # Feedreader
 
-A self-hosted feed reader with a web UI. The Bun server fetches feeds and keeps subscriptions, entries, and read/starred state in one place. It supports RSS, Atom, and JSON Feed, plus OPML import and export.
+A self-hosted feed reader with a web UI. The Bun server fetches feeds and keeps subscriptions, entries, and read and bookmark state in one place. It supports RSS, Atom, and JSON Feed, plus OPML import and export.
 
 ## Run the server
 

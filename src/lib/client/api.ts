@@ -30,7 +30,7 @@ export const api = {
   themes: () => request<Theme[]>('GET', '/api/themes'),
   startRefresh: (feedIds?: string[]) =>
     request<RefreshStatus>('POST', '/api/refresh', feedIds ? { feedIds } : undefined),
-  updateEntries: (entries: Record<string, Pick<EntryState, 'read' | 'starred'>>) =>
+  updateEntries: (entries: Record<string, Pick<EntryState, 'read' | 'bookmarked'>>) =>
     request<{ entryStates: Record<string, EntryState> }>('POST', '/api/state', { entries }),
   addFeed: (url: string) =>
     request<{ feed: Feed; entries: EnrichedEntry[]; removedIds: string[]; health: FeedHealth }>(

@@ -9,7 +9,7 @@
   const mobile = new MediaQuery('(max-width: 699px)');
   const links = [
     ['/', 'Timeline'],
-    ['/starred', 'Starred'],
+    ['/bookmarks', 'Bookmarks'],
     ['/feeds', 'Feeds'],
     ['/settings', 'Settings'],
   ];

@@ -17,13 +17,13 @@ async function body(request: Request): Promise<unknown> {
     error(400, 'Malformed JSON body');
   }
 }
-function statePatch(value: unknown): Record<string, Pick<EntryState, 'read' | 'starred'>> {
+function statePatch(value: unknown): Record<string, Pick<EntryState, 'read' | 'bookmarked'>> {
   if (!record(value) || !record(value.entries)) error(400, 'Invalid state payload');
   return Object.fromEntries(
     Object.entries(value.entries).map(([id, patch]) => {
       if (!record(patch)) error(400, 'Invalid state update');
-      const update: Pick<EntryState, 'read' | 'starred'> = {};
-      for (const key of ['read', 'starred'] as const)
+      const update: Pick<EntryState, 'read' | 'bookmarked'> = {};
+      for (const key of ['read', 'bookmarked'] as const)
         if (key in patch) {
           if (typeof patch[key] !== 'boolean') error(400, `Invalid ${key} state`);
           update[key] = patch[key];

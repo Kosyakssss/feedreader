@@ -14,7 +14,7 @@ import {
 import { api } from './api';
 import { mergeEntryState, safeHttpUrl } from './entries';
 
-type Updates = Record<string, Pick<EntryState, 'read' | 'starred'>>;
+type Updates = Record<string, Pick<EntryState, 'read' | 'bookmarked'>>;
 type Packet = { id: number; data: SharedEventPayload };
 export const readerKey = Symbol('reader');
 export const useReader = () => getContext<Reader>(readerKey);
@@ -35,15 +35,15 @@ export class Reader {
   private totals = $derived.by(() => {
     const result = new Map<
       string,
-      { total: number; unread: number; starred: number; starredUnread: number }
+      { total: number; unread: number; bookmarked: number; bookmarkedUnread: number }
     >();
     for (const entry of this.entries) {
-      const count = result.get(entry.feedId) ?? { total: 0, unread: 0, starred: 0, starredUnread: 0 };
+      const count = result.get(entry.feedId) ?? { total: 0, unread: 0, bookmarked: 0, bookmarkedUnread: 0 };
       count.total++;
       if (!entry.state.read) count.unread++;
-      if (entry.state.starred) {
-        count.starred++;
-        if (!entry.state.read) count.starredUnread++;
+      if (entry.state.bookmarked) {
+        count.bookmarked++;
+        if (!entry.state.read) count.bookmarkedUnread++;
       }
       result.set(entry.feedId, count);
     }
@@ -80,7 +80,7 @@ export class Reader {
   setRefreshAnimation(active: boolean): void {
     this.refreshAnimation = active;
   }
-  counts(feedId?: string, starred = false): { total: number; unread: number } {
+  counts(feedId?: string, bookmarked = false): { total: number; unread: number } {
     const rows = this.complete
       ? feedId
         ? [this.totals.get(feedId)]
@@ -88,8 +88,8 @@ export class Reader {
       : this.initialCounts.filter((row) => !feedId || row.feedId === feedId);
     return rows.reduce(
       (sum, row) => ({
-        total: sum.total + (row ? (starred ? row.starred : row.total) : 0),
-        unread: sum.unread + (row ? (starred ? row.starredUnread : row.unread) : 0),
+        total: sum.total + (row ? (bookmarked ? row.bookmarked : row.total) : 0),
+        unread: sum.unread + (row ? (bookmarked ? row.bookmarkedUnread : row.unread) : 0),
       }),
       { total: 0, unread: 0 },
     );
@@ -254,9 +254,9 @@ export class Reader {
     this.entries = this.entries.map((entry) => {
       const state = { ...(this.saved.get(entry.id) ?? entry.state), ...optimistic.get(entry.id) };
       return state.read === entry.state.read &&
-        state.starred === entry.state.starred &&
+        state.bookmarked === entry.state.bookmarked &&
         state.readAt === entry.state.readAt &&
-        state.starredAt === entry.state.starredAt
+        state.bookmarkedAt === entry.state.bookmarkedAt
         ? entry
         : { ...entry, state };
     });
@@ -270,7 +270,7 @@ export class Reader {
     }, 2320);
     this.toastTimers.add(timer);
   }
-  async mark(ids: string[], update: Pick<EntryState, 'read' | 'starred'>): Promise<boolean> {
+  async mark(ids: string[], update: Pick<EntryState, 'read' | 'bookmarked'>): Promise<boolean> {
     if (!ids.length) return true;
     const payload = Object.fromEntries(ids.map((id) => [id, update]));
     this.pending.push(payload);
@@ -292,7 +292,7 @@ export class Reader {
       this.project();
     }
   }
-  toggle(id: string, key: 'read' | 'starred'): void {
+  toggle(id: string, key: 'read' | 'bookmarked'): void {
     const entry = this.entries.find((entry) => entry.id === id);
     if (entry) void this.mark([id], { [key]: !entry.state[key] });
   }

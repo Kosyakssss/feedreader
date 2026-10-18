@@ -57,7 +57,17 @@ const cache = read<{
   feedErrors: Record<string, string>;
   feedMeta?: Record<string, FeedCacheMeta>;
 }>('cache.json', { entries: [], lastFetched: {}, feedErrors: {} });
-const states = read<Record<string, EntryState>>('state.json', {});
+const states: Record<string, EntryState> = Object.fromEntries(
+  Object.entries(
+    read<Record<string, Pick<EntryState, 'read' | 'readAt'> & { starred?: boolean; starredAt?: number }>>(
+      'state.json',
+      {},
+    ),
+  ).map(([id, { starred, starredAt, ...state }]) => [
+    id,
+    { ...state, ...(starred === undefined ? {} : { bookmarked: starred, bookmarkedAt: starredAt }) },
+  ]),
+);
 const old = read<{
   maxBulkOpen?: number;
   port?: number;
@@ -151,8 +161,8 @@ try {
         id,
         state.read === undefined ? null : Number(state.read),
         state.readAt ?? 0,
-        state.starred === undefined ? null : Number(state.starred),
-        state.starredAt ?? 0,
+        state.bookmarked === undefined ? null : Number(state.bookmarked),
+        state.bookmarkedAt ?? 0,
       );
   }).immediate();
   if (db.query<{ integrity_check: string }, []>('PRAGMA integrity_check').get()?.integrity_check !== 'ok')
@@ -199,7 +209,7 @@ function convertTheme(css: string): string {
     overlay: 'scrim',
     selection: 'selection-background',
     'selection-text': 'selection-foreground',
-    star: 'star-accent',
+    star: 'bookmark-accent',
   };
   const allowed = new Set(
     [...readFileSync(resolve(import.meta.dir, '../data/default.css'), 'utf8').matchAll(/--([\w-]+):/g)].map(

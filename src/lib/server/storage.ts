@@ -8,20 +8,20 @@ type StateRow = {
   id: string;
   read: number | null;
   readAt: number | null;
-  starred: number | null;
-  starredAt: number | null;
+  bookmarked: number | null;
+  bookmarkedAt: number | null;
 };
 type EntryRow = Omit<EnrichedEntry, 'state'> & StateRow;
-const entrySelect = `SELECT e.*, f.label AS feedLabel, s.read, s.readAt, s.starred, s.starredAt
+const entrySelect = `SELECT e.*, f.label AS feedLabel, s.read, s.readAt, s.bookmarked, s.bookmarkedAt
   FROM entries e JOIN feeds f ON f.id = e.feedId LEFT JOIN states s ON s.id = e.id`;
 function stateValue(row: StateRow): EntryState {
   return {
     ...(row.read === null ? {} : { read: !!row.read, readAt: row.readAt! }),
-    ...(row.starred === null ? {} : { starred: !!row.starred, starredAt: row.starredAt! }),
+    ...(row.bookmarked === null ? {} : { bookmarked: !!row.bookmarked, bookmarkedAt: row.bookmarkedAt! }),
   };
 }
-function entryValue({ read, readAt, starred, starredAt, ...entry }: EntryRow): EnrichedEntry {
-  return { ...entry, state: stateValue({ id: entry.id, read, readAt, starred, starredAt }) };
+function entryValue({ read, readAt, bookmarked, bookmarkedAt, ...entry }: EntryRow): EnrichedEntry {
+  return { ...entry, state: stateValue({ id: entry.id, read, readAt, bookmarked, bookmarkedAt }) };
 }
 export function createSchema(db: Database): void {
   db.exec(`
@@ -35,9 +35,18 @@ export function createSchema(db: Database): void {
     CREATE UNIQUE INDEX entry_url ON entries(feedId, url) WHERE url <> '';
     CREATE UNIQUE INDEX entry_title ON entries(feedId, title) WHERE url = '' AND title <> '';
     CREATE TABLE states (id TEXT PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE,
-      read INTEGER, readAt REAL, starred INTEGER, starredAt REAL) STRICT;
-    CREATE INDEX state_starred ON states(starred) WHERE starred = 1;
-    PRAGMA user_version = 100;
+      read INTEGER, readAt REAL, bookmarked INTEGER, bookmarkedAt REAL) STRICT;
+    CREATE INDEX state_bookmarked ON states(bookmarked) WHERE bookmarked = 1;
+    PRAGMA user_version = 101;
+  `);
+}
+function renameStarsToBookmarks(db: Database): void {
+  db.exec(`
+    ALTER TABLE states RENAME COLUMN starred TO bookmarked;
+    ALTER TABLE states RENAME COLUMN starredAt TO bookmarkedAt;
+    DROP INDEX state_starred;
+    CREATE INDEX state_bookmarked ON states(bookmarked) WHERE bookmarked = 1;
+    PRAGMA user_version = 101;
   `);
 }
 export class Storage {
@@ -52,7 +61,8 @@ export class Storage {
       );
       const version = this.db.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version;
       if (version === 0) this.db.transaction(() => createSchema(this.db)).immediate();
-      else if (version !== 100)
+      else if (version === 100) this.db.transaction(() => renameStarsToBookmarks(this.db)).immediate();
+      else if (version !== 101)
         throw new Error('This database is not v0.1. Run the migration into a new data directory.');
     } catch (error) {
       this.db.close();
@@ -85,12 +95,12 @@ export class Storage {
       ),
     };
   }
-  entries(feedId?: string, starred = false, limit = -1): EnrichedEntry[] {
+  entries(feedId?: string, bookmarked = false, limit = -1): EnrichedEntry[] {
     return this.db
       .query<EntryRow, [string | null, string | null, number, number]>(`${entrySelect}
-      WHERE (? IS NULL OR e.feedId = ?) AND (? = 0 OR s.starred = 1)
+      WHERE (? IS NULL OR e.feedId = ?) AND (? = 0 OR s.bookmarked = 1)
       ORDER BY e.publishedTime DESC, e.id LIMIT ?`)
-      .all(feedId ?? null, feedId ?? null, Number(starred), limit)
+      .all(feedId ?? null, feedId ?? null, Number(bookmarked), limit)
       .map(entryValue);
   }
   unread(limit = -1): { entries: EnrichedEntry[]; total: number } {
@@ -108,22 +118,25 @@ export class Storage {
   }
   counts() {
     return this.db
-      .query<{ feedId: string; total: number; unread: number; starred: number; starredUnread: number }, []>(`
+      .query<
+        { feedId: string; total: number; unread: number; bookmarked: number; bookmarkedUnread: number },
+        []
+      >(`
       SELECT e.feedId, count(*) AS total, sum(coalesce(s.read, 0) = 0) AS unread,
-        sum(coalesce(s.starred, 0)) AS starred, sum(coalesce(s.starred, 0) = 1 AND coalesce(s.read, 0) = 0) AS starredUnread
+        sum(coalesce(s.bookmarked, 0)) AS bookmarked, sum(coalesce(s.bookmarked, 0) = 1 AND coalesce(s.read, 0) = 0) AS bookmarkedUnread
       FROM entries e LEFT JOIN states s ON s.id = e.id GROUP BY e.feedId`)
       .all();
   }
-  mark(updates: Record<string, Pick<EntryState, 'read' | 'starred'>>): Record<string, EntryState> {
+  mark(updates: Record<string, Pick<EntryState, 'read' | 'bookmarked'>>): Record<string, EntryState> {
     const rows = this.db
       .query<StateRow, [string, number]>(`
-      INSERT INTO states (id, read, readAt, starred, starredAt)
+      INSERT INTO states (id, read, readAt, bookmarked, bookmarkedAt)
       SELECT key, value->>'$.read', CASE WHEN value->>'$.read' IS NOT NULL THEN ?2 END,
-        value->>'$.starred', CASE WHEN value->>'$.starred' IS NOT NULL THEN ?2 END FROM json_each(?1) WHERE true
+        value->>'$.bookmarked', CASE WHEN value->>'$.bookmarked' IS NOT NULL THEN ?2 END FROM json_each(?1) WHERE true
       ON CONFLICT(id) DO UPDATE SET read = coalesce(excluded.read, states.read),
         readAt = CASE WHEN excluded.read IS NULL THEN states.readAt ELSE max(?2, coalesce(states.readAt, 0) + 1) END,
-        starred = coalesce(excluded.starred, states.starred),
-        starredAt = CASE WHEN excluded.starred IS NULL THEN states.starredAt ELSE max(?2, coalesce(states.starredAt, 0) + 1) END
+        bookmarked = coalesce(excluded.bookmarked, states.bookmarked),
+        bookmarkedAt = CASE WHEN excluded.bookmarked IS NULL THEN states.bookmarkedAt ELSE max(?2, coalesce(states.bookmarkedAt, 0) + 1) END
       RETURNING *`)
       .all(JSON.stringify(updates), Date.now());
     if (rows.length) this.revision++;
@@ -198,9 +211,9 @@ export class Storage {
     const removed = this.db
       .query<{ id: string }, [number, number]>(`
       WITH eligible AS (SELECT e.id, row_number() OVER (ORDER BY e.publishedTime DESC, e.id) AS position
-        FROM entries e LEFT JOIN states s ON s.id = e.id WHERE e.publishedTime >= ? OR s.starred = 1)
+        FROM entries e LEFT JOIN states s ON s.id = e.id WHERE e.publishedTime >= ? OR s.bookmarked = 1)
       DELETE FROM entries WHERE id NOT IN (SELECT id FROM eligible WHERE position <= ?)
-        AND id NOT IN (SELECT id FROM states WHERE starred = 1) RETURNING id`)
+        AND id NOT IN (SELECT id FROM states WHERE bookmarked = 1) RETURNING id`)
       .all(cutoff, maxEntries)
       .map((row) => row.id);
     if (removed.length) this.revision++;
