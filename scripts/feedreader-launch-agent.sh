@@ -7,7 +7,6 @@ script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P)
 project_dir=$(CDPATH= cd "$script_dir/.." && pwd -P)
 plist="$HOME/Library/LaunchAgents/$label.plist"
 tailscale_plist="$HOME/Library/LaunchAgents/$tailscale_label.plist"
-log_dir="$HOME/Library/Logs/feedreader"
 uid=$(id -u)
 domain="gui/$uid"
 service="$domain/$label"
@@ -80,7 +79,7 @@ stop_tailscale_serve() {
 
 write_plist() {
     bun_bin=$(find_bun) || return 1
-    mkdir -p "$(dirname "$plist")" "$log_dir"
+    mkdir -p "$(dirname "$plist")"
     tmp=$(mktemp "${TMPDIR:-/tmp}/feedreader-launch-agent.XXXXXX")
     trap 'rm -f "$tmp"' EXIT HUP INT TERM
 
@@ -122,7 +121,7 @@ EOF
 }
 
 write_tailscale_plist() {
-    mkdir -p "$(dirname "$tailscale_plist")" "$log_dir"
+    mkdir -p "$(dirname "$tailscale_plist")"
     tmp=$(mktemp "${TMPDIR:-/tmp}/feedreader-tailscale-launch-agent.XXXXXX")
     trap 'rm -f "$tmp"' EXIT HUP INT TERM
 

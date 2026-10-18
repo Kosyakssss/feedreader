@@ -1,4 +1,3 @@
-import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Storage } from './storage';
 import { Configuration } from './config';
@@ -13,12 +12,7 @@ export function createApp(directory = process.env.FEEDREADER_DATA_DIR || 'data')
   const themes = new Themes(directory);
   themes.validate(config.read());
   const store = new Storage(directory);
-  const log = new Diagnostics(
-    process.env.FEEDREADER_LOG_DIR ||
-      (process.platform === 'darwin'
-        ? join(homedir(), 'Library/Logs/feedreader')
-        : join(process.env.XDG_STATE_HOME || join(homedir(), '.local/state'), 'feedreader')),
-  );
+  const log = new Diagnostics(process.env.FEEDREADER_LOG_DIR || join(directory, 'logs'));
   const events = new Events();
   const refresh = new Refresh(store, config, events, log);
   const startedAt = new Date().toISOString();
