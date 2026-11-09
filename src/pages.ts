@@ -196,6 +196,8 @@ export function layout(options: { title: string; path: string; version: string; 
       <button class="icon" popovertarget="search" aria-label="Search">${searchIcon}</button>
     </header>
 
+    <div class="veil"></div>
+
     <main
       hx-on:htmx:error="event.target.classList.add('failed')"
       hx-on:htmx:response:error="event.target.classList.add('failed')"

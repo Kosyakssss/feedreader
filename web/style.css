@@ -25,6 +25,7 @@
   --open-time: 0.28s;
   --slash-time: calc(var(--open-time) * 0.4);
   --line-time: calc(var(--open-time) * 0.6);
+  --blur-time: calc(var(--open-time) * 0.8);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -82,7 +83,7 @@ a.title:hover {
 header {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -281,10 +282,6 @@ html:has(#search:popover-open) header button.icon {
   pointer-events: none;
 }
 
-html:has(.menu:popover-open) main {
-  pointer-events: none;
-}
-
 .menu::before {
   position: absolute;
   inset: 0 auto 0 0;
@@ -337,17 +334,21 @@ html:has(.menu:popover-open) main {
   color: var(--tx-2);
 }
 
-/* The whole page blurs and dims together. */
-[popover]::backdrop {
-  top: var(--header-height);
-  background-color: transparent;
-  backdrop-filter: blur(0);
-  transition: background-color var(--open-time) ease-in-out, backdrop-filter var(--open-time) ease-in-out, display var(--open-time) allow-discrete, overlay var(--open-time) allow-discrete;
+/* One veil however many popups come and go, so switching between them doesn't
+   clear the blur and bring it back. */
+.veil {
+  position: fixed;
+  inset: var(--header-height) 0 0;
+  z-index: 1;
+  visibility: hidden;
+  transition: background-color var(--blur-time) ease-in-out, backdrop-filter var(--blur-time) ease-in-out, visibility 0s var(--blur-time);
 }
 
-[popover]:popover-open::backdrop {
+html:has(:popover-open) .veil {
+  visibility: visible;
   background-color: color-mix(in srgb, var(--bg) 40%, transparent);
   backdrop-filter: blur(14px);
+  transition-delay: 0s;
 }
 
 .search-bar {
@@ -409,11 +410,6 @@ html:has(.menu:popover-open) main {
   .menu:popover-open .menu-list a {
     opacity: 0;
     translate: -6px 0;
-  }
-
-  [popover]:popover-open::backdrop {
-    background-color: transparent;
-    backdrop-filter: blur(0);
   }
 
   #search:popover-open .search-bar {
