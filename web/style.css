@@ -245,7 +245,10 @@ html:has(#search:popover-open) header button.icon {
 
 /* The list hangs from the slash: the slash stands up, the line draws down from
    its top and takes its place, then the names appear beside it. */
+/* The line takes over from the slash and hides it. By default a browser would
+   hide the menu along with the slash it hangs from. */
 .menu {
+  position-visibility: always;
   top: anchor(top);
   right: 1rem;
   bottom: auto;
