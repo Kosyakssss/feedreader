@@ -59,7 +59,7 @@ async function safeFetch(start: string, headers: Record<string, string>): Promis
     await assertPublic(url);
     const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT, ...headers }, redirect: 'manual', signal: AbortSignal.timeout(TIMEOUT) });
     const location = response.headers.get('location');
-    if (response.status < 300 || response.status >= 400 || !location) return Object.defineProperty(response, 'url', { value: url.href });
+    if (response.status < 300 || response.status >= 400 || !location) return response;
     await response.body?.cancel();
     url = new URL(location, url);
   }
