@@ -38,6 +38,7 @@
   --glass-blur: blur(14px);
 
   --magnifier: path("M15.95 6.05C18.68 8.78 18.68 13.22 15.95 15.95C13.22 18.68 8.78 18.68 6.05 15.95C3.32 13.22 3.32 8.78 6.05 6.05C8.78 3.32 13.22 3.32 15.95 6.05Z");
+  --handle: path("M16 16L20 20");
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -53,6 +54,13 @@
   initial-value: 0px;
 }
 
+/* Registered so it can be animated. */
+@property --reveal {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
 html {
   scrollbar-gutter: stable;
   -webkit-tap-highlight-color: transparent;
@@ -65,7 +73,8 @@ body {
   --edge: 1.25rem;
   --search-gap: 1em;
   --search-rise: calc(var(--header-height) / -2 - 0.7em - var(--search-gap));
-  --gutter: max(var(--edge), (100% - 37em) / 2);
+  --column: 37em;
+  --gutter: max(var(--edge), (100% - var(--column)) / 2);
   margin: 0;
   background: var(--bg);
   color: var(--tx);
@@ -129,7 +138,7 @@ button:active {
 
 main {
   box-sizing: border-box;
-  max-width: calc(37em + 2 * var(--edge));
+  max-width: calc(var(--column) + 2 * var(--edge));
   margin-inline: auto;
   padding: 0 var(--edge) 1rem;
 }
@@ -281,7 +290,7 @@ button.icon svg {
 }
 
 .handle {
-  d: path("M16 16L20 20");
+  d: var(--handle);
   transition: d var(--open-time) var(--ease);
 }
 
@@ -293,8 +302,7 @@ button.icon svg {
   d: path("M6 6L18 18");
 }
 
-/* The icon in the popup starts exactly on top of the one in the header, so
-   they read as one icon moving. */
+/* The page behind an open popup holds still. */
 html:has(:popover-open) {
   overflow: hidden;
 }
@@ -335,7 +343,7 @@ html:has(#search:popover-open) header button.icon {
 }
 
 /* The list hangs from the slash: the slash stands up, the line draws down from
-   its top and takes its place, then the names appear beside it. The menu has to
+   its top and takes its place, and the names appear as it passes them. The menu has to
    stay visible when that hides the slash it is anchored to. A long list runs
    off the bottom of the window. A short one ends at its last name. */
 .menu {
@@ -374,11 +382,11 @@ html:has(#search:popover-open) header button.icon {
 }
 
 .menu-list {
+  --tip: calc(var(--reveal) * (100% + var(--list-top)) - var(--list-top)); /* the end of the line, measured down this list */
+  --soft: calc(max(var(--row), 25%) * 4 * var(--reveal) * (1 - var(--reveal))); /* widest mid-way, so a fast line never pops names in, and nothing at either end */
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: none; /* the fades and the line already say there is more */
-  --tip: calc(var(--reveal) * (100% + var(--list-top)) - var(--list-top)); /* the end of the line, measured down this list */
-  --soft: calc(max(var(--row), 25%) * 4 * var(--reveal) * (1 - var(--reveal))); /* widest mid-way, so a fast line never pops names in, and nothing at either end */
   mask-image:
     linear-gradient(transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent),
     linear-gradient(#000 calc(var(--tip) - var(--soft)), transparent var(--tip)); /* names appear as the line passes them */
@@ -389,12 +397,6 @@ html:has(#search:popover-open) header button.icon {
 /* Names dissolve at an end only while there is more to scroll to past it. A list
    that fits has nothing to scroll, so none of this applies to it. Scrolling all
    the way down also leaves one empty row, to lift the last name off the edge. */
-@property --reveal {
-  syntax: "<number>";
-  inherits: true;
-  initial-value: 0;
-}
-
 @property --fade-top {
   syntax: "<length>";
   inherits: false;
@@ -586,7 +588,7 @@ html:has(:popover-open) .veil {
   }
 
   #search:popover-open .handle {
-    d: path("M16 16L20 20");
+    d: var(--handle);
   }
 }
 
