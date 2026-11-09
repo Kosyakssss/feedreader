@@ -40,6 +40,13 @@
   }
 }
 
+/* Registered so it is one fixed length everywhere, even inside larger text. */
+@property --header-height {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
 html {
   scrollbar-gutter: stable;
   -webkit-tap-highlight-color: transparent;
@@ -47,10 +54,11 @@ html {
 
 /* One text size everywhere. The only exception is the feed and date on a row. */
 body {
-  --header-height: calc(1.4em + 1rem);
+  --header-height: calc(1.4em + 1.75rem);
+  --edge: 1.25rem;
   --search-gap: 1em;
-  --search-rise: calc(-0.5rem - 1.4em - var(--search-gap));
-  --gutter: max(1rem, (100% - 37em) / 2);
+  --search-rise: calc(var(--header-height) / -2 - 0.7em - var(--search-gap));
+  --gutter: max(var(--edge), (100% - 37em) / 2);
   margin: 0;
   background: var(--bg);
   color: var(--tx);
@@ -114,9 +122,9 @@ button:active {
 
 main {
   box-sizing: border-box;
-  max-width: calc(37em + 2rem);
+  max-width: calc(37em + 2 * var(--edge));
   margin-inline: auto;
-  padding: 0 1rem 1rem;
+  padding: 0 var(--edge) 1rem;
 }
 
 /* Named so that rows moving during a page change pass under it, not over it. */
@@ -327,14 +335,14 @@ html:has(#search:popover-open) header button.icon {
   position-anchor: --slash;
   position-visibility: always;
   top: anchor(top);
-  right: 1rem;
+  right: var(--edge);
   bottom: auto;
   left: calc(anchor(center) - 0.5px);
   width: auto;
   max-width: none;
   max-height: calc(100dvh - var(--header-height) - 1rem);
   margin: 0;
-  padding: calc(var(--header-height) - 0.5rem + 0.1em) 0 0 0.6em;
+  padding: calc(var(--header-height) / 2 + 0.8em) 0 0 0.6em;
   overflow: hidden;
   pointer-events: none;
 }
