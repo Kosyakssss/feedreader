@@ -27,12 +27,11 @@ async function serve(): Promise<void> {
   const removed = store.mergeMoved();
   if (removed) console.log(`Merged ${removed} copies of moved posts`);
 
-  let app: Awaited<ReturnType<typeof createApp>> | undefined;
+  const app = await createApp(store, () => fetcher.nudge());
   const fetcher = new Fetcher(store, (id, added) => {
-    app?.buildFeedsPage();
-    if (added > 0) app?.rebuildEntries([id]);
+    app.buildFeedsPage();
+    if (added > 0) app.rebuildEntries([id]);
   });
-  app = await createApp(store, () => fetcher.nudge());
   fetcher.startAll();
 
   for (const address of values.listen!.split(',')) {
