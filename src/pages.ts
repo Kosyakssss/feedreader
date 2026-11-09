@@ -136,7 +136,8 @@ function menuPopover(id: string, links: Link[], trail: Crumb[]): Html {
   `;
 }
 
-// Pressing a name opens what is under it. Pressing it twice goes to that page.
+// Pressing a name opens what is under it. While the menu is still animating
+// open, the link on top of the name takes a second press to that page.
 // A name with nothing under it is just text.
 function crumb(step: Crumb, index: number, trail: Crumb[]): Html {
   const current = index === trail.length - 1 ? html`aria-current="page"` : '';
@@ -144,7 +145,8 @@ function crumb(step: Crumb, index: number, trail: Crumb[]): Html {
   const menu = `menu-${index}`;
   return html`
     <div class="crumb" ${current}>
-      <button popovertarget="${menu}" hx-on:dblclick="location.href = '${step.href}'">${step.label}<span class="slash"></span></button>
+      <button popovertarget="${menu}">${step.label}<span class="slash"></span></button>
+      <a class="press-again" href="${step.href}" tabindex="-1" aria-hidden="true"></a>
       ${menuPopover(menu, step.under, trail)}
     </div>
   `;

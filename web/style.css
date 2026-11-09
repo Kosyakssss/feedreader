@@ -99,6 +99,7 @@ nav {
 
 /* A name and the slash after it are one thing to press. */
 .crumb {
+  position: relative;
   flex: none;
   anchor-scope: --slash;
   white-space: nowrap;
@@ -120,8 +121,27 @@ nav {
   touch-action: manipulation;
 }
 
-.crumb:has(> button:hover) {
+.crumb:has(> :is(button, .press-again):hover) {
   color: var(--cy);
+}
+
+/* Covers the name only while its menu animates open. Reduced motion has no
+   animation to wait for, so it still gets a moment to press again. */
+.press-again {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  touch-action: manipulation;
+}
+
+.crumb:has(> .menu:popover-open) .press-again {
+  animation: press-again max(var(--open-time), 0.2s) step-end;
+}
+
+@keyframes press-again {
+  from {
+    visibility: visible;
+  }
 }
 
 /* Drawn, not typed, so it is exactly as thick as the line it becomes. */
@@ -137,13 +157,13 @@ nav {
   transition: rotate calc(var(--open-time) * 0.5) ease-in-out calc(var(--open-time) * 0.5);
 }
 
-.crumb:has(> button:hover) .slash {
+.crumb:has(> :is(button, .press-again):hover) .slash {
   background: currentcolor;
 }
 
 /* A slash stands upright when pressing its name would open a list from it. */
 @media (hover: hover) {
-  .crumb:has(> button:hover) .slash {
+  .crumb:has(> :is(button, .press-again):hover) .slash {
     rotate: 0deg;
     transition-delay: 0s;
   }
