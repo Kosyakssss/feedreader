@@ -125,7 +125,7 @@ function menuPopover(id: string, links: Link[], trail: Crumb[]): Html {
     <div class="menu" id="${id}" popover>
       <div class="menu-list">
         ${links.map(
-          (link, index) => html`<a href="${link.href}" style="--i: ${index}; --n: ${links.length}" ${trail.some((step) => step.href === link.href) ? html`aria-current="page"` : ''}>${link.label}${link === FEEDS ? '/' : ''}</a>`,
+          (link) => html`<a href="${link.href}" ${trail.some((step) => step.href === link.href) ? html`aria-current="page"` : ''}>${link.label}${link === FEEDS ? '/' : ''}</a>`,
         )}
       </div>
     </div>

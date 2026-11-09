@@ -346,6 +346,8 @@ html:has(#search:popover-open) header button.icon {
    off the bottom of the window. A short one ends at its last name. */
 .menu {
   --row: 1.7em; /* one name, from the top of its line to the top of the next */
+  --list-top: 1.385em; /* puts the first name exactly one row below the breadcrumb */
+  --reveal: 0; /* how far down the line has reached, from 0 to 1 */
   position-anchor: --slash;
   position-visibility: always;
   top: anchor(top);
@@ -356,9 +358,15 @@ html:has(#search:popover-open) header button.icon {
   max-width: none;
   max-height: calc(100dvh - var(--header-height) / 2 + 0.6em); /* from the slash to just past the bottom of the window */
   margin: 0;
-  padding: 1.385em 0 0 0.6em; /* the first name sits exactly one row below the breadcrumb */
+  padding: var(--list-top) 0 0 0.6em;
   overflow: hidden;
   pointer-events: none;
+  transition: display var(--open-time) allow-discrete, overlay var(--open-time) allow-discrete, --reveal var(--open-time) var(--ease);
+}
+
+.menu:popover-open {
+  --reveal: 1;
+  transition-delay: 0s, 0s, var(--line-start);
 }
 
 .menu::before {
@@ -367,28 +375,32 @@ html:has(#search:popover-open) header button.icon {
   width: 1px;
   background: var(--line);
   content: "";
-  transform: scaleY(0);
+  transform: scaleY(var(--reveal));
   transform-origin: top;
-  transition: transform var(--open-time) var(--ease);
   will-change: transform; /* drawn the same way moving and at rest */
-}
-
-.menu:popover-open::before {
-  transform: scaleY(1);
-  transition-delay: var(--line-start);
 }
 
 .menu-list {
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: none; /* the fades and the line already say there is more */
-  mask-image: linear-gradient(transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent);
+  --tip: calc(var(--reveal) * (100% + var(--list-top)) - var(--list-top)); /* the end of the line, measured down this list */
+  mask-image:
+    linear-gradient(transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent),
+    linear-gradient(#000 calc(var(--tip) - var(--row) * (1 - var(--reveal))), transparent var(--tip)); /* names appear as the line passes them */
+  mask-composite: intersect;
   pointer-events: auto;
 }
 
 /* Names dissolve at an end only while there is more to scroll to past it. A list
    that fits has nothing to scroll, so none of this applies to it. Scrolling all
    the way down also leaves one empty row, to lift the last name off the edge. */
+@property --reveal {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
 @property --fade-top {
   syntax: "<length>";
   inherits: false;
@@ -438,17 +450,6 @@ html:has(#search:popover-open) header button.icon {
   color: var(--tx);
   white-space: nowrap;
   text-overflow: ellipsis;
-  opacity: 0;
-  translate: -6px 0;
-  transition: opacity calc(var(--open-time) * 0.3) var(--ease), translate calc(var(--open-time) * 0.3) var(--ease);
-  transition-delay: calc(min(8, var(--n) - var(--i)) * var(--open-time) * 0.03);
-}
-
-.menu:popover-open .menu-list a {
-  opacity: 1;
-  translate: 0 0;
-  transition-duration: calc(var(--open-time) * 0.5);
-  transition-delay: calc(var(--slash-time) + min(8, var(--i)) * var(--open-time) * 0.1);
 }
 
 /* A long first name stops short of the search icon above it. */
@@ -577,13 +578,8 @@ html:has(:popover-open) .veil {
 
 /* Where each moving part starts from when a popup opens. */
 @starting-style {
-  .menu:popover-open::before {
-    transform: scaleY(0);
-  }
-
-  .menu:popover-open .menu-list a {
-    opacity: 0;
-    translate: -6px 0;
+  .menu:popover-open {
+    --reveal: 0;
   }
 
   #search:popover-open .search-bar {
