@@ -26,6 +26,8 @@
   --slash-time: calc(var(--open-time) * 0.4);
   --line-time: calc(var(--open-time) * 0.6);
   --blur-time: calc(var(--open-time) * 0.8);
+
+  --magnifier: path("M15.95 6.05C18.68 8.78 18.68 13.22 15.95 15.95C13.22 18.68 8.78 18.68 6.05 15.95C3.32 13.22 3.32 8.78 6.05 6.05C8.78 3.32 13.22 3.32 15.95 6.05Z");
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -42,6 +44,7 @@ html {
 body {
   --header-height: calc(1.4em + 1rem);
   --search-gap: 1em;
+  --search-rise: calc(-0.5rem - 1.4em - var(--search-gap));
   max-width: 37em;
   margin: 0 auto;
   padding: 0 1rem 1rem;
@@ -58,6 +61,20 @@ small,
 button,
 input {
   font: inherit;
+}
+
+button {
+  padding: 0 0.5em;
+  border: 1px solid var(--ui-2);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tx-2);
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--ui-3);
+  color: var(--tx);
 }
 
 ::selection {
@@ -115,8 +132,7 @@ nav {
   text-overflow: ellipsis;
 }
 
-.crumb button,
-.crumb button:hover {
+.crumb button {
   padding: 0;
   border: 0;
   background: none;
@@ -203,7 +219,7 @@ button.icon svg {
 /* One drawing that is both icons. Closed it is a magnifier. Open, the lens
    flattens into one stroke of the X and the handle grows into the other. */
 .lens {
-  d: path("M15.95 6.05C18.68 8.78 18.68 13.22 15.95 15.95C13.22 18.68 8.78 18.68 6.05 15.95C3.32 13.22 3.32 8.78 6.05 6.05C8.78 3.32 13.22 3.32 15.95 6.05Z");
+  d: var(--magnifier);
   transition: d var(--open-time) ease-in-out;
 }
 
@@ -220,9 +236,9 @@ button.icon svg {
   d: path("M6 6L18 18");
 }
 
-/* Search covers everything below the header, so only the header can close it
-   by being pressed. The icon in the popup starts exactly on top
-   of the one in the header, so the two read as a single icon moving. */
+/* Search covers everything below the header, so the only way to close it from
+   outside is to press something in the header. The icon in the popup starts
+   exactly on top of the one in the header, so they read as one icon moving. */
 html:has(:popover-open) {
   overflow: hidden;
 }
@@ -357,7 +373,7 @@ html:has(:popover-open) .veil {
   align-items: flex-start;
   gap: 1ch;
   margin-block-start: var(--search-gap);
-  translate: 0 calc(-0.5rem - 1.4em - var(--search-gap));
+  translate: 0 var(--search-rise);
   transition: translate var(--open-time) ease-in-out;
 }
 
@@ -413,7 +429,7 @@ html:has(:popover-open) .veil {
   }
 
   #search:popover-open .search-bar {
-    translate: 0 calc(-0.5rem - 1.4em - var(--search-gap));
+    translate: 0 var(--search-rise);
   }
 
   #search:popover-open .search-bar input,
@@ -422,26 +438,12 @@ html:has(:popover-open) .veil {
   }
 
   #search:popover-open .lens {
-    d: path("M15.95 6.05C18.68 8.78 18.68 13.22 15.95 15.95C13.22 18.68 8.78 18.68 6.05 15.95C3.32 13.22 3.32 8.78 6.05 6.05C8.78 3.32 13.22 3.32 15.95 6.05Z");
+    d: var(--magnifier);
   }
 
   #search:popover-open .handle {
     d: path("M16 16L20 20");
   }
-}
-
-button {
-  padding: 0 0.5em;
-  border: 1px solid var(--ui-2);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--tx-2);
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: var(--ui-3);
-  color: var(--tx);
 }
 
 ol {
