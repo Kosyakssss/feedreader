@@ -8,7 +8,7 @@ let store: Store;
 let app: Awaited<ReturnType<typeof createApp>>;
 let opened = 0;
 
-const item = (guid: string, published: number): Item => ({ guid, url: `https://example.com/${guid}`, title: `Post ${guid}`, text: '', body: '', published });
+const item = (guid: string, published: number): Item => ({ guid, url: `https://example.com/${guid}`, title: `Post ${guid}`, text: '', published });
 const pageText = async (path: string) => Bun.gunzipSync(new Uint8Array(await app.handle(new Request(BASE + path)).arrayBuffer()));
 const page = async (path: string) => new TextDecoder().decode(await pageText(path));
 const post = (path: string, currentUrl = `${BASE}/all`) => app.handle(new Request(BASE + path, { method: 'POST', headers: { 'HX-Current-URL': currentUrl } }));

@@ -180,14 +180,14 @@ async function fetchAtproto(did: string, since: number | null): Promise<FetchRes
       if (value.reply) continue;
       const published = parseDate(value.createdAt);
       const text = fresh(published) ? await describe(value) : String(value.text ?? '');
-      items.push({ guid: uri, url: postUrl(uri), title: '', text: oneLine(text) || '[post]', body: '', published });
+      items.push({ guid: uri, url: postUrl(uri), title: '', text: oneLine(text) || '[post]', published });
     }
     for (const { uri, value } of (reposts.records ?? []) as { uri: string; value: Json }[]) {
       const published = parseDate(value.createdAt);
       const subject = value.subject?.uri as string | undefined;
       if (!subject || !fresh(published)) continue;
       const target = await record(subject);
-      if (target) items.push({ guid: uri, url: postUrl(subject), title: '', text: oneLine(`Reposted @${target.handle}: ${await describe(target.value)}`), body: '', published });
+      if (target) items.push({ guid: uri, url: postUrl(subject), title: '', text: oneLine(`Reposted @${target.handle}: ${await describe(target.value)}`), published });
     }
     return { items };
   } catch (error) {

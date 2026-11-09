@@ -16,7 +16,6 @@ const item = (guid: string, overrides: Partial<Item> = {}): Item => ({
   url: `https://example.com/${guid}`,
   title: `Post ${guid}`,
   text: '',
-  body: '',
   published: JAN,
   ...overrides,
 });

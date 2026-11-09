@@ -5,7 +5,6 @@ export type Item = {
   url: string;
   title: string;
   text: string;
-  body: string;
   published: number | null;
 };
 
@@ -15,7 +14,7 @@ export type ParsedFeed = {
   items: Item[];
 };
 
-const MAX_BODY = 200_000;
+const MAX_BODY = 200_000; // a body is only ever read for its text
 type Node = Record<string, unknown>;
 
 const ENTITIES: Record<string, string> = {
@@ -124,8 +123,7 @@ function safeLink(raw: string, base: string): string {
 
 function buildItem(guid: string, rawLink: string, title: string, body: string, published: number | null, base: string): Item {
   const url = safeLink(rawLink, base);
-  const kept = body.slice(0, MAX_BODY);
-  return { guid: guid || rawLink || title, url, title: cleanTitle(title, url), text: plain(kept), body: kept, published };
+  return { guid: guid || rawLink || title, url, title: cleanTitle(title, url), text: plain(body.slice(0, MAX_BODY)), published };
 }
 
 function decode(bytes: Uint8Array, contentType: string): string {

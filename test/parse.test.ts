@@ -18,7 +18,7 @@ test('RSS prefers the full content over the description', () => {
     <description>short</description>
     <content:encoded><![CDATA[<p>The <b>full</b> text</p>]]></content:encoded>
   </item></channel></rss>`);
-  expect(feed.items[0]).toMatchObject({ body: '<p>The <b>full</b> text</p>', text: 'The full text' });
+  expect(feed.items[0]).toMatchObject({ text: 'The full text' });
 });
 
 test('an item with no guid is identified by its link', () => {

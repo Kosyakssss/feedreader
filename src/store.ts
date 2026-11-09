@@ -61,8 +61,7 @@ CREATE TABLE IF NOT EXISTS entries (
   published_at INTEGER NOT NULL,
   state TEXT NOT NULL CHECK (state IN ('none', 'unread', 'read', 'bookmarked')),
   title TEXT NOT NULL DEFAULT '',
-  text TEXT NOT NULL DEFAULT '',
-  body TEXT
+  text TEXT NOT NULL DEFAULT ''
 ) STRICT;
 CREATE UNIQUE INDEX IF NOT EXISTS source_guid ON entries(source_id, guid) WHERE guid <> '';
 CREATE UNIQUE INDEX IF NOT EXISTS source_url ON entries(source_id, url) WHERE url <> '';
@@ -132,8 +131,7 @@ export class Store {
 
     const moved = this.db.query<{ id: number; guid: string }, [number, string, number, string]>('SELECT id, guid FROM entries WHERE source_id = ? AND title = ? AND published_at = ? AND guid <> ?');
     const repoint = this.db.query('UPDATE OR IGNORE entries SET guid = ?, url = ? WHERE id = ?');
-    const insert = this.db.query(`INSERT OR IGNORE INTO entries (source_id, guid, url, published_at, state, title, text, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-    const fill = this.db.query('UPDATE entries SET body = ?, text = ? WHERE source_id = ? AND (guid = ? OR url = ?) AND body IS NULL');
+    const insert = this.db.query(`INSERT OR IGNORE INTO entries (source_id, guid, url, published_at, state, title, text) VALUES (?, ?, ?, ?, ?, ?, ?)`);
 
     return this.db.transaction(() => {
       let changed = 0;
@@ -141,16 +139,9 @@ export class Store {
         // Some sites change every item's id when they redeploy. The same title at
         // the same moment in the same feed is the same post, unless the other one
         // is still in this very fetch.
-        if (item.title && item.published) {
-          const old = moved.all(source.id, item.title, item.published, item.guid).find((row) => !current.has(row.guid));
-          if (old) {
-            changed += repoint.run(item.guid, item.url, old.id).changes;
-            continue;
-          }
-        }
+        const old = item.title && item.published ? moved.all(source.id, item.title, item.published, item.guid).find((row) => !current.has(row.guid)) : undefined;
         const usable = item.published !== null && item.published > EARLIEST_DATE && item.published <= now + DAY && !allSameDate;
-        const added = insert.run(source.id, item.guid, item.url, usable ? item.published : now, state, item.title, item.text, item.body || null).changes;
-        changed += added || (item.body ? fill.run(item.body, item.text, source.id, item.guid, item.url).changes : 0);
+        changed += old ? repoint.run(item.guid, item.url, old.id).changes : insert.run(source.id, item.guid, item.url, usable ? item.published : now, state, item.title, item.text).changes;
       }
       const failed = !!result.error;
       this.db.run(`UPDATE sources SET fetched_at = ?, next_at = ?, failures = ?, error = ?, etag = ?, last_modified = ? WHERE id = ?`, [
@@ -225,7 +216,7 @@ export class Store {
   export(state?: State) {
     const where = state ? 'WHERE e.state = ?' : '';
     const rows = this.db
-      .query<Entry & { full_text: string }, SQLQueryBindings[]>(`SELECT e.id, e.source_id, s.label AS feed, e.url, e.published_at, e.state, e.title, e.text FROM entries e JOIN sources s ON s.id = e.source_id ${where} ORDER BY e.published_at DESC, e.id DESC`)
+      .query<Entry, SQLQueryBindings[]>(`SELECT e.id, e.source_id, s.label AS feed, e.url, e.published_at, e.state, e.title, e.text FROM entries e JOIN sources s ON s.id = e.source_id ${where} ORDER BY e.published_at DESC, e.id DESC`)
       .all(...(state ? [state] : []));
     return rows.map((row) => ({ id: row.id, feed: row.feed, title: displayTitle(row), url: row.url, published: new Date(row.published_at).toISOString(), state: row.state, text: row.text }));
   }
