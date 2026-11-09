@@ -187,6 +187,7 @@ export function layout(options: { title: string; path: string; version: string; 
     <script src="/js/titles.js?v=${version}"></script>
   </head>
   <body>
+    <div class="header-glass"></div>
     <header>
       <nav>${trail.map(crumb)}</nav>
       <button class="icon" popovertarget="search" aria-label="Search">${searchIcon}</button>

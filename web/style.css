@@ -28,6 +28,9 @@
   --blur-time: calc(var(--open-time) * 0.8);
   --press-time: max(var(--open-time), 0.2s);
 
+  --glass-tint: color-mix(in srgb, var(--bg) 40%, transparent);
+  --glass-blur: blur(14px);
+
   --magnifier: path("M15.95 6.05C18.68 8.78 18.68 13.22 15.95 15.95C13.22 18.68 8.78 18.68 6.05 15.95C3.32 13.22 3.32 8.78 6.05 6.05C8.78 3.32 13.22 3.32 15.95 6.05Z");
 }
 
@@ -128,7 +131,6 @@ header {
   height: var(--header-height);
   margin-block-end: 1rem;
   padding-inline: var(--gutter);
-  background: var(--bg);
   view-transition-name: header;
 }
 
@@ -395,20 +397,40 @@ html:has(#search:popover-open) header button.icon {
   color: var(--tx-2);
 }
 
-/* One veil however many popups come and go, so switching between them doesn't
-   clear the blur and bring it back. */
+/* The header sits on glass. When a popup opens, the veil fades in over the
+   whole window while the glass fades out, so there is one blur and no line
+   where two would meet. Switching between popups leaves the veil in place. */
+.header-glass,
 .veil {
   position: fixed;
-  inset: var(--header-height) 0 0;
+  top: 0;
+  right: 0;
+  left: 0;
   z-index: 1;
+  transition: background-color var(--blur-time) ease-in-out, backdrop-filter var(--blur-time) ease-in-out;
+}
+
+.header-glass {
+  height: var(--header-height);
+  background-color: var(--glass-tint);
+  backdrop-filter: var(--glass-blur);
+}
+
+html:has(:popover-open) .header-glass {
+  background-color: transparent;
+  backdrop-filter: none;
+}
+
+.veil {
+  bottom: 0;
   visibility: hidden;
   transition: background-color var(--blur-time) ease-in-out, backdrop-filter var(--blur-time) ease-in-out, visibility 0s var(--blur-time);
 }
 
 html:has(:popover-open) .veil {
   visibility: visible;
-  background-color: color-mix(in srgb, var(--bg) 40%, transparent);
-  backdrop-filter: blur(14px);
+  background-color: var(--glass-tint);
+  backdrop-filter: var(--glass-blur);
   transition-delay: 0s;
 }
 
@@ -561,4 +583,10 @@ button.failed {
    pages they would jump out sharp on top of the blur and the open menu. */
 html:active-view-transition-type(page-change) .row {
   view-transition-name: none !important;
+}
+
+/* Rows that move within a page pass over the glass, which is part of the page
+   behind them, so they are blurred as they go under the header instead. */
+:root:not(:active-view-transition-type(page-change))::view-transition-group(header) {
+  backdrop-filter: var(--glass-blur);
 }
