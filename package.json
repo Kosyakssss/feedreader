@@ -1,0 +1,13 @@
+{
+  "name": "feedreader",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "serve": "bun run src/main.ts serve",
+    "check": "bun check",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4"
+  }
+}
