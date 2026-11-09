@@ -1,7 +1,7 @@
 // What every page looks like.
 import { displayTitle, type Entry, type Source } from './store';
 
-class Html {
+export class Html {
   constructor(readonly value: string) {}
 }
 
@@ -85,17 +85,19 @@ export function searchResults(feeds: Source[], entries: Entry[]): Html {
   `;
 }
 
-export const unreadList = (entries: Entry[], newest: number) =>
-  entries.length
-    ? html`
-        <ol class="entries">${rows(entries)}</ol>
-        <button hx-post="/read-all/${newest}" hx-target="#unread" hx-swap="innerHTML">Mark all read</button>
-      `
-    : html`<p>Nothing unread.</p>`;
-
 export const entryList = (entries: Entry[]) => html`<ol class="entries">${rows(entries)}</ol>`;
 export const feedList = (feeds: Source[]) => html`<ol>${feeds.map(feedRow)}</ol>`;
-export const unreadSection = (entries: Entry[], newest: number) => html`<div id="unread">${unreadList(entries, newest)}</div>`;
+
+export const unreadSection = (entries: Entry[], newest: number) => html`
+  <div id="unread">
+    ${entries.length
+      ? html`
+          <ol class="entries">${rows(entries)}</ol>
+          <button hx-post="/read-all/${newest}" hx-target="#unread" hx-swap="innerHTML">Mark all read</button>
+        `
+      : html`<p>Nothing unread.</p>`}
+  </div>
+`;
 
 // A placeholder until the app has its real name.
 const APP_NAME = 'Collector';
@@ -103,22 +105,17 @@ const APP_NAME = 'Collector';
 type Link = { href: string; label: string };
 type Crumb = Link & { under?: Link[] };
 
-const PAGES: Link[] = [
-  { href: '/all', label: 'All' },
-  { href: '/archive', label: 'Archive' },
-  { href: '/bookmarks', label: 'Bookmarks' },
-  { href: '/feeds', label: 'Feeds' },
-];
+const FEEDS: Link = { href: '/feeds', label: 'Feeds' };
+const PAGES: Link[] = [{ href: '/all', label: 'All' }, { href: '/archive', label: 'Archive' }, { href: '/bookmarks', label: 'Bookmarks' }, FEEDS];
 
-const FEEDS_HREF = '/feeds';
 const feedHref = (feed: Source) => `/feed/${feed.id}`;
 
 // Where a page sits. A crumb's `under` is the list of pages below it.
 function trailFor(path: string, feeds: Source[]): Crumb[] {
   const home: Crumb = { href: '/', label: APP_NAME, under: PAGES };
-  const feedsPage: Crumb = { href: FEEDS_HREF, label: 'Feeds', under: feeds.map((feed) => ({ href: feedHref(feed), label: feed.label })) };
+  const feedsPage: Crumb = { ...FEEDS, under: feeds.map((feed) => ({ href: feedHref(feed), label: feed.label })) };
   if (path === '/') return [home];
-  if (path === FEEDS_HREF) return [home, feedsPage];
+  if (path === FEEDS.href) return [home, feedsPage];
   const page = PAGES.find((link) => link.href === path);
   if (page) return [home, page];
   return [home, feedsPage, { href: path, label: feeds.find((feed) => feedHref(feed) === path)?.label ?? '' }];
@@ -129,7 +126,7 @@ function menuPopover(id: string, links: Link[], trail: Crumb[]): Html {
     <div class="menu" id="${id}" popover>
       <div class="menu-list">
         ${links.map(
-          (link, index) => html`<a href="${link.href}" style="--i: ${index}; --n: ${links.length}" ${trail.some((step) => step.href === link.href) ? html`aria-current="page"` : ''}>${link.label}${link.href === FEEDS_HREF ? '/' : ''}</a>`,
+          (link, index) => html`<a href="${link.href}" style="--i: ${index}; --n: ${links.length}" ${trail.some((step) => step.href === link.href) ? html`aria-current="page"` : ''}>${link.label}${link === FEEDS ? '/' : ''}</a>`,
         )}
       </div>
     </div>
@@ -154,7 +151,7 @@ function crumb(step: Crumb, index: number, trail: Crumb[]): Html {
 
 const searchIcon = html`<svg viewBox="0 0 24 24" aria-hidden="true"><path class="lens" d="M15.95 6.05C18.68 8.78 18.68 13.22 15.95 15.95C13.22 18.68 8.78 18.68 6.05 15.95C3.32 13.22 3.32 8.78 6.05 6.05C8.78 3.32 13.22 3.32 15.95 6.05Z" /><path class="handle" d="M16 16L20 20" /></svg>`;
 
-const searchDialog = html`
+const searchPopover = html`
   <div id="search" popover>
     <div class="search-bar">
       <input
@@ -204,7 +201,7 @@ export function layout(options: { title: string; path: string; version: string; 
       hx-on:htmx:before:request="event.target.classList.remove('failed')"
     >
       ${content}
-      ${searchDialog}
+      ${searchPopover}
     </main>
   </body>
 </html>

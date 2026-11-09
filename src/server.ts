@@ -1,5 +1,5 @@
 // Answers requests. Pages are built ahead of time and kept in memory.
-import { entryList, feedList, layout, row, searchResults, unreadSection } from './pages';
+import { entryList, feedList, layout, row, searchResults, unreadSection, type Html } from './pages';
 import { scopes, type Entry, type Scope, type Store } from './store';
 
 const WEB = new URL('../web/', import.meta.url).pathname;
@@ -50,17 +50,17 @@ export async function createApp(store: Store, onOpen: () => void = () => {}) {
 
   // Renders one page. Returns null for a path that isn't a page.
   function renderPage(path: string): string | null {
+    const feeds = store.sources();
+    const page = (title: string, content: Html) => layout({ title, path, version, content, feeds });
     const known = ENTRY_PAGES[path];
     if (known) {
       const entries = store.entries(known.scope);
-      const content = path === '/' ? unreadSection(entries, newest(entries)) : entryList(entries);
-      return layout({ title: known.title, path, version, content, feeds: store.sources() });
+      return page(known.title, path === '/' ? unreadSection(entries, newest(entries)) : entryList(entries));
     }
-    if (path === '/feeds') return layout({ title: 'Feeds', path, version, content: feedList(store.sources()), feeds: store.sources() });
+    if (path === '/feeds') return page('Feeds', feedList(feeds));
     const id = Number(path.slice('/feed/'.length));
     const source = path.startsWith('/feed/') && Number.isInteger(id) ? store.source(id) : null;
-    if (!source) return null;
-    return layout({ title: source.label, path, version, content: entryList(store.entries(scopes.feed(id))), feeds: store.sources() });
+    return source && page(source.label, entryList(store.entries(scopes.feed(id))));
   }
 
   function build(paths: string[]): void {
