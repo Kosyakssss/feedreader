@@ -133,10 +133,9 @@ nav {
   anchor-name: --slash-1;
 }
 
-/* The slash stands upright when pressing would open the list drawn from it. */
+/* A slash stands upright when pressing its name would open a list from it. */
 @media (hover: hover) {
-  .crumb:has(+ button.crumb:hover) .slash,
-  button.crumb.home:hover .slash {
+  button.crumb:hover .slash {
     rotate: -13.5deg;
   }
 }

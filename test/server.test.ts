@@ -80,18 +80,18 @@ test('the app name opens the page list on every page', async () => {
   for (const path of ['/', '/all', '/feed/1']) expect(await page(path)).toMatch(/<button class="crumb home"[^>]*popovertarget="menu-0"/);
 });
 
-test('every page name in the path opens the pages beside it', async () => {
-  const html = await page('/bookmarks');
-  expect(html).toMatch(/popovertarget="menu-0"[^>]*aria-current="page">Bookmarks/);
-  for (const href of ['/all', '/archive', '/feeds']) expect(html).toContain(`<a href="${href}"`);
+test('a page with nothing under it is plain text in the path', async () => {
+  expect(await page('/bookmarks')).toContain('<span class="crumb" aria-current="page">Bookmarks</span>');
 });
 
-test('a feed page offers the other feeds', async () => {
+test('Feeds opens the list of feeds, on its own page and on a feed', async () => {
   store.addSource('rss', 'https://example.org/feed', 'Other');
   app = await createApp(store);
-  const html = await page('/feed/1');
-  expect(html).toMatch(/popovertarget="menu-1"[^>]*aria-current="page">Example/);
-  expect(html).toMatch(/<a href="\/feed\/2"[^>]*>Other/);
+  for (const path of ['/feeds', '/feed/1']) {
+    const html = await page(path);
+    expect(html).toMatch(/<button class="crumb" popovertarget="menu-1"[^>]*>Feeds/);
+    expect(html).toMatch(/<a href="\/feed\/2"[^>]*>Other/);
+  }
 });
 
 test('saving replies with the updated row and rebuilds the pages', async () => {
