@@ -152,6 +152,7 @@ nav {
 
 /* A name and the slash after it are one thing to press. */
 .crumb {
+  --line: var(--tx-2);
   position: relative;
   flex: none;
   anchor-scope: --slash;
@@ -174,6 +175,7 @@ nav {
 }
 
 .crumb:has(> :is(button, .press-again):active) {
+  --line: var(--cy);
   color: var(--cy);
 }
 
@@ -202,7 +204,8 @@ nav {
   }
 }
 
-/* Drawn, not typed, so it is exactly as thick as the line it becomes. */
+/* Drawn, not typed, so it is exactly as thick as the line it becomes. It shares
+   the line's colour and hides as soon as the line covers it. */
 .slash {
   display: inline-block;
   width: 1px;
@@ -210,23 +213,19 @@ nav {
   margin-inline: 0.3em;
   vertical-align: -0.16em;
   anchor-name: --slash;
-  background: var(--tx-2);
+  background: var(--line);
   rotate: 12.5deg;
-  transition: rotate var(--slash-time) ease-in-out var(--line-time);
-}
-
-.crumb:has(> :is(button, .press-again):active) .slash {
-  background: currentcolor;
+  transition: rotate var(--slash-time) ease-in-out var(--line-time), visibility 0s calc(var(--line-time) * 0.8);
 }
 
 /* A slash stands upright when pressing its name would open a list from it. */
 @media (hover: hover) {
   .crumb:has(> :is(button, .press-again):hover) {
+    --line: var(--cy);
     color: var(--cy);
   }
 
   .crumb:has(> :is(button, .press-again):hover) .slash {
-    background: currentcolor;
     rotate: 0deg;
     transition-delay: 0s;
   }
@@ -235,7 +234,7 @@ nav {
 .crumb:has(> .menu:popover-open) .slash {
   visibility: hidden;
   rotate: 0deg;
-  transition: rotate var(--slash-time) ease-in-out, visibility 0s var(--open-time);
+  transition: rotate var(--slash-time) ease-in-out, visibility 0s calc(var(--slash-time) + var(--line-time) * 0.3);
 }
 
 [aria-current] {
@@ -353,11 +352,12 @@ html:has(#search:popover-open) header button.icon {
   position: absolute;
   inset: 0 auto 0 0;
   width: 1px;
-  background: var(--tx-2);
+  background: var(--line);
   content: "";
   transform: scaleY(0);
   transform-origin: top;
   transition: transform var(--line-time) ease-in-out;
+  will-change: transform; /* drawn the same way moving and at rest */
 }
 
 .menu:popover-open::before {
