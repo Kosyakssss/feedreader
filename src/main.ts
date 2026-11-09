@@ -4,16 +4,16 @@ import { discover, Fetcher, fetchSource } from './fetch';
 import { createApp } from './server';
 import { Store, type State } from './store';
 
-const USAGE = `feedreader serve   [--db path] [--listen addr,addr]
-feedreader entries [--db path] [--unread | --bookmarked]
-feedreader add     [--db path] <feed url | @handle | did:...>
-feedreader check   [--db path]`;
+const USAGE = `lagan serve   [--db path] [--listen addr,addr]
+lagan entries [--db path] [--unread | --bookmarked]
+lagan add     [--db path] <feed url | @handle | did:...>
+lagan check   [--db path]`;
 
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
   allowPositionals: true,
   options: {
-    db: { type: 'string', default: 'data/feedreader.sqlite' },
+    db: { type: 'string', default: 'data/lagan.sqlite' },
     listen: { type: 'string', default: '127.0.0.1:8789' },
     unread: { type: 'boolean', default: false },
     bookmarked: { type: 'boolean', default: false },

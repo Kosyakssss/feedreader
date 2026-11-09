@@ -30,7 +30,7 @@ const WOKE_LATE = 30 * SECOND;
 
 const MAX_FEED_BYTES = 10 * 1024 * 1024;
 const TIMEOUT = 20 * SECOND;
-const USER_AGENT = 'Feedreader/0.4';
+const USER_AGENT = 'Lagan/0.4';
 const ACCEPT = 'application/rss+xml, application/atom+xml, application/feed+json, application/xml, text/xml';
 
 // ---- reaching only the public internet

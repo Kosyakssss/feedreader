@@ -137,7 +137,7 @@ test('feeds match by name before address', () => {
 });
 
 test('copies left by a moved site merge and keep the strongest state', () => {
-  const file = join(mkdtempSync(join(tmpdir(), 'feedreader-')), 'test.sqlite');
+  const file = join(mkdtempSync(join(tmpdir(), 'lagan-')), 'test.sqlite');
   const onDisk = new Store(file);
   onDisk.addSource('rss', 'https://example.com/feed', 'Example');
   const source = onDisk.sources()[0]!;
@@ -154,7 +154,7 @@ test('copies left by a moved site merge and keep the strongest state', () => {
 });
 
 test('copies at different paths are different posts', () => {
-  const file = join(mkdtempSync(join(tmpdir(), 'feedreader-')), 'test.sqlite');
+  const file = join(mkdtempSync(join(tmpdir(), 'lagan-')), 'test.sqlite');
   const onDisk = new Store(file);
   onDisk.addSource('rss', 'https://example.com/feed', 'Example');
   const source = onDisk.sources()[0]!;

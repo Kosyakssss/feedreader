@@ -99,8 +99,7 @@ export const unreadSection = (entries: Entry[], newest: number) => html`
   </div>
 `;
 
-// A placeholder until the app has its real name.
-const APP_NAME = 'Collector';
+const APP_NAME = 'Lagan';
 
 type Link = { href: string; label: string };
 type Crumb = Link & { under?: Link[] };
