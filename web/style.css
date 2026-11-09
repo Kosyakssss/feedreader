@@ -21,6 +21,14 @@
   --ma: light-dark(#a02f6f, #ce5d97);
 
   --font: -apple-system, BlinkMacSystemFont, "Inter", "IBM Plex Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+
+  --open-time: 0.28s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --open-time: 0s;
+  }
 }
 
 /* One text size everywhere. The only exception is the feed and date on a row. */
@@ -101,64 +109,123 @@ button.icon {
 
 button.icon svg {
   display: block;
+  overflow: visible;
   fill: none;
   stroke: currentcolor;
   stroke-width: 1.5;
   stroke-linecap: round;
 }
 
-/* Search opens below the header. The page under it is blurred, the header is not. */
+/* One drawing that is both icons. Closed it is a magnifier. Open, the lens
+   flattens into one stroke of the X and the handle grows into the other. */
+.lens {
+  transform: translate(0, 0) rotate(-45deg) scale(1, 1);
+  transform-origin: 11px 11px;
+  transition: transform var(--open-time) ease-in-out;
+  vector-effect: non-scaling-stroke;
+}
+
+.handle {
+  stroke-dasharray: 28.6 100;
+  stroke-dashoffset: -71.4;
+  transition: stroke-dasharray var(--open-time) ease-in-out, stroke-dashoffset var(--open-time) ease-in-out;
+}
+
+dialog[open] .lens {
+  transform: translate(1px, 1px) rotate(-45deg) scale(1.212, 0.001);
+}
+
+dialog[open] .handle {
+  stroke-dasharray: 85.7 100;
+  stroke-dashoffset: 0;
+}
+
+/* Search opens below the header. The icon in the popup starts exactly on top
+   of the one in the header, so the two read as a single icon moving. */
 html:has(dialog[open]) {
   overflow: hidden;
 }
 
-html:has(dialog[open]) header button.icon {
+header button.icon {
+  transition: visibility 0s var(--open-time);
+}
+
+html:has(#search[open]) header button.icon {
   visibility: hidden;
+  transition-delay: 0s;
 }
 
 dialog {
+  position: fixed;
   box-sizing: border-box;
+  border: 0;
+  background: transparent;
+  color: var(--tx);
+  flex-direction: column;
+  transition: display var(--open-time) allow-discrete, overlay var(--open-time) allow-discrete;
+}
+
+dialog[open] {
+  display: flex;
+}
+
+#search {
   top: var(--header-height);
+  right: 0;
+  left: 0;
   width: 100%;
   max-width: calc(37em + 2rem);
   height: calc(100dvh - var(--header-height));
   max-height: none;
   margin: 0 auto;
   padding: 0 1rem 1rem;
-  overflow: hidden;
-  border: 0;
-  background: transparent;
-  color: var(--tx);
+  overflow: visible;
 }
 
-dialog[open] {
-  display: flex;
-  flex-direction: column;
-}
-
+/* The blur spreads down the page from the header, with a soft leading edge. */
 dialog::backdrop {
   top: var(--header-height);
-  background: transparent;
-  backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--bg) 40%, transparent);
+  backdrop-filter: blur(14px);
+  mask: linear-gradient(#000 80%, transparent) no-repeat;
+  mask-size: 100% 0;
+  transition: mask-size var(--open-time) ease-in-out, display var(--open-time) allow-discrete, overlay var(--open-time) allow-discrete;
+}
+
+dialog[open]::backdrop {
+  mask-size: 100% 125%;
 }
 
 .search-bar {
   display: flex;
   flex: none;
-  align-items: center;
+  align-items: flex-start;
   gap: 1ch;
+  translate: 0 calc(-0.5rem - 1.4em);
+  transition: translate var(--open-time) ease-in-out;
+}
+
+dialog[open] .search-bar {
+  translate: 0 0;
 }
 
 .search-bar input {
   flex: 1;
   min-width: 0;
-  padding: 0;
+  padding: 0 0 0.4em;
   border: 0;
-  border-block-end: 1px solid var(--tx-2);
+  border-block-end: 1px solid var(--ui);
   border-radius: 0;
   outline: none;
   background: transparent;
   color: var(--tx);
+  opacity: 0;
+  transition: opacity calc(var(--open-time) * 0.4) ease-in;
+}
+
+/* Fades in late, so the text doesn't cross the header on its way down. */
+dialog[open] .search-bar input {
+  transition: opacity calc(var(--open-time) * 0.6) ease-out calc(var(--open-time) * 0.4);
 }
 
 .search-bar input::placeholder {
@@ -169,18 +236,37 @@ dialog::backdrop {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  opacity: 0;
+  transition: opacity var(--open-time) ease-in-out;
 }
 
-/* The search icon slides down from the header to its place beside the line. */
-@media (prefers-reduced-motion: no-preference) {
-  .search-bar button.icon {
-    transition: translate 0.15s ease-out;
+dialog[open] .search-bar input,
+dialog[open] #results {
+  opacity: 1;
+}
+
+/* Where each moving part starts from when the popup opens. */
+@starting-style {
+  dialog[open]::backdrop {
+    mask-size: 100% 0;
   }
 
-  @starting-style {
-    dialog[open] .search-bar button.icon {
-      translate: 0 calc(-0.5rem - 1.4em);
-    }
+  dialog[open] .search-bar {
+    translate: 0 calc(-0.5rem - 1.4em);
+  }
+
+  dialog[open] .search-bar input,
+  dialog[open] #results {
+    opacity: 0;
+  }
+
+  dialog[open] .lens {
+    transform: translate(0, 0) rotate(-45deg) scale(1, 1);
+  }
+
+  dialog[open] .handle {
+    stroke-dasharray: 28.6 100;
+    stroke-dashoffset: -71.4;
   }
 }
 

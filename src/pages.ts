@@ -105,8 +105,7 @@ const LINKS = [
   ['/feeds', 'Feeds'],
 ] as const;
 
-const searchIcon = html`<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>`;
-const closeIcon = html`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>`;
+const searchIcon = html`<svg viewBox="0 0 24 24" aria-hidden="true"><circle class="lens" cx="11" cy="11" r="7" /><line class="handle" x1="6" y1="6" x2="20" y2="20" pathLength="100" /></svg>`;
 
 const searchDialog = html`
   <dialog id="search">
@@ -121,10 +120,10 @@ const searchDialog = html`
         hx-get="/search"
         hx-trigger="input changed delay:200ms"
         hx-target="#results"
-        hx-swap="innerHTML"
+        hx-swap="innerHTML transition:false"
         hx-sync="this:replace"
       >
-      <button class="icon" commandfor="search" command="close" aria-label="Close search">${closeIcon}</button>
+      <button class="icon" commandfor="search" command="close" aria-label="Close search">${searchIcon}</button>
     </div>
     <div id="results"></div>
   </dialog>
