@@ -509,4 +509,11 @@ button.failed {
 
 @view-transition {
   navigation: auto;
+  types: page-change;
+}
+
+/* Rows move on their own only for changes within a page, like saving. Across
+   pages they would jump out sharp on top of the blur and the open menu. */
+html:active-view-transition-type(page-change) .row {
+  view-transition-name: none !important;
 }
