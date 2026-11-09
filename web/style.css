@@ -88,11 +88,74 @@ header {
 
 nav {
   display: flex;
-  gap: 1ch;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
   color: var(--tx-2);
+}
+
+/* A name and the slash after it are one thing to press. */
+.crumb {
+  flex: none;
+  touch-action: manipulation;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  white-space: nowrap;
+}
+
+.crumb:last-child {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crumb:hover {
+  color: var(--cy);
+}
+
+.slash {
+  display: inline-block;
+  margin-inline: 0.12em;
+  color: var(--tx-2);
+  transition: rotate var(--open-time) ease-in-out;
+}
+
+.crumb:hover .slash {
+  color: inherit;
+}
+
+.crumb-home {
+  anchor-name: --crumb-home;
+}
+
+.crumb-0 {
+  anchor-name: --crumb-0;
+}
+
+.crumb-1 {
+  anchor-name: --crumb-1;
+}
+
+.slash-0 {
+  anchor-name: --slash-0;
+}
+
+.slash-1 {
+  anchor-name: --slash-1;
+}
+
+/* The slash stands upright when pressing would open the list drawn from it. */
+@media (hover: hover) {
+  .crumb:has(+ button.crumb:hover) .slash,
+  button.crumb.home:hover .slash {
+    rotate: -13.5deg;
+  }
+}
+
+header:has(#menu-0[open]) .slash-0,
+header:has(#menu-1[open]) .slash-1 {
+  rotate: -13.5deg;
 }
 
 [aria-current] {
@@ -182,6 +245,103 @@ dialog[open] {
   overflow: visible;
 }
 
+/* The list hangs from the slash: the line draws down, then the names appear
+   beside it from top to bottom. Closing runs the same thing backwards. */
+.menu {
+  top: calc(anchor(bottom) - 0.3em);
+  right: 1rem;
+  bottom: auto;
+  left: calc(anchor(center) - 0.04em);
+  width: auto;
+  max-width: none;
+  max-height: calc(100dvh - var(--header-height) - 1rem);
+  margin: 0;
+  padding: 0.5em 0 0 0.6em;
+  overflow: hidden;
+}
+
+#menu-0 {
+  position-anchor: --slash-0;
+}
+
+#menu-1 {
+  position-anchor: --slash-1;
+}
+
+.menu::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 1px;
+  background: var(--tx-2);
+  content: "";
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform var(--open-time) ease-in-out;
+}
+
+.menu[open]::before {
+  transform: scaleY(1);
+}
+
+.menu-list {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.menu-list a {
+  display: block;
+  overflow: hidden;
+  padding-block: 0.15em;
+  color: var(--tx);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0;
+  translate: -6px 0;
+  transition: opacity calc(var(--open-time) * 0.5), translate calc(var(--open-time) * 0.5);
+  transition-delay: calc(min(8, var(--n) - var(--i)) * var(--open-time) * 0.06);
+}
+
+.menu[open] .menu-list a {
+  opacity: 1;
+  translate: 0 0;
+  transition-delay: calc(var(--open-time) * 0.3 + min(8, var(--i)) * var(--open-time) * 0.1);
+}
+
+.menu-list a:hover,
+.menu-list a:focus-visible {
+  outline: none;
+  color: var(--cy);
+}
+
+.menu-list a[aria-current] {
+  color: var(--tx-2);
+}
+
+/* Covers the pressed name for a moment after the menu opens, so that a quick
+   second press goes to that page. A later press just closes the menu. */
+.again {
+  position: fixed;
+  top: anchor(top);
+  right: anchor(right);
+  bottom: anchor(bottom);
+  left: anchor(left);
+  visibility: hidden;
+  touch-action: manipulation;
+  transition: visibility 0s linear 0.4s;
+}
+
+.again-home {
+  position-anchor: --crumb-home;
+}
+
+.again-0 {
+  position-anchor: --crumb-0;
+}
+
+.again-1 {
+  position-anchor: --crumb-1;
+}
+
 /* The blur spreads down the page from the header, with a soft leading edge. */
 dialog::backdrop {
   top: var(--header-height);
@@ -245,8 +405,21 @@ dialog[open] #results {
   opacity: 1;
 }
 
-/* Where each moving part starts from when the popup opens. */
+/* Where each moving part starts from when a popup opens. */
 @starting-style {
+  .menu[open]::before {
+    transform: scaleY(0);
+  }
+
+  .menu[open] .menu-list a {
+    opacity: 0;
+    translate: -6px 0;
+  }
+
+  .menu[open] .again {
+    visibility: visible;
+  }
+
   dialog[open]::backdrop {
     mask-size: 100% 0;
   }

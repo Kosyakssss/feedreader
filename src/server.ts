@@ -54,13 +54,13 @@ export async function createApp(store: Store, onOpen: () => void = () => {}) {
     if (known) {
       const entries = store.entries(known.scope);
       const content = path === '/' ? unreadSection(entries, newest(entries)) : entryList(entries);
-      return layout({ title: known.title, path, version, content });
+      return layout({ title: known.title, path, version, content, feeds: store.sources() });
     }
-    if (path === '/feeds') return layout({ title: 'Feeds', path, version, content: feedList(store.sources()) });
+    if (path === '/feeds') return layout({ title: 'Feeds', path, version, content: feedList(store.sources()), feeds: store.sources() });
     const id = Number(path.slice('/feed/'.length));
     const source = path.startsWith('/feed/') && Number.isInteger(id) ? store.source(id) : null;
     if (!source) return null;
-    return layout({ title: source.label, path, version, content: entryList(store.entries(scopes.feed(id))) });
+    return layout({ title: source.label, path, version, content: entryList(store.entries(scopes.feed(id))), feeds: store.sources() });
   }
 
   function build(paths: string[]): void {

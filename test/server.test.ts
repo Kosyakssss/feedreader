@@ -76,6 +76,24 @@ test('there are no visible page headings', async () => {
   expect(html).not.toMatch(/<h[1-6]/);
 });
 
+test('the app name opens the page list on every page', async () => {
+  for (const path of ['/', '/all', '/feed/1']) expect(await page(path)).toMatch(/<button class="crumb home[^>]*commandfor="menu-0"/);
+});
+
+test('every page name in the path opens the pages beside it', async () => {
+  const html = await page('/bookmarks');
+  expect(html).toMatch(/commandfor="menu-0"[^>]*aria-current="page">Bookmarks/);
+  for (const href of ['/all', '/archive', '/feeds']) expect(html).toContain(`<a href="${href}"`);
+});
+
+test('a feed page offers the other feeds', async () => {
+  store.addSource('rss', 'https://example.org/feed', 'Other');
+  app = await createApp(store);
+  const html = await page('/feed/1');
+  expect(html).toMatch(/commandfor="menu-1"[^>]*aria-current="page">Example/);
+  expect(html).toMatch(/<a href="\/feed\/2"[^>]*>Other/);
+});
+
 test('saving replies with the updated row and rebuilds the pages', async () => {
   const response = post(`/bookmark/${firstId()}`);
   expect(await response.text()).toContain('Saved');

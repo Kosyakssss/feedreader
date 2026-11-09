@@ -97,13 +97,67 @@ export const entryList = (entries: Entry[]) => html`<ol class="entries">${rows(e
 export const feedList = (feeds: Source[]) => html`<ol>${feeds.map(feedRow)}</ol>`;
 export const unreadSection = (entries: Entry[], newest: number) => html`<div id="unread">${unreadList(entries, newest)}</div>`;
 
-const LINKS = [
-  ['/', 'Unread'],
-  ['/all', 'All'],
-  ['/archive', 'Archive'],
-  ['/bookmarks', 'Bookmarks'],
-  ['/feeds', 'Feeds'],
-] as const;
+// A placeholder until the app has its real name.
+const APP_NAME = 'Collector';
+
+type Link = { href: string; label: string };
+type Menu = { links: Link[]; current?: string };
+
+const PAGES: Link[] = [
+  { href: '/all', label: 'All' },
+  { href: '/archive', label: 'Archive' },
+  { href: '/bookmarks', label: 'Bookmarks' },
+  { href: '/feeds', label: 'Feeds' },
+];
+
+const hasSubPages = (href: string) => href === '/feeds';
+
+// One menu per level of the path. The first holds the main pages. A feed's
+// page adds a second one holding the other feeds.
+function menusFor(path: string, feeds: Source[]): Menu[] {
+  if (!path.startsWith('/feed/')) return [{ links: PAGES, current: path === '/' ? undefined : path }];
+  return [
+    { links: PAGES, current: '/feeds' },
+    { links: feeds.map((feed) => ({ href: `/feed/${feed.id}`, label: feed.label })), current: path },
+  ];
+}
+
+const slash = (level: number) => html`<span class="slash slash-${level}">/</span>`;
+
+// Pressing a name opens its menu. Pressing it twice quickly goes to that page.
+function breadcrumbs(menus: Menu[]): Html {
+  const atHome = menus[0]?.current === undefined;
+  const crumbs = menus.filter((menu) => menu.current !== undefined);
+  return html`
+    <nav>
+      <button class="crumb home crumb-home" commandfor="menu-0" command="show-modal" ${atHome ? html`aria-current="page"` : ''}>${APP_NAME}${slash(0)}</button>
+      ${crumbs.map((menu, level) => {
+        const link = menu.links.find((candidate) => candidate.href === menu.current);
+        const last = level === crumbs.length - 1;
+        return html`<button class="crumb crumb-${level}" commandfor="menu-${level}" command="show-modal" ${last ? html`aria-current="page"` : ''}>${link?.label}${!last || hasSubPages(menu.current ?? '') ? slash(level + 1) : ''}</button>`;
+      })}
+    </nav>
+  `;
+}
+
+// The menu locks the header, so a second press can't reach the name. This
+// invisible link sits over the name for a moment and catches that press.
+const pressAgain = (name: string, href: string) => html`<a class="again again-${name}" href="${href}" tabindex="-1" aria-hidden="true"></a>`;
+
+function menuDialog(menu: Menu, level: number): Html {
+  const count = menu.links.length;
+  return html`
+    <dialog class="menu" id="menu-${level}" closedby="any">
+      <div class="menu-list">
+        ${menu.links.map(
+          (link, index) => html`<a href="${link.href}" style="--i: ${index}; --n: ${count}" ${link.href === menu.current ? html`aria-current="page"` : ''}>${link.label}${hasSubPages(link.href) ? '/' : ''}</a>`,
+        )}
+      </div>
+      ${level === 0 ? pressAgain('home', '/') : ''}
+      ${menu.current ? pressAgain(String(level), menu.current) : ''}
+    </dialog>
+  `;
+}
 
 const searchIcon = html`<svg viewBox="0 0 24 24" aria-hidden="true"><circle class="lens" cx="11" cy="11" r="7" /><line class="handle" x1="6" y1="6" x2="20" y2="20" pathLength="100" /></svg>`;
 
@@ -129,8 +183,9 @@ const searchDialog = html`
   </dialog>
 `;
 
-export function layout(options: { title: string; path: string; version: string; content: Html }): string {
-  const { title, path, version, content } = options;
+export function layout(options: { title: string; path: string; version: string; content: Html; feeds: Source[] }): string {
+  const { title, path, version, content, feeds } = options;
+  const menus = menusFor(path, feeds);
   return html`<!doctype html>
 <html lang="en">
   <head>
@@ -144,10 +199,9 @@ export function layout(options: { title: string; path: string; version: string; 
   </head>
   <body>
     <header>
-      <nav>
-        ${LINKS.map(([href, label]) => html`<a href="${href}" ${href === path ? html`aria-current="page"` : ''}>${label}</a>`)}
-      </nav>
+      ${breadcrumbs(menus)}
       <button class="icon" commandfor="search" command="show-modal" aria-label="Search">${searchIcon}</button>
+      ${menus.map(menuDialog)}
     </header>
 
     <main
