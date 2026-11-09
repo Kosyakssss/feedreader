@@ -257,8 +257,4 @@ export class Store {
       return removed;
     })();
   }
-
-  close(): void {
-    this.db.close();
-  }
 }
