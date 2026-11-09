@@ -176,30 +176,27 @@ button.icon svg {
   stroke: currentcolor;
   stroke-width: 1.5;
   stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* One drawing that is both icons. Closed it is a magnifier. Open, the lens
    flattens into one stroke of the X and the handle grows into the other. */
 .lens {
-  transform: translate(0, 0) rotate(-45deg) scale(1, 1);
-  transform-origin: 11px 11px;
-  transition: transform var(--open-time) ease-in-out;
-  vector-effect: non-scaling-stroke;
+  d: path("M15.95 6.05C18.68 8.78 18.68 13.22 15.95 15.95C13.22 18.68 8.78 18.68 6.05 15.95C3.32 13.22 3.32 8.78 6.05 6.05C8.78 3.32 13.22 3.32 15.95 6.05Z");
+  transition: d var(--open-time) ease-in-out;
 }
 
 .handle {
-  stroke-dasharray: 28.6 100;
-  stroke-dashoffset: -71.4;
-  transition: stroke-dasharray var(--open-time) ease-in-out, stroke-dashoffset var(--open-time) ease-in-out;
+  d: path("M16 16L20 20");
+  transition: d var(--open-time) ease-in-out;
 }
 
 #search:popover-open .lens {
-  transform: translate(1px, 1px) rotate(-45deg) scale(1.212, 0.001);
+  d: path("M18 6C16 8 14 10 12 12C10 14 8 16 6 18C8 16 10 14 12 12C14 10 16 8 18 6Z");
 }
 
 #search:popover-open .handle {
-  stroke-dasharray: 85.7 100;
-  stroke-dashoffset: 0;
+  d: path("M6 6L18 18");
 }
 
 /* Search covers everything below the header, so only the header can close it
@@ -412,12 +409,11 @@ html:has(.menu:popover-open) main {
   }
 
   #search:popover-open .lens {
-    transform: translate(0, 0) rotate(-45deg) scale(1, 1);
+    d: path("M15.95 6.05C18.68 8.78 18.68 13.22 15.95 15.95C13.22 18.68 8.78 18.68 6.05 15.95C3.32 13.22 3.32 8.78 6.05 6.05C8.78 3.32 13.22 3.32 15.95 6.05Z");
   }
 
   #search:popover-open .handle {
-    stroke-dasharray: 28.6 100;
-    stroke-dashoffset: -71.4;
+    d: path("M16 16L20 20");
   }
 }
 
