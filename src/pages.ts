@@ -133,8 +133,8 @@ function menuPopover(id: string, links: Link[], trail: Crumb[]): Html {
   `;
 }
 
-// Pressing a name opens what is under it. While the menu is still animating
-// open, the link on top of the name takes a second press to that page.
+// Pressing a name opens or closes what is under it. While the menu is still
+// animating, the link on top of the name takes a second press to that page.
 // A name with nothing under it is just text.
 function crumb(step: Crumb, index: number, trail: Crumb[]): Html {
   const current = index === trail.length - 1 ? html`aria-current="page"` : '';

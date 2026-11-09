@@ -26,6 +26,7 @@
   --slash-time: calc(var(--open-time) * 0.4);
   --line-time: calc(var(--open-time) * 0.6);
   --blur-time: calc(var(--open-time) * 0.8);
+  --press-time: max(var(--open-time), 0.2s);
 
   --magnifier: path("M15.95 6.05C18.68 8.78 18.68 13.22 15.95 15.95C13.22 18.68 8.78 18.68 6.05 15.95C3.32 13.22 3.32 8.78 6.05 6.05C8.78 3.32 13.22 3.32 15.95 6.05Z");
 }
@@ -144,22 +145,28 @@ nav {
   color: var(--cy);
 }
 
-/* Covers the name only while its menu animates open. Reduced motion has no
-   animation to wait for, so it still gets a moment to press again. */
+/* Covers the name while its menu animates, opening or closing. Fully open it
+   stays visible but has no size, so that closing can start at full size and
+   only then hide. Reduced motion has no animation to wait for, so it still
+   gets a moment to press again. */
 .press-again {
   position: absolute;
   inset: 0;
   visibility: hidden;
   touch-action: manipulation;
+  transition: visibility 0s var(--press-time);
 }
 
 .crumb:has(> .menu:popover-open) .press-again {
-  animation: press-again max(var(--open-time), 0.2s) step-end;
+  visibility: visible;
+  scale: 0;
+  transition: none;
+  animation: press-again var(--press-time) step-end;
 }
 
 @keyframes press-again {
   from {
-    visibility: visible;
+    scale: 1;
   }
 }
 
