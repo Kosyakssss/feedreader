@@ -38,6 +38,7 @@ html {
 /* One text size everywhere. The only exception is the feed and date on a row. */
 body {
   --header-height: calc(1.4em + 1rem);
+  --search-gap: 1em;
   max-width: 37em;
   margin: 0 auto;
   padding: 0 1rem 1rem;
@@ -339,7 +340,8 @@ html:has(.menu:popover-open) main {
   flex: none;
   align-items: flex-start;
   gap: 1ch;
-  translate: 0 calc(-0.5rem - 1.4em);
+  margin-block-start: var(--search-gap);
+  translate: 0 calc(-0.5rem - 1.4em - var(--search-gap));
   transition: translate var(--open-time) ease-in-out;
 }
 
@@ -400,7 +402,7 @@ html:has(.menu:popover-open) main {
   }
 
   #search:popover-open .search-bar {
-    translate: 0 calc(-0.5rem - 1.4em);
+    translate: 0 calc(-0.5rem - 1.4em - var(--search-gap));
   }
 
   #search:popover-open .search-bar input,
