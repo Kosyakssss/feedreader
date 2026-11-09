@@ -125,7 +125,7 @@ function trailFor(path: string, feeds: Source[]): Crumb[] {
   return [home, feedsPage, { href: path, label: feed?.label ?? '' }];
 }
 
-const slash = (menu: number) => html`<span class="slash slash-${menu}">/</span>`;
+const slash = (menu: number) => html`<span class="slash slash-${menu}"></span>`;
 
 // Pressing a name opens what is under it. Pressing it twice goes to that page.
 // A name with nothing under it is just text.

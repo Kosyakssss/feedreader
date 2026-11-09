@@ -114,15 +114,20 @@ nav {
   color: var(--cy);
 }
 
+/* Drawn, not typed, so it is exactly as thick as the line it becomes. */
 .slash {
   display: inline-block;
-  margin-inline: 0.12em;
-  color: var(--tx-2);
-  transition: rotate var(--open-time) ease-in-out;
+  width: 1px;
+  height: 1.05em;
+  margin-inline: 0.3em;
+  vertical-align: -0.16em;
+  background: var(--tx-2);
+  rotate: 12.5deg;
+  transition: rotate calc(var(--open-time) * 0.5) ease-in-out calc(var(--open-time) * 0.5);
 }
 
 .crumb:hover .slash {
-  color: inherit;
+  background: currentcolor;
 }
 
 .slash-0 {
@@ -136,13 +141,16 @@ nav {
 /* A slash stands upright when pressing its name would open a list from it. */
 @media (hover: hover) {
   button.crumb:hover .slash {
-    rotate: -13.5deg;
+    rotate: 0deg;
+    transition-delay: 0s;
   }
 }
 
 header:has(#menu-0:popover-open) .slash-0,
 header:has(#menu-1:popover-open) .slash-1 {
-  rotate: -13.5deg;
+  visibility: hidden;
+  rotate: 0deg;
+  transition: rotate calc(var(--open-time) * 0.5) ease-in-out, visibility 0s var(--open-time);
 }
 
 [aria-current] {
@@ -233,18 +241,18 @@ html:has(#search:popover-open) header button.icon {
   overflow: visible;
 }
 
-/* The list hangs from the slash: the line draws down, then the names appear
-   beside it from top to bottom. Closing runs the same thing backwards. */
+/* The list hangs from the slash: the slash stands up, the line draws down from
+   its top and takes its place, then the names appear beside it. */
 .menu {
-  top: calc(anchor(bottom) - 0.3em);
+  top: anchor(top);
   right: 1rem;
   bottom: auto;
-  left: calc(anchor(center) - 0.04em);
+  left: calc(anchor(center) - 0.5px);
   width: auto;
   max-width: none;
   max-height: calc(100dvh - var(--header-height) - 1rem);
   margin: 0;
-  padding: 0.5em 0 0 0.6em;
+  padding: calc(var(--header-height) - 0.5rem + 0.1em) 0 0 0.6em;
   overflow: hidden;
   pointer-events: none;
 }
@@ -274,6 +282,7 @@ html:has(.menu:popover-open) main {
 
 .menu:popover-open::before {
   transform: scaleY(1);
+  transition: transform calc(var(--open-time) * 0.6) ease-in-out calc(var(--open-time) * 0.4);
 }
 
 .menu-list {
@@ -298,7 +307,7 @@ html:has(.menu:popover-open) main {
 .menu:popover-open .menu-list a {
   opacity: 1;
   translate: 0 0;
-  transition-delay: calc(var(--open-time) * 0.3 + min(8, var(--i)) * var(--open-time) * 0.1);
+  transition-delay: calc(var(--open-time) * 0.4 + min(8, var(--i)) * var(--open-time) * 0.1);
 }
 
 .menu-list a:hover,
