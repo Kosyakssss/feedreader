@@ -156,7 +156,7 @@ function menuDialog(menu: Menu, level: number): Html {
 const searchIcon = html`<svg viewBox="0 0 24 24" aria-hidden="true"><circle class="lens" cx="11" cy="11" r="7" /><line class="handle" x1="6" y1="6" x2="20" y2="20" pathLength="100" /></svg>`;
 
 const searchDialog = html`
-  <dialog id="search">
+  <div id="search" popover>
     <div class="search-bar">
       <input
         type="text"
@@ -171,10 +171,10 @@ const searchDialog = html`
         hx-swap="innerHTML transition:false"
         hx-sync="this:replace"
       >
-      <button class="icon" commandfor="search" command="close" aria-label="Close search">${searchIcon}</button>
+      <button class="icon" popovertarget="search" popovertargetaction="hide" aria-label="Close search">${searchIcon}</button>
     </div>
     <div id="results"></div>
-  </dialog>
+  </div>
 `;
 
 export function layout(options: { title: string; path: string; version: string; content: Html; feeds: Source[] }): string {
@@ -194,7 +194,7 @@ export function layout(options: { title: string; path: string; version: string; 
   <body>
     <header>
       ${breadcrumbs(menus)}
-      <button class="icon" commandfor="search" command="show-modal" aria-label="Search">${searchIcon}</button>
+      <button class="icon" popovertarget="search" aria-label="Search">${searchIcon}</button>
       ${menus.map(menuDialog)}
     </header>
 

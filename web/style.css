@@ -182,18 +182,19 @@ button.icon svg {
   transition: stroke-dasharray var(--open-time) ease-in-out, stroke-dashoffset var(--open-time) ease-in-out;
 }
 
-dialog[open] .lens {
+#search:popover-open .lens {
   transform: translate(1px, 1px) rotate(-45deg) scale(1.212, 0.001);
 }
 
-dialog[open] .handle {
+#search:popover-open .handle {
   stroke-dasharray: 85.7 100;
   stroke-dashoffset: 0;
 }
 
-/* Search opens below the header. The icon in the popup starts exactly on top
+/* Search covers everything below the header, so only the header can close it
+   by being pressed. The icon in the popup starts exactly on top
    of the one in the header, so the two read as a single icon moving. */
-html:has(dialog[open], :popover-open) {
+html:has(:popover-open) {
   overflow: hidden;
 }
 
@@ -201,13 +202,12 @@ header button.icon {
   transition: visibility 0s var(--open-time);
 }
 
-html:has(#search[open]) header button.icon {
+html:has(#search:popover-open) header button.icon {
   visibility: hidden;
   transition-delay: 0s;
 }
 
-dialog,
-.menu {
+[popover] {
   position: fixed;
   box-sizing: border-box;
   border: 0;
@@ -217,8 +217,7 @@ dialog,
   transition: display var(--open-time) allow-discrete, overlay var(--open-time) allow-discrete;
 }
 
-dialog[open],
-.menu:popover-open {
+[popover]:popover-open {
   display: flex;
 }
 
@@ -227,11 +226,11 @@ dialog[open],
   right: 0;
   left: 0;
   width: 100%;
-  max-width: calc(37em + 2rem);
+  max-width: none;
   height: calc(100dvh - var(--header-height));
   max-height: none;
-  margin: 0 auto;
-  padding: 0 1rem 1rem;
+  margin: 0;
+  padding: 0 max(1rem, (100% - 37em) / 2) 1rem;
   overflow: visible;
 }
 
@@ -314,8 +313,7 @@ html:has(.menu:popover-open) main {
 }
 
 /* The blur spreads down the page from the header, with a soft leading edge. */
-dialog::backdrop,
-.menu::backdrop {
+[popover]::backdrop {
   top: var(--header-height);
   background: color-mix(in srgb, var(--bg) 40%, transparent);
   backdrop-filter: blur(14px);
@@ -324,8 +322,7 @@ dialog::backdrop,
   transition: mask-size var(--open-time) ease-in-out, display var(--open-time) allow-discrete, overlay var(--open-time) allow-discrete;
 }
 
-dialog[open]::backdrop,
-.menu:popover-open::backdrop {
+[popover]:popover-open::backdrop {
   mask-size: 100% 125%;
 }
 
@@ -338,7 +335,7 @@ dialog[open]::backdrop,
   transition: translate var(--open-time) ease-in-out;
 }
 
-dialog[open] .search-bar {
+#search:popover-open .search-bar {
   translate: 0 0;
 }
 
@@ -357,7 +354,7 @@ dialog[open] .search-bar {
 }
 
 /* Fades in late, so the text doesn't cross the header on its way down. */
-dialog[open] .search-bar input {
+#search:popover-open .search-bar input {
   transition: opacity calc(var(--open-time) * 0.6) ease-out calc(var(--open-time) * 0.4);
 }
 
@@ -373,8 +370,8 @@ dialog[open] .search-bar input {
   transition: opacity var(--open-time) ease-in-out;
 }
 
-dialog[open] .search-bar input,
-dialog[open] #results {
+#search:popover-open .search-bar input,
+#search:popover-open #results {
   opacity: 1;
 }
 
@@ -389,25 +386,24 @@ dialog[open] #results {
     translate: -6px 0;
   }
 
-  dialog[open]::backdrop,
-  .menu:popover-open::backdrop {
+  [popover]:popover-open::backdrop {
     mask-size: 100% 0;
   }
 
-  dialog[open] .search-bar {
+  #search:popover-open .search-bar {
     translate: 0 calc(-0.5rem - 1.4em);
   }
 
-  dialog[open] .search-bar input,
-  dialog[open] #results {
+  #search:popover-open .search-bar input,
+  #search:popover-open #results {
     opacity: 0;
   }
 
-  dialog[open] .lens {
+  #search:popover-open .lens {
     transform: translate(0, 0) rotate(-45deg) scale(1, 1);
   }
 
-  dialog[open] .handle {
+  #search:popover-open .handle {
     stroke-dasharray: 28.6 100;
     stroke-dashoffset: -71.4;
   }
