@@ -75,7 +75,7 @@ const SEARCH_LIMIT = 200;
 const EARLIEST_DATE = 631_152_000_000; // 1990: anything earlier is a broken date
 const DAY = 86_400_000;
 
-export const wordsOf = (text: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+const wordsOf = (text: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 
 export function displayTitle(entry: Pick<Entry, 'title' | 'text' | 'url'>): string {
   return entry.title || entry.text || entry.url;
