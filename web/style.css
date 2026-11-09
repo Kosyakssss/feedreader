@@ -658,6 +658,14 @@ button.failed {
   types: page-change;
 }
 
+/* Page changes, and rows moving within a page, follow the motion style too. */
+::view-transition-group(*),
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: var(--open-time);
+  animation-timing-function: var(--ease);
+}
+
 /* Rows move on their own only for changes within a page, like saving. Across
    pages they would jump out sharp on top of the blur and the open menu. */
 html:active-view-transition-type(page-change) .row {
