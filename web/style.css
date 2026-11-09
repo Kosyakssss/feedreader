@@ -437,6 +437,21 @@ html:has(:popover-open) .header-glass {
   transition: background-color var(--blur-time) ease-in-out, backdrop-filter var(--blur-time) ease-in-out, visibility 0s var(--blur-time);
 }
 
+/* A blur ends at a definite distance, and on a dark screen its first shade
+   switches on along a straight line. A trace of grain breaks that line up. */
+.veil::after {
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .03 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+  content: "";
+  opacity: 0;
+  transition: opacity var(--blur-time) ease-in-out;
+}
+
+html:has(:popover-open) .veil::after {
+  opacity: 1;
+}
+
 html:has(:popover-open) .veil {
   visibility: visible;
   background-color: var(--glass-tint);
