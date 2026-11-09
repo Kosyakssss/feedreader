@@ -31,6 +31,10 @@
   }
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 /* One text size everywhere. The only exception is the feed and date on a row. */
 body {
   --header-height: calc(1.4em + 1rem);
@@ -320,18 +324,17 @@ html:has(.menu:popover-open) main {
   color: var(--tx-2);
 }
 
-/* The blur spreads down the page from the header, with a soft leading edge. */
+/* The whole page blurs and dims together. */
 [popover]::backdrop {
   top: var(--header-height);
-  background: color-mix(in srgb, var(--bg) 40%, transparent);
-  backdrop-filter: blur(14px);
-  mask: linear-gradient(#000 80%, transparent) no-repeat;
-  mask-size: 100% 0;
-  transition: mask-size var(--open-time) ease-in-out, display var(--open-time) allow-discrete, overlay var(--open-time) allow-discrete;
+  background-color: transparent;
+  backdrop-filter: blur(0);
+  transition: background-color var(--open-time) ease-in-out, backdrop-filter var(--open-time) ease-in-out, display var(--open-time) allow-discrete, overlay var(--open-time) allow-discrete;
 }
 
 [popover]:popover-open::backdrop {
-  mask-size: 100% 125%;
+  background-color: color-mix(in srgb, var(--bg) 40%, transparent);
+  backdrop-filter: blur(14px);
 }
 
 .search-bar {
@@ -395,7 +398,8 @@ html:has(.menu:popover-open) main {
   }
 
   [popover]:popover-open::backdrop {
-    mask-size: 100% 0;
+    background-color: transparent;
+    backdrop-filter: blur(0);
   }
 
   #search:popover-open .search-bar {
