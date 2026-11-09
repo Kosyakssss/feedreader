@@ -229,7 +229,7 @@ export async function discover(input: string): Promise<Pick<Source, 'kind' | 're
 
 const clamp = (value: number, ceiling = MAX_WAIT) => Math.min(Math.max(value, BASE), ceiling);
 const spread = (limit: number) => Math.random() * limit;
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
 export function earliestAfter(result: FetchResult, failures: number): number {
   if (result.retryAfter && result.retryAfter > 0) return clamp(result.retryAfter);
