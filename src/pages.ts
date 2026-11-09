@@ -146,7 +146,6 @@ export function layout(options: { title: string; path: string; version: string; 
     <header>
       <nav>
         ${LINKS.map(([href, label]) => html`<a href="${href}" ${href === path ? html`aria-current="page"` : ''}>${label}</a>`)}
-        <a href="${path}">Refresh</a>
       </nav>
       <button class="icon" commandfor="search" command="show-modal" aria-label="Search">${searchIcon}</button>
     </header>
