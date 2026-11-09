@@ -101,7 +101,7 @@ export const unreadSection = (entries: Entry[], newest: number) => html`<div id=
 const APP_NAME = 'Collector';
 
 type Link = { href: string; label: string };
-type Crumb = Link & { menu?: number };
+type Crumb = Link & { under?: Link[] };
 
 const PAGES: Link[] = [
   { href: '/all', label: 'All' },
@@ -110,48 +110,44 @@ const PAGES: Link[] = [
   { href: '/feeds', label: 'Feeds' },
 ];
 
-const hasSubPages = (href: string) => href === '/feeds';
+const FEEDS_HREF = '/feeds';
 const feedHref = (feed: Source) => `/feed/${feed.id}`;
 
-// Where a page sits. A crumb with a menu is one that has pages under it.
+// Where a page sits. A crumb's `under` is the list of pages below it.
 function trailFor(path: string, feeds: Source[]): Crumb[] {
-  const home: Crumb = { href: '/', label: APP_NAME, menu: 0 };
-  const feedsPage: Crumb = { href: '/feeds', label: 'Feeds', menu: 1 };
+  const home: Crumb = { href: '/', label: APP_NAME, under: PAGES };
+  const feedsPage: Crumb = { href: FEEDS_HREF, label: 'Feeds', under: feeds.map((feed) => ({ href: feedHref(feed), label: feed.label })) };
   if (path === '/') return [home];
-  if (path === feedsPage.href) return [home, feedsPage];
+  if (path === FEEDS_HREF) return [home, feedsPage];
   const page = PAGES.find((link) => link.href === path);
   if (page) return [home, page];
-  const feed = feeds.find((candidate) => feedHref(candidate) === path);
-  return [home, feedsPage, { href: path, label: feed?.label ?? '' }];
+  return [home, feedsPage, { href: path, label: feeds.find((feed) => feedHref(feed) === path)?.label ?? '' }];
 }
 
-const slash = (menu: number) => html`<span class="slash slash-${menu}"></span>`;
-
-// Pressing a name opens what is under it. Pressing it twice goes to that page.
-// A name with nothing under it is just text.
-function crumb(link: Crumb, last: boolean): Html {
-  const current = last ? html`aria-current="page"` : '';
-  if (link.menu === undefined) return html`<span class="crumb" ${current}>${link.label}</span>`;
-  return html`<button class="crumb" popovertarget="menu-${link.menu}" hx-on:dblclick="location.href = '${link.href}'" ${current}>${link.label}${slash(link.menu)}</button>`;
-}
-
-const breadcrumbs = (trail: Crumb[]) => html`<nav>${trail.map((link, index) => crumb(link, index === trail.length - 1))}</nav>`;
-
-function menuPopover(links: Link[], level: number, trail: Crumb[]): Html {
+function menuPopover(id: string, links: Link[], trail: Crumb[]): Html {
   return html`
-    <div class="menu" id="menu-${level}" popover>
+    <div class="menu" id="${id}" popover>
       <div class="menu-list">
         ${links.map(
-          (link, index) => html`<a href="${link.href}" style="--i: ${index}; --n: ${links.length}" ${trail.some((step) => step.href === link.href) ? html`aria-current="page"` : ''}>${link.label}${hasSubPages(link.href) ? '/' : ''}</a>`,
+          (link, index) => html`<a href="${link.href}" style="--i: ${index}; --n: ${links.length}" ${trail.some((step) => step.href === link.href) ? html`aria-current="page"` : ''}>${link.label}${link.href === FEEDS_HREF ? '/' : ''}</a>`,
         )}
       </div>
     </div>
   `;
 }
 
-function menusFor(trail: Crumb[], feeds: Source[]): Html[] {
-  const lists = [PAGES, feeds.map((feed) => ({ href: feedHref(feed), label: feed.label }))];
-  return trail.flatMap((link) => (link.menu === undefined ? [] : [menuPopover(lists[link.menu] ?? [], link.menu, trail)]));
+// Pressing a name opens what is under it. Pressing it twice goes to that page.
+// A name with nothing under it is just text.
+function crumb(step: Crumb, index: number, trail: Crumb[]): Html {
+  const current = index === trail.length - 1 ? html`aria-current="page"` : '';
+  if (!step.under) return html`<span class="crumb" ${current}>${step.label}</span>`;
+  const menu = `menu-${index}`;
+  return html`
+    <div class="crumb" ${current}>
+      <button popovertarget="${menu}" hx-on:dblclick="location.href = '${step.href}'">${step.label}<span class="slash"></span></button>
+      ${menuPopover(menu, step.under, trail)}
+    </div>
+  `;
 }
 
 const searchIcon = html`<svg viewBox="0 0 24 24" aria-hidden="true"><path class="lens" d="M15.95 6.05C18.68 8.78 18.68 13.22 15.95 15.95C13.22 18.68 8.78 18.68 6.05 15.95C3.32 13.22 3.32 8.78 6.05 6.05C8.78 3.32 13.22 3.32 15.95 6.05Z" /><path class="handle" d="M16 16L20 20" /></svg>`;
@@ -194,9 +190,8 @@ export function layout(options: { title: string; path: string; version: string; 
   </head>
   <body>
     <header>
-      ${breadcrumbs(trail)}
+      <nav>${trail.map(crumb)}</nav>
       <button class="icon" popovertarget="search" aria-label="Search">${searchIcon}</button>
-      ${menusFor(trail, feeds)}
     </header>
 
     <main

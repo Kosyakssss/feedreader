@@ -77,7 +77,7 @@ test('there are no visible page headings', async () => {
 });
 
 test('the app name opens the page list on every page', async () => {
-  for (const path of ['/', '/all', '/feed/1']) expect(await page(path)).toMatch(/<button class="crumb" popovertarget="menu-0"/);
+  for (const path of ['/', '/all', '/feed/1']) expect(await page(path)).toMatch(/<button popovertarget="menu-0"/);
 });
 
 test('a page with nothing under it is plain text in the path', async () => {
@@ -89,7 +89,7 @@ test('Feeds opens the list of feeds, on its own page and on a feed', async () =>
   app = await createApp(store);
   for (const path of ['/feeds', '/feed/1']) {
     const html = await page(path);
-    expect(html).toMatch(/<button class="crumb" popovertarget="menu-1"[^>]*>Feeds/);
+    expect(html).toMatch(/<button popovertarget="menu-1"[^>]*>Feeds/);
     expect(html).toMatch(/<a href="\/feed\/2"[^>]*>Other/);
   }
 });

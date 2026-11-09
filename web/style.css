@@ -100,11 +100,7 @@ nav {
 /* A name and the slash after it are one thing to press. */
 .crumb {
   flex: none;
-  touch-action: manipulation;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
+  anchor-scope: --slash;
   white-space: nowrap;
 }
 
@@ -115,7 +111,16 @@ nav {
   text-overflow: ellipsis;
 }
 
-.crumb:hover {
+.crumb button,
+.crumb button:hover {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  touch-action: manipulation;
+}
+
+.crumb:has(> button:hover) {
   color: var(--cy);
 }
 
@@ -126,33 +131,25 @@ nav {
   height: 1.05em;
   margin-inline: 0.3em;
   vertical-align: -0.16em;
+  anchor-name: --slash;
   background: var(--tx-2);
   rotate: 12.5deg;
   transition: rotate calc(var(--open-time) * 0.5) ease-in-out calc(var(--open-time) * 0.5);
 }
 
-.crumb:hover .slash {
+.crumb:has(> button:hover) .slash {
   background: currentcolor;
-}
-
-.slash-0 {
-  anchor-name: --slash-0;
-}
-
-.slash-1 {
-  anchor-name: --slash-1;
 }
 
 /* A slash stands upright when pressing its name would open a list from it. */
 @media (hover: hover) {
-  button.crumb:hover .slash {
+  .crumb:has(> button:hover) .slash {
     rotate: 0deg;
     transition-delay: 0s;
   }
 }
 
-header:has(#menu-0:popover-open) .slash-0,
-header:has(#menu-1:popover-open) .slash-1 {
+.crumb:has(> .menu:popover-open) .slash {
   visibility: hidden;
   rotate: 0deg;
   transition: rotate calc(var(--open-time) * 0.5) ease-in-out, visibility 0s var(--open-time);
@@ -244,10 +241,10 @@ html:has(#search:popover-open) header button.icon {
 }
 
 /* The list hangs from the slash: the slash stands up, the line draws down from
-   its top and takes its place, then the names appear beside it. */
-/* The line takes over from the slash and hides it. By default a browser would
-   hide the menu along with the slash it hangs from. */
+   its top and takes its place, then the names appear beside it. The menu has to
+   stay visible when that hides the slash it is anchored to. */
 .menu {
+  position-anchor: --slash;
   position-visibility: always;
   top: anchor(top);
   right: 1rem;
@@ -264,14 +261,6 @@ html:has(#search:popover-open) header button.icon {
 
 html:has(.menu:popover-open) main {
   pointer-events: none;
-}
-
-#menu-0 {
-  position-anchor: --slash-0;
-}
-
-#menu-1 {
-  position-anchor: --slash-1;
 }
 
 .menu::before {
