@@ -256,8 +256,11 @@ button.icon {
   border: 0;
 }
 
+/* The icon in the popup starts exactly on top of the one in the header, so
+   they read as one icon moving. */
 header button.icon {
   anchor-name: --search-icon;
+  transition: visibility 0s var(--open-time);
 }
 
 button.icon svg {
@@ -296,17 +299,12 @@ html:has(:popover-open) {
   overflow: hidden;
 }
 
-header button.icon {
-  transition: visibility 0s var(--open-time);
-}
-
 html:has(#search:popover-open) header button.icon {
   visibility: hidden;
   transition-delay: 0s;
 }
 
 [popover] {
-  position: fixed;
   box-sizing: border-box;
   border: 0;
   background: transparent;
@@ -321,12 +319,8 @@ html:has(#search:popover-open) header button.icon {
 
 #search {
   top: var(--header-height);
-  right: 0;
-  left: 0;
   width: 100%;
-  max-width: none;
   height: calc(100dvh - var(--header-height));
-  max-height: none;
   margin: 0;
   padding: 0 var(--gutter) 1rem;
   overflow: visible;
@@ -355,7 +349,6 @@ html:has(#search:popover-open) header button.icon {
   bottom: auto;
   left: calc(anchor(center) - 0.5px);
   width: auto;
-  max-width: none;
   max-height: calc(100dvh - var(--header-height) / 2 + 0.6em); /* from the slash to just past the bottom of the window */
   margin: 0;
   padding: var(--list-top) 0 0 0.6em;
@@ -448,7 +441,6 @@ html:has(#search:popover-open) header button.icon {
   display: block;
   overflow: hidden;
   padding-block: 0.15em;
-  color: var(--tx);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -458,13 +450,6 @@ html:has(#search:popover-open) header button.icon {
   padding-inline-end: 2em;
 }
 
-@media (hover: hover) {
-  .menu-list a:hover {
-    color: var(--cy);
-  }
-}
-
-.menu-list a:active,
 .menu-list a:focus-visible {
   outline: none;
   color: var(--cy);
@@ -487,7 +472,7 @@ html:has(#search:popover-open) header button.icon {
   right: 0;
   left: 0;
   z-index: 1;
-  transition: background-color var(--open-time) var(--ease) var(--clear-after), backdrop-filter var(--open-time) var(--ease) var(--clear-after);
+  transition: background-color var(--open-time) var(--ease) var(--clear-after), backdrop-filter var(--open-time) var(--ease) var(--clear-after), visibility 0s calc(var(--open-time) + var(--clear-after));
 }
 
 .header-glass {
@@ -505,7 +490,6 @@ html:has(:popover-open) .header-glass {
 .veil {
   bottom: 0;
   visibility: hidden;
-  transition: background-color var(--open-time) var(--ease) var(--clear-after), backdrop-filter var(--open-time) var(--ease) var(--clear-after), visibility 0s calc(var(--open-time) + var(--clear-after));
 }
 
 /* A blur ends at a definite distance, and on a dark screen its first shade
