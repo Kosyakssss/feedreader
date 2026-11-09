@@ -1,0 +1,77 @@
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  font: 16px/1.4 system-ui, sans-serif;
+  max-width: 72ch;
+  margin: 0 auto;
+  padding: 1rem;
+  background: Canvas;
+  color: CanvasText;
+}
+
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1ch;
+}
+
+[aria-current] {
+  font-weight: 600;
+}
+
+input[type="search"] {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+ol {
+  list-style: none;
+  padding: 0;
+}
+
+li {
+  margin-block: 0.5rem;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 1ch;
+}
+
+/* Off-screen rows skip rendering, which also keeps them out of view transitions. */
+#list > li {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 3em;
+}
+
+/* titles.js shortens titles that don't fit. This handles the rest: a single
+   word wider than the line. */
+.title {
+  flex: 1 0 100%;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.saved {
+  color: light-dark(#a15c00, #f0a040);
+}
+
+.failed {
+  color: light-dark(#c00, #ff6b6b);
+}
+
+.htmx-request {
+  opacity: 0.5;
+}
+
+@view-transition {
+  navigation: auto;
+}
