@@ -22,10 +22,16 @@
 
   --font: -apple-system, BlinkMacSystemFont, "Inter", "IBM Plex Sans", "Segoe UI", Helvetica, Arial, sans-serif;
 
+  /* The motion style: everything that moves takes this long, on this curve.
+     Anything that doesn't says why, where it happens. */
   --open-time: 0.28s;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* The exception: the slash is a flick before the line, so it is quicker, and
+     the line sets off as it finishes so the two read as one movement. */
   --slash-time: calc(var(--open-time) * 0.4);
-  --line-time: calc(var(--open-time) * 0.6);
-  --blur-time: calc(var(--open-time) * 0.8);
+  --line-start: calc(var(--slash-time) / 2);
+
   --press-time: max(var(--open-time), 0.2s);
 
   --glass-tint: color-mix(in srgb, var(--bg) 40%, transparent);
@@ -205,7 +211,8 @@ nav {
 }
 
 /* Drawn, not typed, so it is exactly as thick as the line it becomes. It shares
-   the line's colour and hides as soon as the line covers it. */
+   the line's colour and hides as soon as the line covers it. When the line goes
+   back up, the slash is there again underneath it and leans over once it's gone. */
 .slash {
   display: inline-block;
   width: 1px;
@@ -215,7 +222,7 @@ nav {
   anchor-name: --slash;
   background: var(--line);
   rotate: 12.5deg;
-  transition: rotate var(--slash-time) ease-in-out var(--line-time), visibility 0s calc(var(--line-time) * 0.8);
+  transition: rotate var(--slash-time) var(--ease) calc(var(--open-time) * 0.75), visibility 0s calc(var(--open-time) * 0.2);
 }
 
 /* A slash stands upright when pressing its name would open a list from it. */
@@ -234,7 +241,7 @@ nav {
 .crumb:has(> .menu:popover-open) .slash {
   visibility: hidden;
   rotate: 0deg;
-  transition: rotate var(--slash-time) ease-in-out, visibility 0s calc(var(--slash-time) + var(--line-time) * 0.3);
+  transition: rotate var(--slash-time) var(--ease), visibility 0s calc(var(--line-start) + var(--open-time) * 0.1);
 }
 
 [aria-current] {
@@ -267,12 +274,12 @@ button.icon svg {
    flattens into one stroke of the X and the handle grows into the other. */
 .lens {
   d: var(--magnifier);
-  transition: d var(--open-time) ease-in-out;
+  transition: d var(--open-time) var(--ease);
 }
 
 .handle {
   d: path("M16 16L20 20");
-  transition: d var(--open-time) ease-in-out;
+  transition: d var(--open-time) var(--ease);
 }
 
 #search:popover-open .lens {
@@ -362,13 +369,13 @@ html:has(#search:popover-open) header button.icon {
   content: "";
   transform: scaleY(0);
   transform-origin: top;
-  transition: transform var(--line-time) ease-in-out;
+  transition: transform var(--open-time) var(--ease);
   will-change: transform; /* drawn the same way moving and at rest */
 }
 
 .menu:popover-open::before {
   transform: scaleY(1);
-  transition-delay: var(--slash-time);
+  transition-delay: var(--line-start);
 }
 
 .menu-list {
@@ -433,7 +440,7 @@ html:has(#search:popover-open) header button.icon {
   text-overflow: ellipsis;
   opacity: 0;
   translate: -6px 0;
-  transition: opacity calc(var(--open-time) * 0.3), translate calc(var(--open-time) * 0.3);
+  transition: opacity calc(var(--open-time) * 0.3) var(--ease), translate calc(var(--open-time) * 0.3) var(--ease);
   transition-delay: calc(min(8, var(--n) - var(--i)) * var(--open-time) * 0.03);
 }
 
@@ -475,7 +482,7 @@ html:has(#search:popover-open) header button.icon {
   right: 0;
   left: 0;
   z-index: 1;
-  transition: background-color var(--blur-time) ease-in-out, backdrop-filter var(--blur-time) ease-in-out;
+  transition: background-color var(--open-time) var(--ease), backdrop-filter var(--open-time) var(--ease);
 }
 
 .header-glass {
@@ -492,7 +499,7 @@ html:has(:popover-open) .header-glass {
 .veil {
   bottom: 0;
   visibility: hidden;
-  transition: background-color var(--blur-time) ease-in-out, backdrop-filter var(--blur-time) ease-in-out, visibility 0s var(--blur-time);
+  transition: background-color var(--open-time) var(--ease), backdrop-filter var(--open-time) var(--ease), visibility 0s var(--open-time);
 }
 
 /* A blur ends at a definite distance, and on a dark screen its first shade
@@ -503,7 +510,7 @@ html:has(:popover-open) .header-glass {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .03 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
   content: "";
   opacity: 0;
-  transition: opacity var(--blur-time) ease-in-out;
+  transition: opacity var(--open-time) var(--ease);
 }
 
 html:has(:popover-open) .veil::after {
@@ -524,7 +531,7 @@ html:has(:popover-open) .veil {
   gap: 1ch;
   margin-block-start: var(--search-gap);
   translate: 0 var(--search-rise);
-  transition: translate var(--open-time) ease-in-out;
+  transition: translate var(--open-time) var(--ease);
 }
 
 #search:popover-open .search-bar {
@@ -542,12 +549,13 @@ html:has(:popover-open) .veil {
   background: transparent;
   color: var(--tx);
   opacity: 0;
-  transition: opacity calc(var(--open-time) * 0.4) ease-in;
+  transition: opacity calc(var(--open-time) * 0.2) var(--ease);
 }
 
-/* Fades in late, so the text doesn't cross the header on its way down. */
+/* An exception: the text must not cross the header, so it fades in late on the
+   way down and is gone almost at once on the way up. */
 #search:popover-open .search-bar input {
-  transition: opacity calc(var(--open-time) * 0.6) ease-out calc(var(--open-time) * 0.4);
+  transition: opacity calc(var(--open-time) * 0.75) var(--ease) calc(var(--open-time) * 0.25);
 }
 
 .search-bar input::placeholder {
@@ -559,7 +567,7 @@ html:has(:popover-open) .veil {
   min-height: 0;
   overflow-y: auto;
   opacity: 0;
-  transition: opacity var(--open-time) ease-in-out;
+  transition: opacity var(--open-time) var(--ease);
 }
 
 #search:popover-open .search-bar input,
