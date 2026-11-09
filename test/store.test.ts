@@ -1,8 +1,4 @@
-import { Database } from 'bun:sqlite';
 import { beforeEach, expect, test } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { FetchResult } from '../src/fetch';
 import type { Item } from '../src/parse';
 import { scopes, Store, type Source } from '../src/store';
@@ -137,29 +133,15 @@ test('feeds match by name before address', () => {
 });
 
 test('copies left by a moved site merge and keep the strongest state', () => {
-  const file = join(mkdtempSync(join(tmpdir(), 'lagan-')), 'test.sqlite');
-  const onDisk = new Store(file);
-  onDisk.addSource('rss', 'https://example.com/feed', 'Example');
-  const source = onDisk.sources()[0]!;
-  onDisk.save(source, result(item('a', { title: 'Same', url: 'https://one.example.com/post' })), 0, 0);
-  onDisk.toggleBookmark(onDisk.entries(scopes.feed(source.id))[0]!.id);
+  saveItems(item('a', { title: 'Same', url: 'https://one.example.com/post' }), item('copy', { title: 'Same', url: 'https://two.example.com/post' }));
+  store.toggleBookmark(store.entries(scopes.feed(feed.id)).at(-1)!.id);
 
-  const raw = new Database(file);
-  raw.run(`INSERT INTO entries (source_id, guid, url, published_at, state, title) VALUES (?, 'copy', 'https://two.example.com/post', ?, 'none', 'Same')`, [source.id, JAN]);
-  raw.close();
-
-  expect(onDisk.mergeMoved()).toBe(1);
-  expect(onDisk.entries(scopes.feed(source.id))).toMatchObject([{ state: 'bookmarked', url: 'https://two.example.com/post' }]);
-  onDisk.close();
+  expect(store.mergeMoved()).toBe(1);
+  expect(store.entries(scopes.feed(feed.id))).toMatchObject([{ state: 'bookmarked', url: 'https://two.example.com/post' }]);
 });
 
 test('copies at different paths are different posts', () => {
-  const file = join(mkdtempSync(join(tmpdir(), 'lagan-')), 'test.sqlite');
-  const onDisk = new Store(file);
-  onDisk.addSource('rss', 'https://example.com/feed', 'Example');
-  const source = onDisk.sources()[0]!;
-  onDisk.save(source, result(item('a', { title: 'Links', url: 'https://example.com/one' }), item('b', { title: 'Links', url: 'https://example.com/two' })), 0, 0);
-  expect(onDisk.mergeMoved()).toBe(0);
-  expect(onDisk.entries(scopes.feed(source.id))).toHaveLength(2);
-  onDisk.close();
+  saveItems(item('a', { title: 'Links', url: 'https://example.com/one' }), item('b', { title: 'Links', url: 'https://example.com/two' }));
+  expect(store.mergeMoved()).toBe(0);
+  expect(store.entries(scopes.feed(feed.id))).toHaveLength(2);
 });
