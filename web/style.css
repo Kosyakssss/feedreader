@@ -23,6 +23,8 @@
   --font: -apple-system, BlinkMacSystemFont, "Inter", "IBM Plex Sans", "Segoe UI", Helvetica, Arial, sans-serif;
 
   --open-time: 0.28s;
+  --slash-time: calc(var(--open-time) * 0.4);
+  --line-time: calc(var(--open-time) * 0.6);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -154,7 +156,7 @@ nav {
   anchor-name: --slash;
   background: var(--tx-2);
   rotate: 12.5deg;
-  transition: rotate calc(var(--open-time) * 0.5) ease-in-out calc(var(--open-time) * 0.5);
+  transition: rotate var(--slash-time) ease-in-out var(--line-time);
 }
 
 .crumb:has(> :is(button, .press-again):hover) .slash {
@@ -172,7 +174,7 @@ nav {
 .crumb:has(> .menu:popover-open) .slash {
   visibility: hidden;
   rotate: 0deg;
-  transition: rotate calc(var(--open-time) * 0.5) ease-in-out, visibility 0s var(--open-time);
+  transition: rotate var(--slash-time) ease-in-out, visibility 0s var(--open-time);
 }
 
 [aria-current] {
@@ -291,12 +293,12 @@ html:has(.menu:popover-open) main {
   content: "";
   transform: scaleY(0);
   transform-origin: top;
-  transition: transform var(--open-time) ease-in-out;
+  transition: transform var(--line-time) ease-in-out;
 }
 
 .menu:popover-open::before {
   transform: scaleY(1);
-  transition: transform calc(var(--open-time) * 0.6) ease-in-out calc(var(--open-time) * 0.4);
+  transition-delay: var(--slash-time);
 }
 
 .menu-list {
@@ -314,14 +316,15 @@ html:has(.menu:popover-open) main {
   text-overflow: ellipsis;
   opacity: 0;
   translate: -6px 0;
-  transition: opacity calc(var(--open-time) * 0.5), translate calc(var(--open-time) * 0.5);
-  transition-delay: calc(min(8, var(--n) - var(--i)) * var(--open-time) * 0.06);
+  transition: opacity calc(var(--open-time) * 0.3), translate calc(var(--open-time) * 0.3);
+  transition-delay: calc(min(8, var(--n) - var(--i)) * var(--open-time) * 0.03);
 }
 
 .menu:popover-open .menu-list a {
   opacity: 1;
   translate: 0 0;
-  transition-delay: calc(var(--open-time) * 0.4 + min(8, var(--i)) * var(--open-time) * 0.1);
+  transition-duration: calc(var(--open-time) * 0.5);
+  transition-delay: calc(var(--slash-time) + min(8, var(--i)) * var(--open-time) * 0.1);
 }
 
 .menu-list a:hover,
