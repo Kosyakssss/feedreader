@@ -9,7 +9,6 @@ export type Item = {
 };
 
 export type ParsedFeed = {
-  format: 'rss' | 'rdf' | 'atom' | 'json';
   title: string;
   items: Item[];
 };
@@ -177,7 +176,7 @@ function parseJsonFeed(source: string, base: string): ParsedFeed {
     const body = field('content_html') || field('content_text') || field('summary');
     return buildItem(field('id') || url, url, field('title'), body, firstDate(field('date_published'), field('date_modified')), base);
   });
-  return { format: 'json', title: typeof feed.title === 'string' ? feed.title : '', items };
+  return { title: typeof feed.title === 'string' ? feed.title : '', items };
 }
 
 export function parseFeed(bytes: Uint8Array, contentType: string, base: string): ParsedFeed {
@@ -187,15 +186,15 @@ export function parseFeed(bytes: Uint8Array, contentType: string, base: string):
 
   if (isNode(doc.rss)) {
     const channel = (doc.rss.channel ?? {}) as Node;
-    return { format: 'rss', title: text(channel.title), items: asList(channel.item as Node[]).filter(isNode).map((item) => rssItem(item, text(item.guid), base)) };
+    return { title: text(channel.title), items: asList(channel.item as Node[]).filter(isNode).map((item) => rssItem(item, text(item.guid), base)) };
   }
   if (isNode(doc['rdf:RDF'])) {
     const rdf = doc['rdf:RDF'] as Node;
-    return { format: 'rdf', title: text((rdf.channel as Node | undefined)?.title), items: asList(rdf.item as Node[]).filter(isNode).map((item) => rssItem(item, decodeEntities(String(item['@rdf:about'] ?? '')), base)) };
+    return { title: text((rdf.channel as Node | undefined)?.title), items: asList(rdf.item as Node[]).filter(isNode).map((item) => rssItem(item, decodeEntities(String(item['@rdf:about'] ?? '')), base)) };
   }
   if (isNode(doc.feed)) {
     const feed = doc.feed;
-    return { format: 'atom', title: text(feed.title), items: asList(feed.entry as Node[]).filter(isNode).map((entry) => atomItem(entry, base)) };
+    return { title: text(feed.title), items: asList(feed.entry as Node[]).filter(isNode).map((entry) => atomItem(entry, base)) };
   }
   throw new Error('Unrecognized feed format');
 }
