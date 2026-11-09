@@ -335,7 +335,8 @@ html:has(#search:popover-open) header button.icon {
 
 /* The list hangs from the slash: the slash stands up, the line draws down from
    its top and takes its place, then the names appear beside it. The menu has to
-   stay visible when that hides the slash it is anchored to. */
+   stay visible when that hides the slash it is anchored to. A long list runs
+   off the bottom of the window. A short one ends at its last name. */
 .menu {
   --row: 1.7em; /* one name, from the top of its line to the top of the next */
   position-anchor: --slash;
@@ -346,7 +347,7 @@ html:has(#search:popover-open) header button.icon {
   left: calc(anchor(center) - 0.5px);
   width: auto;
   max-width: none;
-  max-height: calc(100dvh - var(--header-height) - 1rem);
+  max-height: calc(100dvh - var(--header-height) / 2 + 0.6em); /* from the slash to just past the bottom of the window */
   margin: 0;
   padding: 1.385em 0 0 0.6em; /* the first name sits exactly one row below the breadcrumb */
   overflow: hidden;
@@ -373,7 +374,54 @@ html:has(#search:popover-open) header button.icon {
 .menu-list {
   min-height: 0;
   overflow-y: auto;
+  scrollbar-width: none; /* the fades and the line already say there is more */
+  mask-image: linear-gradient(transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent);
   pointer-events: auto;
+}
+
+/* Names dissolve at an end only while there is more to scroll to past it. A list
+   that fits has nothing to scroll, so none of this applies to it. Scrolling all
+   the way down also leaves one empty row, to lift the last name off the edge. */
+@property --fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --fade-bottom {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@supports (animation-timeline: scroll()) {
+  .menu-list {
+    animation: fade-top linear both, fade-bottom linear both;
+    animation-timeline: scroll(self);
+    animation-range: 0 var(--row), calc(100% - var(--row)) 100%;
+  }
+}
+
+@keyframes fade-top {
+  from {
+    --fade-top: 0px;
+  }
+
+  to {
+    --fade-top: var(--row);
+  }
+}
+
+@keyframes fade-bottom {
+  from {
+    --fade-bottom: var(--row);
+    padding-block-end: var(--row);
+  }
+
+  to {
+    --fade-bottom: 0px;
+    padding-block-end: var(--row);
+  }
 }
 
 .menu-list a {
