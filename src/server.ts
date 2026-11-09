@@ -1,5 +1,5 @@
 // Answers requests. Pages are built ahead of time and kept in memory.
-import { entryList, feedList, layout, row, searchResults, unreadSection, type Html } from './pages';
+import { entryList, feedList, feedPath, layout, row, searchResults, unreadSection, type Html } from './pages';
 import { scopes, type Entry, type Scope, type Store } from './store';
 
 const WEB = new URL('../web/', import.meta.url).pathname;
@@ -42,7 +42,6 @@ const ENTRY_PAGES: Record<string, { title: string; scope: Scope }> = {
   '/archive': { title: 'Archive', scope: scopes.archive },
   '/bookmarks': { title: 'Bookmarks', scope: scopes.bookmarks },
 };
-const feedPath = (id: number) => `/feed/${id}`;
 
 export async function createApp(store: Store, onOpen: () => void = () => {}) {
   const { assets, version } = await loadAssets();

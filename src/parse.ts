@@ -8,7 +8,7 @@ export type Item = {
   published: number | null;
 };
 
-export type ParsedFeed = {
+type ParsedFeed = {
   title: string;
   items: Item[];
 };
@@ -25,7 +25,7 @@ const ENTITIES: Record<string, string> = {
   cent: '¢', pound: '£', euro: '€', yen: '¥',
 };
 
-export function decodeEntities(text: string): string {
+function decodeEntities(text: string): string {
   if (!text.includes('&')) return text;
   return text.replace(/&(#x?[0-9a-f]+|[a-z][a-z0-9]+);/gi, (match, entity: string) => {
     if (entity[0] !== '#') return ENTITIES[entity.toLowerCase()] ?? match;

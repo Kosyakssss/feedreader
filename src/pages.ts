@@ -19,6 +19,8 @@ export function html(strings: TemplateStringsArray, ...parts: Part[]): Html {
   return new Html(strings.reduce((out, text, index) => out + text + render(parts[index]), ''));
 }
 
+export const feedPath = (id: number) => `/feed/${id}`;
+
 const MAX_TITLE = 240;
 
 // Very long text keeps its true start and true end, so the part that says how
@@ -37,7 +39,7 @@ function dateLabel(ms: number): string {
 }
 
 const titleLink = (entry: Entry) => html`<a class="title" href="${entry.url}" target="_blank" rel="noopener">${capTitle(displayTitle(entry))}</a>`;
-const feedAndDate = (entry: Entry) => html`<small><a href="/feed/${entry.source_id}">${entry.feed}</a> ${dateLabel(entry.published_at)}</small>`;
+const feedAndDate = (entry: Entry) => html`<small><a href="${feedPath(entry.source_id)}">${entry.feed}</a> ${dateLabel(entry.published_at)}</small>`;
 
 export function row(entry: Entry): Html {
   const saved = entry.state === 'bookmarked';
@@ -61,7 +63,7 @@ const rows = (entries: Entry[]) => (entries.length ? entries.map(row) : html`<li
 
 const feedRow = (feed: Source) => html`
   <li>
-    <a href="/feed/${feed.id}">${feed.label}</a>
+    <a href="${feedPath(feed.id)}">${feed.label}</a>
     ${feed.folder ? html`<span class="muted">${feed.folder}</span>` : ''}
     ${feed.error ? html`<span class="failed">${feed.error}</span>` : ''}
   </li>
@@ -77,22 +79,22 @@ const resultRow = (entry: Entry) => html`
   </li>
 `;
 
+export const entryList = (entries: Entry[]) => html`<ol class="entries">${rows(entries)}</ol>`;
+export const feedList = (feeds: Source[]) => html`<ol>${feeds.map(feedRow)}</ol>`;
+
 export function searchResults(feeds: Source[], entries: Entry[]): Html {
   if (!feeds.length && !entries.length) return html`<p>Nothing found.</p>`;
   return html`
-    ${feeds.length ? html`<ol>${feeds.map(feedRow)}</ol>` : ''}
+    ${feeds.length ? feedList(feeds) : ''}
     ${entries.length ? html`<ol class="entries">${entries.map(resultRow)}</ol>` : ''}
   `;
 }
-
-export const entryList = (entries: Entry[]) => html`<ol class="entries">${rows(entries)}</ol>`;
-export const feedList = (feeds: Source[]) => html`<ol>${feeds.map(feedRow)}</ol>`;
 
 export const unreadSection = (entries: Entry[], newest: number) => html`
   <div id="unread">
     ${entries.length
       ? html`
-          <ol class="entries">${rows(entries)}</ol>
+          ${entryList(entries)}
           <button hx-post="/read-all/${newest}" hx-target="#unread" hx-swap="innerHTML">Mark all read</button>
         `
       : html`<p>Nothing unread.</p>`}
@@ -107,17 +109,15 @@ type Crumb = Link & { under?: Link[] };
 const FEEDS: Link = { href: '/feeds', label: 'Feeds' };
 const PAGES: Link[] = [{ href: '/all', label: 'All' }, { href: '/archive', label: 'Archive' }, { href: '/bookmarks', label: 'Bookmarks' }, FEEDS];
 
-const feedHref = (feed: Source) => `/feed/${feed.id}`;
-
 // Where a page sits. A crumb's `under` is the list of pages below it.
 function trailFor(path: string, feeds: Source[]): Crumb[] {
   const home: Crumb = { href: '/', label: APP_NAME, under: PAGES };
-  const feedsPage: Crumb = { ...FEEDS, under: feeds.map((feed) => ({ href: feedHref(feed), label: feed.label })) };
+  const feedsPage: Crumb = { ...FEEDS, under: feeds.map((feed) => ({ href: feedPath(feed.id), label: feed.label })) };
   if (path === '/') return [home];
   if (path === FEEDS.href) return [home, feedsPage];
   const page = PAGES.find((link) => link.href === path);
   if (page) return [home, page];
-  return [home, feedsPage, { href: path, label: feeds.find((feed) => feedHref(feed) === path)?.label ?? '' }];
+  return [home, feedsPage, { href: path, label: feeds.find((feed) => feedPath(feed.id) === path)?.label ?? '' }];
 }
 
 function menuPopover(id: string, links: Link[], trail: Crumb[]): Html {
