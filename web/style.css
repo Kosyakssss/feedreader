@@ -385,9 +385,10 @@ html:has(#search:popover-open) header button.icon {
   overflow-y: auto;
   scrollbar-width: none; /* the fades and the line already say there is more */
   --tip: calc(var(--reveal) * (100% + var(--list-top)) - var(--list-top)); /* the end of the line, measured down this list */
+  --soft: calc(max(var(--row), 25%) * 4 * var(--reveal) * (1 - var(--reveal))); /* widest mid-way, so a fast line never pops names in, and nothing at either end */
   mask-image:
     linear-gradient(transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent),
-    linear-gradient(#000 calc(var(--tip) - var(--row) * (1 - var(--reveal))), transparent var(--tip)); /* names appear as the line passes them */
+    linear-gradient(#000 calc(var(--tip) - var(--soft)), transparent var(--tip)); /* names appear as the line passes them */
   mask-composite: intersect;
   pointer-events: auto;
 }
