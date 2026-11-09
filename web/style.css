@@ -243,9 +243,8 @@ button.icon svg {
   d: path("M6 6L18 18");
 }
 
-/* Search covers everything below the header, so the only way to close it from
-   outside is to press something in the header. The icon in the popup starts
-   exactly on top of the one in the header, so they read as one icon moving. */
+/* The icon in the popup starts exactly on top of the one in the header, so
+   they read as one icon moving. */
 html:has(:popover-open) {
   overflow: hidden;
 }
@@ -284,6 +283,14 @@ html:has(#search:popover-open) header button.icon {
   margin: 0;
   padding: 0 max(1rem, (100% - 37em) / 2) 1rem;
   overflow: visible;
+  pointer-events: none;
+}
+
+/* Only the box and the results catch presses. Anywhere else lands on the veil
+   and closes search. */
+.search-bar,
+#results {
+  pointer-events: auto;
 }
 
 /* The list hangs from the slash: the slash stands up, the line draws down from
@@ -412,7 +419,7 @@ html:has(:popover-open) .veil {
 }
 
 #results {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
   opacity: 0;
