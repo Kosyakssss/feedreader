@@ -32,7 +32,7 @@
   --slash-time: calc(var(--open-time) * 0.4);
   --line-start: calc(var(--slash-time) / 2);
 
-  --press-time: max(var(--open-time), 0.2s);
+  --press-time: max(var(--line-start) + var(--open-time), 0.2s); /* as long as the line is moving */
 
   --glass-tint: color-mix(in srgb, var(--bg) 40%, transparent);
   --glass-blur: blur(14px);
