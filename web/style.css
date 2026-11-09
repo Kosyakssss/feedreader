@@ -39,6 +39,7 @@
 
 html {
   scrollbar-gutter: stable;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* One text size everywhere. The only exception is the feed and date on a row. */
@@ -73,9 +74,11 @@ button {
   cursor: pointer;
 }
 
-button:hover {
-  border-color: var(--ui-3);
-  color: var(--tx);
+@media (hover: hover) {
+  button:hover {
+    border-color: var(--ui-3);
+    color: var(--tx);
+  }
 }
 
 ::selection {
@@ -92,8 +95,18 @@ a {
   text-decoration: none;
 }
 
-a:hover,
-a.title:hover {
+/* Hover belongs to a mouse: on a touch screen it sticks after the tap. The
+   finger gets colour only for as long as it is pressing. */
+@media (hover: hover) {
+  a:hover,
+  a.title:hover {
+    color: var(--cy);
+  }
+}
+
+a:active,
+a.title:active,
+button:active {
   color: var(--cy);
 }
 
@@ -141,7 +154,7 @@ nav {
   touch-action: manipulation;
 }
 
-.crumb:has(> :is(button, .press-again):hover) {
+.crumb:has(> :is(button, .press-again):active) {
   color: var(--cy);
 }
 
@@ -183,13 +196,18 @@ nav {
   transition: rotate var(--slash-time) ease-in-out var(--line-time);
 }
 
-.crumb:has(> :is(button, .press-again):hover) .slash {
+.crumb:has(> :is(button, .press-again):active) .slash {
   background: currentcolor;
 }
 
 /* A slash stands upright when pressing its name would open a list from it. */
 @media (hover: hover) {
+  .crumb:has(> :is(button, .press-again):hover) {
+    color: var(--cy);
+  }
+
   .crumb:has(> :is(button, .press-again):hover) .slash {
+    background: currentcolor;
     rotate: 0deg;
     transition-delay: 0s;
   }
@@ -354,7 +372,13 @@ html:has(#search:popover-open) header button.icon {
   transition-delay: calc(var(--slash-time) + min(8, var(--i)) * var(--open-time) * 0.1);
 }
 
-.menu-list a:hover,
+@media (hover: hover) {
+  .menu-list a:hover {
+    color: var(--cy);
+  }
+}
+
+.menu-list a:active,
 .menu-list a:focus-visible {
   outline: none;
   color: var(--cy);
