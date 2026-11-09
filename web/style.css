@@ -1,30 +1,115 @@
+/* Flexoki, by Steph Ango. MIT licensed. https://stephango.com/flexoki */
 :root {
   color-scheme: light dark;
+
+  --bg: light-dark(#fffcf0, #100f0f);
+  --bg-2: light-dark(#f2f0e5, #1c1b1a);
+  --ui: light-dark(#e6e4d9, #282726);
+  --ui-2: light-dark(#dad8ce, #343331);
+  --ui-3: light-dark(#cecdc3, #403e3c);
+  --tx-3: light-dark(#b7b5ac, #575653);
+  --tx-2: light-dark(#6f6e69, #878580);
+  --tx: light-dark(#100f0f, #cecdc3);
+
+  --re: light-dark(#af3029, #d14d41);
+  --or: light-dark(#bc5215, #da702c);
+  --ye: light-dark(#ad8301, #d0a215);
+  --gr: light-dark(#66800b, #879a39);
+  --cy: light-dark(#24837b, #3aa99f);
+  --bl: light-dark(#205ea6, #4385be);
+  --pu: light-dark(#5e409d, #8b7ec8);
+  --ma: light-dark(#a02f6f, #ce5d97);
+
+  --font: -apple-system, BlinkMacSystemFont, "Inter", "IBM Plex Sans", "Segoe UI", Helvetica, Arial, sans-serif;
 }
 
+/* One text size everywhere. The only exception is the feed and date on a row. */
 body {
-  font: 16px/1.4 system-ui, sans-serif;
-  max-width: 72ch;
+  max-width: 37em;
   margin: 0 auto;
   padding: 1rem;
-  background: Canvas;
-  color: CanvasText;
+  background: var(--bg);
+  color: var(--tx);
+  font-family: var(--font);
+  font-size: calc(0.9375rem + 0.25vw);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+small,
+button,
+input {
+  font: inherit;
+}
+
+h1 {
+  margin-block: 1.5rem 1rem;
+}
+
+h2 {
+  margin-block: 1.5rem 0.5rem;
+  color: var(--tx-2);
+}
+
+::selection {
+  background: var(--ui-3);
+}
+
+:focus-visible {
+  outline: 2px solid var(--cy);
+  outline-offset: 2px;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+a:hover,
+a.title:hover {
+  color: var(--cy);
 }
 
 nav {
   display: flex;
   flex-wrap: wrap;
   gap: 1ch;
+  color: var(--tx-2);
 }
 
 [aria-current] {
-  font-weight: 600;
+  color: var(--tx);
 }
 
 input[type="search"] {
   width: 100%;
   box-sizing: border-box;
-  font: inherit;
+  padding: 0.25em 0.5em;
+  border: 1px solid var(--ui-2);
+  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--tx);
+}
+
+input[type="search"]::placeholder {
+  color: var(--tx-2);
+}
+
+button {
+  padding: 0 0.5em;
+  border: 1px solid var(--ui-2);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tx-2);
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--ui-3);
+  color: var(--tx);
 }
 
 ol {
@@ -43,14 +128,20 @@ li {
   column-gap: 1ch;
 }
 
+.row small {
+  color: var(--tx-2);
+  font-size: 0.875em;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Off-screen rows skip rendering, which also keeps them out of view transitions. */
 #list > li {
   content-visibility: auto;
   contain-intrinsic-block-size: auto 3em;
 }
 
-/* titles.js shortens titles that don't fit. This handles the rest: a single
-   word wider than the line. */
+/* titles.js shortens titles that don't fit. This handles the rest: text it
+   can't cut at all. */
 .title {
   flex: 1 0 100%;
   width: 100%;
@@ -60,12 +151,22 @@ li {
   text-overflow: ellipsis;
 }
 
-.saved {
-  color: light-dark(#a15c00, #f0a040);
+.title:visited {
+  color: var(--tx-2);
 }
 
-.failed {
-  color: light-dark(#c00, #ff6b6b);
+.muted {
+  color: var(--tx-2);
+}
+
+.saved {
+  color: var(--or);
+}
+
+.failed,
+button.failed {
+  color: var(--re);
+  border-color: var(--re);
 }
 
 .htmx-request {

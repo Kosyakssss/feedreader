@@ -25,8 +25,8 @@
   {{range .}}
     <li>
       <a href="/feed/{{.ID}}">{{.Label}}</a>
-      {{if .Folder}}<small>{{.Folder}}</small>{{end}}
-      {{if .Error}}<small class="failed">{{.Error}}</small>{{end}}
+      {{if .Folder}}<span class="muted">{{.Folder}}</span>{{end}}
+      {{if .Error}}<span class="failed">{{.Error}}</span>{{end}}
     </li>
   {{end}}
 {{end}}

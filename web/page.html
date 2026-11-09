@@ -27,7 +27,6 @@
       {{if eq .Kind "unread"}}
         <div id="unread">
           {{if .Rows}}
-            <button onclick="document.querySelectorAll('#list a.title').forEach(link => open(link.href, '_blank', 'noopener'))">Open all</button>
             <ol id="list">
               {{template "rows" .Rows}}
             </ol>
