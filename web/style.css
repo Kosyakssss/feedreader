@@ -47,9 +47,8 @@ body {
   --header-height: calc(1.4em + 1rem);
   --search-gap: 1em;
   --search-rise: calc(-0.5rem - 1.4em - var(--search-gap));
-  max-width: 37em;
-  margin: 0 auto;
-  padding: 0 1rem 1rem;
+  --gutter: max(1rem, (100% - 37em) / 2);
+  margin: 0;
   background: var(--bg);
   color: var(--tx);
   font-family: var(--font);
@@ -110,6 +109,13 @@ button:active {
   color: var(--cy);
 }
 
+main {
+  box-sizing: border-box;
+  max-width: calc(37em + 2rem);
+  margin-inline: auto;
+  padding: 0 1rem 1rem;
+}
+
 /* Named so that rows moving during a page change pass under it, not over it. */
 header {
   position: sticky;
@@ -121,6 +127,7 @@ header {
   gap: 1ch;
   height: var(--header-height);
   margin-block-end: 1rem;
+  padding-inline: var(--gutter);
   background: var(--bg);
   view-transition-name: header;
 }
@@ -299,7 +306,7 @@ html:has(#search:popover-open) header button.icon {
   height: calc(100dvh - var(--header-height));
   max-height: none;
   margin: 0;
-  padding: 0 max(1rem, (100% - 37em) / 2) 1rem;
+  padding: 0 var(--gutter) 1rem;
   overflow: visible;
   pointer-events: none;
 }
