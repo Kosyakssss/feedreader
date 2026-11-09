@@ -475,15 +475,18 @@ html:has(#search:popover-open) header button.icon {
 
 /* The header sits on glass. When a popup opens, the veil fades in over the
    whole window while the glass fades out, so there is one blur and no line
-   where two would meet. Switching between popups leaves the veil in place. */
+   where two would meet. Switching between popups leaves the veil in place.
+   An exception: on closing the page stays blurred until the names have gone,
+   or for a few frames they would sit on top of readable text. */
 .header-glass,
 .veil {
+  --clear-after: calc(var(--open-time) * 0.35);
   position: fixed;
   top: 0;
   right: 0;
   left: 0;
   z-index: 1;
-  transition: background-color var(--open-time) var(--ease), backdrop-filter var(--open-time) var(--ease);
+  transition: background-color var(--open-time) var(--ease) var(--clear-after), backdrop-filter var(--open-time) var(--ease) var(--clear-after);
 }
 
 .header-glass {
@@ -495,12 +498,13 @@ html:has(#search:popover-open) header button.icon {
 html:has(:popover-open) .header-glass {
   background-color: transparent;
   backdrop-filter: none;
+  transition-delay: 0s;
 }
 
 .veil {
   bottom: 0;
   visibility: hidden;
-  transition: background-color var(--open-time) var(--ease), backdrop-filter var(--open-time) var(--ease), visibility 0s var(--open-time);
+  transition: background-color var(--open-time) var(--ease) var(--clear-after), backdrop-filter var(--open-time) var(--ease) var(--clear-after), visibility 0s calc(var(--open-time) + var(--clear-after));
 }
 
 /* A blur ends at a definite distance, and on a dark screen its first shade
@@ -511,11 +515,12 @@ html:has(:popover-open) .header-glass {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .03 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
   content: "";
   opacity: 0;
-  transition: opacity var(--open-time) var(--ease);
+  transition: opacity var(--open-time) var(--ease) var(--clear-after);
 }
 
 html:has(:popover-open) .veil::after {
   opacity: 1;
+  transition-delay: 0s;
 }
 
 html:has(:popover-open) .veil {
