@@ -112,14 +112,14 @@ const searchDialog = html`
   <dialog id="search">
     <div class="search-bar">
       <input
-        type="search"
+        type="text"
         name="q"
         placeholder="Search"
         aria-label="Search"
         autocomplete="off"
         autofocus
         hx-get="/search"
-        hx-trigger="input changed delay:200ms, search"
+        hx-trigger="input changed delay:200ms"
         hx-target="#results"
         hx-swap="innerHTML"
         hx-sync="this:replace"
