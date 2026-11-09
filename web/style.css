@@ -125,18 +125,6 @@ nav {
   color: inherit;
 }
 
-.crumb-home {
-  anchor-name: --crumb-home;
-}
-
-.crumb-0 {
-  anchor-name: --crumb-0;
-}
-
-.crumb-1 {
-  anchor-name: --crumb-1;
-}
-
 .slash-0 {
   anchor-name: --slash-0;
 }
@@ -153,8 +141,8 @@ nav {
   }
 }
 
-header:has(#menu-0[open]) .slash-0,
-header:has(#menu-1[open]) .slash-1 {
+header:has(#menu-0:popover-open) .slash-0,
+header:has(#menu-1:popover-open) .slash-1 {
   rotate: -13.5deg;
 }
 
@@ -205,7 +193,7 @@ dialog[open] .handle {
 
 /* Search opens below the header. The icon in the popup starts exactly on top
    of the one in the header, so the two read as a single icon moving. */
-html:has(dialog[open]) {
+html:has(dialog[open], :popover-open) {
   overflow: hidden;
 }
 
@@ -218,7 +206,8 @@ html:has(#search[open]) header button.icon {
   transition-delay: 0s;
 }
 
-dialog {
+dialog,
+.menu {
   position: fixed;
   box-sizing: border-box;
   border: 0;
@@ -228,7 +217,8 @@ dialog {
   transition: display var(--open-time) allow-discrete, overlay var(--open-time) allow-discrete;
 }
 
-dialog[open] {
+dialog[open],
+.menu:popover-open {
   display: flex;
 }
 
@@ -258,6 +248,11 @@ dialog[open] {
   margin: 0;
   padding: 0.5em 0 0 0.6em;
   overflow: hidden;
+  pointer-events: none;
+}
+
+html:has(.menu:popover-open) main {
+  pointer-events: none;
 }
 
 #menu-0 {
@@ -279,13 +274,14 @@ dialog[open] {
   transition: transform var(--open-time) ease-in-out;
 }
 
-.menu[open]::before {
+.menu:popover-open::before {
   transform: scaleY(1);
 }
 
 .menu-list {
   min-height: 0;
   overflow-y: auto;
+  pointer-events: auto;
 }
 
 .menu-list a {
@@ -301,7 +297,7 @@ dialog[open] {
   transition-delay: calc(min(8, var(--n) - var(--i)) * var(--open-time) * 0.06);
 }
 
-.menu[open] .menu-list a {
+.menu:popover-open .menu-list a {
   opacity: 1;
   translate: 0 0;
   transition-delay: calc(var(--open-time) * 0.3 + min(8, var(--i)) * var(--open-time) * 0.1);
@@ -317,33 +313,9 @@ dialog[open] {
   color: var(--tx-2);
 }
 
-/* Covers the pressed name for a moment after the menu opens, so that a quick
-   second press goes to that page. A later press just closes the menu. */
-.again {
-  position: fixed;
-  top: anchor(top);
-  right: anchor(right);
-  bottom: anchor(bottom);
-  left: anchor(left);
-  visibility: hidden;
-  touch-action: manipulation;
-  transition: visibility 0s linear 0.4s;
-}
-
-.again-home {
-  position-anchor: --crumb-home;
-}
-
-.again-0 {
-  position-anchor: --crumb-0;
-}
-
-.again-1 {
-  position-anchor: --crumb-1;
-}
-
 /* The blur spreads down the page from the header, with a soft leading edge. */
-dialog::backdrop {
+dialog::backdrop,
+.menu::backdrop {
   top: var(--header-height);
   background: color-mix(in srgb, var(--bg) 40%, transparent);
   backdrop-filter: blur(14px);
@@ -352,7 +324,8 @@ dialog::backdrop {
   transition: mask-size var(--open-time) ease-in-out, display var(--open-time) allow-discrete, overlay var(--open-time) allow-discrete;
 }
 
-dialog[open]::backdrop {
+dialog[open]::backdrop,
+.menu:popover-open::backdrop {
   mask-size: 100% 125%;
 }
 
@@ -407,20 +380,17 @@ dialog[open] #results {
 
 /* Where each moving part starts from when a popup opens. */
 @starting-style {
-  .menu[open]::before {
+  .menu:popover-open::before {
     transform: scaleY(0);
   }
 
-  .menu[open] .menu-list a {
+  .menu:popover-open .menu-list a {
     opacity: 0;
     translate: -6px 0;
   }
 
-  .menu[open] .again {
-    visibility: visible;
-  }
-
-  dialog[open]::backdrop {
+  dialog[open]::backdrop,
+  .menu:popover-open::backdrop {
     mask-size: 100% 0;
   }
 

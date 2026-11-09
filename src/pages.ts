@@ -130,32 +130,26 @@ function breadcrumbs(menus: Menu[]): Html {
   const crumbs = menus.filter((menu) => menu.current !== undefined);
   return html`
     <nav>
-      <button class="crumb home crumb-home" commandfor="menu-0" command="show-modal" ${atHome ? html`aria-current="page"` : ''}>${APP_NAME}${slash(0)}</button>
+      <button class="crumb home" popovertarget="menu-0" hx-on:dblclick="location.href = '/'" ${atHome ? html`aria-current="page"` : ''}>${APP_NAME}${slash(0)}</button>
       ${crumbs.map((menu, level) => {
         const link = menu.links.find((candidate) => candidate.href === menu.current);
         const last = level === crumbs.length - 1;
-        return html`<button class="crumb crumb-${level}" commandfor="menu-${level}" command="show-modal" ${last ? html`aria-current="page"` : ''}>${link?.label}${!last || hasSubPages(menu.current ?? '') ? slash(level + 1) : ''}</button>`;
+        return html`<button class="crumb" popovertarget="menu-${level}" hx-on:dblclick="location.href = '${menu.current}'" ${last ? html`aria-current="page"` : ''}>${link?.label}${!last || hasSubPages(menu.current ?? '') ? slash(level + 1) : ''}</button>`;
       })}
     </nav>
   `;
 }
 
-// The menu locks the header, so a second press can't reach the name. This
-// invisible link sits over the name for a moment and catches that press.
-const pressAgain = (name: string, href: string) => html`<a class="again again-${name}" href="${href}" tabindex="-1" aria-hidden="true"></a>`;
-
 function menuDialog(menu: Menu, level: number): Html {
   const count = menu.links.length;
   return html`
-    <dialog class="menu" id="menu-${level}" closedby="any">
+    <div class="menu" id="menu-${level}" popover>
       <div class="menu-list">
         ${menu.links.map(
           (link, index) => html`<a href="${link.href}" style="--i: ${index}; --n: ${count}" ${link.href === menu.current ? html`aria-current="page"` : ''}>${link.label}${hasSubPages(link.href) ? '/' : ''}</a>`,
         )}
       </div>
-      ${level === 0 ? pressAgain('home', '/') : ''}
-      ${menu.current ? pressAgain(String(level), menu.current) : ''}
-    </dialog>
+    </div>
   `;
 }
 
