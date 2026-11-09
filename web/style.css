@@ -52,7 +52,8 @@ html {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* One text size everywhere. The only exception is the feed and date on a row. */
+/* One text size for reading. The breadcrumbs and their menus are slightly larger,
+   and the feed and date on a row slightly smaller. */
 body {
   --header-height: calc(1.4em + 1.75rem);
   --edge: 1.25rem;
@@ -146,6 +147,7 @@ nav {
   display: flex;
   min-width: 0;
   color: var(--tx-2);
+  font-size: 1.1em;
 }
 
 /* A name and the slash after it are one thing to press. */
