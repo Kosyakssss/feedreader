@@ -571,26 +571,27 @@ html:has(:popover-open:not(.closing)) .veil {
   opacity: 1;
 }
 
-/* Where each moving part starts from when a popup opens. */
+/* Where each moving part starts from when a popup opens. The selectors match
+   the open state exactly, or the open state wins and nothing moves. */
 @starting-style {
-  .menu:popover-open {
+  .menu:popover-open:not(.closing) {
     --reveal: 0;
   }
 
-  #search:popover-open .search-bar {
+  #search:popover-open:not(.closing) .search-bar {
     translate: 0 var(--search-rise);
   }
 
-  #search:popover-open .search-bar input,
-  #search:popover-open #results {
+  #search:popover-open:not(.closing) .search-bar input,
+  #search:popover-open:not(.closing) #results {
     opacity: 0;
   }
 
-  #search:popover-open .lens {
+  #search:popover-open:not(.closing) .lens {
     transform: translate(0, 0) rotate(0deg) scale(1, 1);
   }
 
-  #search:popover-open .handle {
+  #search:popover-open:not(.closing) .handle {
     stroke-dasharray: 0.286 1;
     stroke-dashoffset: -0.714;
   }
