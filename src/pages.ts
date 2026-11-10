@@ -1,5 +1,5 @@
 // What every page looks like.
-import { displayTitle, type Entry, type Source } from './store';
+import { displayTitle, type Entry, type Source } from './lib/server/store';
 
 export class Html {
   constructor(readonly value: string) {}

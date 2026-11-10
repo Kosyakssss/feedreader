@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "serve": "bun run src/main.ts serve",
+    "serve": "bun run src/cli.ts serve",
     "check": "bun check",
     "test": "bun test"
   },

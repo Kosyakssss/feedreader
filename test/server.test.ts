@@ -1,7 +1,7 @@
 import { beforeEach, expect, test } from 'bun:test';
-import type { Item } from '../src/parse';
+import type { Item } from '../src/lib/server/parse';
 import { createApp } from '../src/server';
-import { scopes, Store } from '../src/store';
+import { scopes, Store } from '../src/lib/server/store';
 
 const BASE = 'http://reader.test';
 let store: Store;

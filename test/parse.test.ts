@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { cleanTitle, parseDate, parseFeed, plain } from '../src/parse';
+import { cleanTitle, parseDate, parseFeed, plain } from '../src/lib/server/parse';
 
 const BASE = 'https://example.com/feed.xml';
 const parse = (xml: string) => parseFeed(new TextEncoder().encode(xml), 'application/xml', BASE);

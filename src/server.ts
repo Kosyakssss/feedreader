@@ -1,6 +1,6 @@
 // Answers requests. Pages are built ahead of time and kept in memory.
 import { entryList, feedList, feedPath, layout, row, searchResults, unreadSection, type Html } from './pages';
-import { scopes, type Entry, type Scope, type Store } from './store';
+import { scopes, type Entry, type Scope, type Store } from './lib/server/store';
 
 const WEB = new URL('../web/', import.meta.url).pathname;
 const HTML = 'text/html; charset=utf-8';

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { shorten } from '../web/js/shorten';
+import { shorten } from '../src/lib/shorten';
 
 // Every character is one unit wide, so widths are easy to reason about.
 const measure = (text: string) => [...text].length;

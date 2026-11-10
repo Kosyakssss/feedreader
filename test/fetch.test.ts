@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { earliestAfter, restFor } from '../src/fetch';
+import { earliestAfter, restFor } from '../src/lib/server/fetch';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;

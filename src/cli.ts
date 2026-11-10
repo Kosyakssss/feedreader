@@ -1,8 +1,8 @@
 // The command line: serve, entries, add, check.
 import { parseArgs } from 'node:util';
-import { discover, Fetcher, fetchSource } from './fetch';
+import { discover, Fetcher, fetchSource } from './lib/server/fetch';
 import { createApp } from './server';
-import { Store, type State } from './store';
+import { Store, type State } from './lib/server/store';
 
 const USAGE = `lagan serve   [--db path] [--listen addr,addr]
 lagan entries [--db path] [--unread | --bookmarked]

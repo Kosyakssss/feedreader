@@ -1,7 +1,7 @@
 import { beforeEach, expect, test } from 'bun:test';
-import type { FetchResult } from '../src/fetch';
-import type { Item } from '../src/parse';
-import { scopes, Store, type Source } from '../src/store';
+import type { FetchResult } from '../src/lib/server/fetch';
+import type { Item } from '../src/lib/server/parse';
+import { scopes, Store, type Source } from '../src/lib/server/store';
 
 let store: Store;
 let feed: Source;

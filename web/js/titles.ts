@@ -1,5 +1,5 @@
 // Shortens titles that don't fit on one line, as they arrive on the page.
-import { shorten } from './shorten';
+import { shorten } from '../../src/lib/shorten';
 
 const canvas = document.createElement('canvas').getContext('2d')!;
 const measure = (text: string) => canvas.measureText(text).width;
