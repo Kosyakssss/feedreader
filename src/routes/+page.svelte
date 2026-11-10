@@ -9,7 +9,7 @@
   const rows = $derived(new Rows(data.entries, () => true));
 </script>
 
-<svelte:head><title>Unread</title></svelte:head>
+<svelte:head><title>Lagan</title></svelte:head>
 
 {#if rows.list.length}
   <EntryList {rows} />
