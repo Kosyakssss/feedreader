@@ -48,7 +48,7 @@ function isPublic(address: string): boolean {
 async function assertPublic(url: URL): Promise<void> {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Only http and https are allowed');
   const host = url.hostname.replace(/^\[|\]$/g, '');
-  const addresses = isIP(host) ? [host] : (await Bun.dns.lookup(host)).map((record) => record.address);
+  const addresses = isIP(host) ? [host] : (await Bun.dns.lookup(host)).map((found) => found.address);
   if (!addresses.length || !addresses.every(isPublic)) throw new Error('Not a public address');
 }
 

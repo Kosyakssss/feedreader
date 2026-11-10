@@ -35,16 +35,16 @@ function decodeEntities(text: string): string {
 }
 
 // Turns a body of HTML into one line of text.
-export function plain(markup: string): string {
-  const noHidden = markup.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<!--[\s\S]*?-->/gi, ' ');
+export function plain(html: string): string {
+  const noHidden = html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<!--[\s\S]*?-->/gi, ' ');
   return decodeEntities(noHidden.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
 }
 
 // A title that says nothing is no title: the row shows the entry's text instead.
-export function cleanTitle(title: string, link: string): string {
+export function cleanTitle(title: string, url: string): string {
   const clean = title.replace(/\s+/g, ' ').trim();
   if (['untitled', '(untitled)', 'no title', '(no title)', '[no title]'].includes(clean.toLowerCase())) return '';
-  return clean === link ? '' : clean;
+  return clean === url ? '' : clean;
 }
 
 const isNode = (value: unknown): value is Node => !!value && typeof value === 'object' && !Array.isArray(value);

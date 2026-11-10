@@ -30,11 +30,12 @@ test('the cut is near the golden point', () => {
   expect(share).toBeLessThan(0.75);
 });
 
+const words = (text: string) => text.replace(' … ', ' ').split(' ').length;
+
 test('a title one letter too long loses a whole word', () => {
   const title = 'Outlook rejected mail without DMARC. Check your domain.';
   const shown = shorten(title, title.length - 1, measure);
   expect(shown).toContain(' … ');
-  const words = (text: string) => text.replace(' … ', ' ').split(' ').length;
   expect(words(shown)).toBeLessThan(words(title));
 });
 
