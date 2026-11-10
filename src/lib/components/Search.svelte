@@ -41,8 +41,18 @@
 {#if popups.isShown('search')}
   <div id="search" class="popup" class:closing={popups.isClosing('search')}>
     <div class="search-bar">
-      <input bind:this={input} bind:value={query} oninput={ask} type="text" placeholder="Search" aria-label="Search" autocomplete="off" />
-      <button class="icon" aria-label="Close search" data-popup-toggle onclick={() => popups.close()}><SearchIcon /></button>
+      <input
+        bind:this={input}
+        bind:value={query}
+        oninput={ask}
+        type="text"
+        placeholder="Search"
+        aria-label="Search"
+        autocomplete="off"
+      />
+      <button class="icon" aria-label="Close search" data-popup-toggle onclick={() => popups.close()}>
+        <SearchIcon />
+      </button>
     </div>
     <!-- Results are plain links: an entry goes out to its post, a feed to its page. -->
     <div id="results">

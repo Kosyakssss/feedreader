@@ -11,7 +11,11 @@ function moving(update: () => void): Promise<void> {
   return document.startViewTransition(() => flushSync(update)).updateCallbackDone;
 }
 
-const post = (path: string) => fetch(path, { method: 'POST' }).then((response) => response.ok, () => false);
+const post = (path: string) =>
+  fetch(path, { method: 'POST' }).then(
+    (response) => response.ok,
+    () => false,
+  );
 
 export class Rows {
   list = $state<Entry[]>([]);
@@ -31,7 +35,9 @@ export class Rows {
     const after: Entry = { ...entry, state: entry.state === 'bookmarked' ? 'read' : 'bookmarked' };
     this.failed.delete(entry.id);
     const shown = moving(() => {
-      this.list = this.leaves(after) ? before.filter((row) => row.id !== entry.id) : before.map((row) => (row.id === entry.id ? after : row));
+      this.list = this.leaves(after)
+        ? before.filter((row) => row.id !== entry.id)
+        : before.map((row) => (row.id === entry.id ? after : row));
     });
     const saved = await post(`/api/bookmark/${entry.id}`);
     await shown; // a quick failure must not be undone before the change is even shown

@@ -76,7 +76,11 @@ const SEARCH_LIMIT = 200;
 const EARLIEST_DATE = 631_152_000_000; // 1990: anything earlier is a broken date
 const DAY = 86_400_000;
 
-const wordsOf = (text: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+const wordsOf = (text: string) =>
+  text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
 
 // Every typed word must be a word of the title. The last one may still be being
 // typed, so it can match the start of a word.
@@ -115,7 +119,11 @@ export class Store {
   }
 
   lastPost(id: number): number {
-    return this.db.query<{ last: number | null }, [number]>('SELECT max(published_at) AS last FROM entries WHERE source_id = ?').get(id)?.last ?? 0;
+    return (
+      this.db
+        .query<{ last: number | null }, [number]>('SELECT max(published_at) AS last FROM entries WHERE source_id = ?')
+        .get(id)?.last ?? 0
+    );
   }
 
   // Stores a fetch and returns how many entries it added or changed.
@@ -126,9 +134,13 @@ export class Store {
     const allSameDate = result.items.length > 3 && dates.size === 1;
     const current = new Set(result.items.map((item) => item.guid));
 
-    const moved = this.db.query<{ id: number; guid: string }, [number, string, number, string]>('SELECT id, guid FROM entries WHERE source_id = ? AND title = ? AND published_at = ? AND guid <> ?');
+    const moved = this.db.query<{ id: number; guid: string }, [number, string, number, string]>(
+      'SELECT id, guid FROM entries WHERE source_id = ? AND title = ? AND published_at = ? AND guid <> ?',
+    );
     const repoint = this.db.query('UPDATE OR IGNORE entries SET guid = ?, url = ? WHERE id = ?');
-    const insert = this.db.query(`INSERT OR IGNORE INTO entries (source_id, guid, url, published_at, state, title, text) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    const insert = this.db.query(
+      `INSERT OR IGNORE INTO entries (source_id, guid, url, published_at, state, title, text) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
 
     return this.db.transaction(() => {
       let changed = 0;
@@ -136,26 +148,38 @@ export class Store {
         // Some sites change every item's id when they redeploy. The same title at
         // the same moment in the same feed is the same post, unless the other one
         // is still in this very fetch.
-        const old = item.title && item.published ? moved.all(source.id, item.title, item.published, item.guid).find((row) => !current.has(row.guid)) : undefined;
-        const usable = item.published !== null && item.published > EARLIEST_DATE && item.published <= now + DAY && !allSameDate;
-        changed += old ? repoint.run(item.guid, item.url, old.id).changes : insert.run(source.id, item.guid, item.url, usable ? item.published : now, state, item.title, item.text).changes;
+        const old =
+          item.title && item.published
+            ? moved.all(source.id, item.title, item.published, item.guid).find((row) => !current.has(row.guid))
+            : undefined;
+        const usable =
+          item.published !== null && item.published > EARLIEST_DATE && item.published <= now + DAY && !allSameDate;
+        changed += old
+          ? repoint.run(item.guid, item.url, old.id).changes
+          : insert.run(source.id, item.guid, item.url, usable ? item.published : now, state, item.title, item.text)
+              .changes;
       }
       const failed = !!result.error;
-      this.db.run(`UPDATE sources SET fetched_at = ?, next_at = ?, failures = ?, error = ?, etag = ?, last_modified = ? WHERE id = ?`, [
-        now,
-        Math.round(nextAt),
-        failures,
-        result.error ?? '',
-        failed ? source.etag : (result.etag ?? ''),
-        failed ? source.last_modified : (result.lastModified ?? ''),
-        source.id,
-      ]);
+      this.db.run(
+        `UPDATE sources SET fetched_at = ?, next_at = ?, failures = ?, error = ?, etag = ?, last_modified = ? WHERE id = ?`,
+        [
+          now,
+          Math.round(nextAt),
+          failures,
+          result.error ?? '',
+          failed ? source.etag : (result.etag ?? ''),
+          failed ? source.last_modified : (result.lastModified ?? ''),
+          source.id,
+        ],
+      );
       return changed;
     })();
   }
 
   knownCount(sourceId: number, items: FetchResult['items']): number {
-    const known = this.db.query(`SELECT 1 FROM entries WHERE source_id = ? AND (guid = ? OR (url <> '' AND url = ?) OR (title <> '' AND title = ? AND published_at = ?)) LIMIT 1`);
+    const known = this.db.query(
+      `SELECT 1 FROM entries WHERE source_id = ? AND (guid = ? OR (url <> '' AND url = ?) OR (title <> '' AND title = ? AND published_at = ?)) LIMIT 1`,
+    );
     return items.filter((item) => known.get(sourceId, item.guid, item.url, item.title, item.published ?? 0)).length;
   }
 
@@ -175,7 +199,11 @@ export class Store {
     if (!typed.length) return [];
     const exact: Entry[] = [];
     const partial: Entry[] = [];
-    const everything = this.db.query<Entry, []>(`SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id ORDER BY e.published_at DESC, e.id DESC`).all();
+    const everything = this.db
+      .query<Entry, []>(
+        `SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id ORDER BY e.published_at DESC, e.id DESC`,
+      )
+      .all();
     for (const entry of everything) {
       const found = matchWords(typed, wordsOf(displayTitle(entry)));
       if (found === 'exact') exact.push(entry);
@@ -199,23 +227,42 @@ export class Store {
 
   // Bookmarked becomes read; anything else becomes bookmarked.
   toggleBookmark(id: number): Entry | null {
-    this.db.run(`UPDATE entries SET state = CASE state WHEN 'bookmarked' THEN 'read' ELSE 'bookmarked' END WHERE id = ?`, [id]);
-    return this.db.query<Entry, [number]>(`SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id WHERE e.id = ?`).get(id);
+    this.db.run(
+      `UPDATE entries SET state = CASE state WHEN 'bookmarked' THEN 'read' ELSE 'bookmarked' END WHERE id = ?`,
+      [id],
+    );
+    return this.db
+      .query<Entry, [number]>(`SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id WHERE e.id = ?`)
+      .get(id);
   }
 
   // Marks entries read up to the newest one the page was showing, so anything
   // that arrived after the page loaded stays unread. Returns the feeds touched.
   readAll(upto: number): number[] {
-    const rows = this.db.query<{ source_id: number }, [number]>(`UPDATE entries SET state = 'read' WHERE state = 'unread' AND id <= ? RETURNING source_id`).all(upto);
+    const rows = this.db
+      .query<{ source_id: number }, [number]>(
+        `UPDATE entries SET state = 'read' WHERE state = 'unread' AND id <= ? RETURNING source_id`,
+      )
+      .all(upto);
     return [...new Set(rows.map((row) => row.source_id))];
   }
 
   export(state?: State) {
     const where = state ? 'WHERE e.state = ?' : '';
     const rows = this.db
-      .query<Entry, SQLQueryBindings[]>(`SELECT e.id, e.source_id, s.label AS feed, e.url, e.published_at, e.state, e.title, e.text FROM entries e JOIN sources s ON s.id = e.source_id ${where} ORDER BY e.published_at DESC, e.id DESC`)
+      .query<Entry, SQLQueryBindings[]>(
+        `SELECT e.id, e.source_id, s.label AS feed, e.url, e.published_at, e.state, e.title, e.text FROM entries e JOIN sources s ON s.id = e.source_id ${where} ORDER BY e.published_at DESC, e.id DESC`,
+      )
       .all(...(state ? [state] : []));
-    return rows.map((row) => ({ id: row.id, feed: row.feed, title: displayTitle(row), url: row.url, published: new Date(row.published_at).toISOString(), state: row.state, text: row.text }));
+    return rows.map((row) => ({
+      id: row.id,
+      feed: row.feed,
+      title: displayTitle(row),
+      url: row.url,
+      published: new Date(row.published_at).toISOString(),
+      state: row.state,
+      text: row.text,
+    }));
   }
 
   // Folds together copies of one post left behind by a site that changed its
@@ -244,7 +291,10 @@ export class Store {
       let removed = 0;
       for (const group of groups.values()) {
         if (group.length < 2) continue;
-        const state = group.reduce((best, copy) => (strength[copy.state] > strength[best] ? copy.state : best), group[0]!.state);
+        const state = group.reduce(
+          (best, copy) => (strength[copy.state] > strength[best] ? copy.state : best),
+          group[0]!.state,
+        );
         for (const extra of group.slice(1)) {
           this.db.run('DELETE FROM entries WHERE id = ?', [extra.id]);
           removed++;

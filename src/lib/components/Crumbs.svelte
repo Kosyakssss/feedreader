@@ -1,8 +1,11 @@
 <script lang="ts">
   import { popups } from '#lib/popups.svelte.ts';
-  import { FEEDS, type Crumb } from '#lib/trail.ts';
+  import { FEEDS, type Crumb, type Link } from '#lib/trail.ts';
 
   let { trail }: { trail: Crumb[] } = $props();
+
+  const onTrail = (href: string) => (trail.some((crumb) => crumb.href === href) ? 'page' : undefined);
+  const label = (link: Link) => (link === FEEDS ? `${link.label}/` : link.label);
 </script>
 
 <!-- Pressing a name opens or closes what is under it. While the menu is still
@@ -14,13 +17,15 @@
     {#if step.under}
       {@const id = `menu-${index}`}
       <div class="crumb" aria-current={current}>
-        <button aria-expanded={popups.isOpen(id)} data-popup-toggle onclick={() => popups.toggle(id)}>{step.label}<span class="slash"></span></button>
+        <button aria-expanded={popups.isOpen(id)} data-popup-toggle onclick={() => popups.toggle(id)}>
+          {step.label}<span class="slash"></span>
+        </button>
         <a class="press-again" href={step.href} tabindex="-1" aria-hidden="true"></a>
         {#if popups.isShown(id)}
           <div class="menu popup" class:closing={popups.isClosing(id)}>
             <div class="menu-list">
               {#each step.under as link (link.href)}
-                <a href={link.href} aria-current={trail.some((crumb) => crumb.href === link.href) ? 'page' : undefined}>{link.label}{link === FEEDS ? '/' : ''}</a>
+                <a href={link.href} aria-current={onTrail(link.href)}>{label(link)}</a>
               {/each}
             </div>
           </div>

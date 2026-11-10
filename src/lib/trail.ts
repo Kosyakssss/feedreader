@@ -6,7 +6,12 @@ export type Crumb = Link & { under?: Link[] };
 
 export const APP_NAME = 'Lagan';
 export const FEEDS: Link = { href: '/feeds', label: 'Feeds' };
-export const PAGES: Link[] = [{ href: '/all', label: 'All' }, { href: '/archive', label: 'Archive' }, { href: '/bookmarks', label: 'Bookmarks' }, FEEDS];
+export const PAGES: Link[] = [
+  { href: '/all', label: 'All' },
+  { href: '/archive', label: 'Archive' },
+  { href: '/bookmarks', label: 'Bookmarks' },
+  FEEDS,
+];
 
 export function trailFor(path: string, feeds: { id: number; label: string }[]): Crumb[] {
   const home: Crumb = { href: '/', label: APP_NAME, under: PAGES };

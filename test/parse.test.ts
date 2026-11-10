@@ -30,7 +30,11 @@ test('Atom uses the alternate link and resolves relative ones', () => {
     <id>tag:1</id><title>A</title><updated>2026-01-02T03:04:05Z</updated>
     <link rel="self" href="/self"/><link rel="alternate" href="/posts/a"/>
   </entry></feed>`);
-  expect(feed.items[0]).toMatchObject({ guid: 'tag:1', url: 'https://example.com/posts/a', published: Date.UTC(2026, 0, 2, 3, 4, 5) });
+  expect(feed.items[0]).toMatchObject({
+    guid: 'tag:1',
+    url: 'https://example.com/posts/a',
+    published: Date.UTC(2026, 0, 2, 3, 4, 5),
+  });
 });
 
 test('nested XHTML content still gives text', () => {
@@ -41,18 +45,27 @@ test('nested XHTML content still gives text', () => {
 });
 
 test('RDF feeds are read', () => {
-  const feed = parse(`<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><channel><title>Site</title></channel>
+  const feed =
+    parse(`<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><channel><title>Site</title></channel>
     <item rdf:about="https://example.com/a"><title>A</title><link>https://example.com/a</link></item></rdf:RDF>`);
   expect(feed.items[0]!.guid).toBe('https://example.com/a');
 });
 
 test('JSON Feed is read', () => {
-  const feed = parse(JSON.stringify({ version: 'https://jsonfeed.org/version/1.1', title: 'Site', items: [{ id: '1', url: 'https://example.com/a', content_text: 'Hello' }] }));
+  const feed = parse(
+    JSON.stringify({
+      version: 'https://jsonfeed.org/version/1.1',
+      title: 'Site',
+      items: [{ id: '1', url: 'https://example.com/a', content_text: 'Hello' }],
+    }),
+  );
   expect(feed.items[0]).toMatchObject({ guid: '1', title: '', text: 'Hello' });
 });
 
 test('an HTML entity XML does not know does not break the feed', () => {
-  const feed = parse(`<rss><channel><item><title>A&nbsp;B &mystery; C</title><link>https://example.com/a</link></item></channel></rss>`);
+  const feed = parse(
+    `<rss><channel><item><title>A&nbsp;B &mystery; C</title><link>https://example.com/a</link></item></channel></rss>`,
+  );
   expect(feed.items).toHaveLength(1);
   expect(feed.items[0]!.title).toContain('C');
 });

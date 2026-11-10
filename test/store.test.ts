@@ -117,7 +117,10 @@ test('search matches whole words, except the word still being typed', () => {
 });
 
 test('search puts exact matches before partial ones', () => {
-  saveItems(item('a', { title: 'Going places', published: JAN + 5000 }), item('b', { title: 'Why go', published: JAN }));
+  saveItems(
+    item('a', { title: 'Going places', published: JAN + 5000 }),
+    item('b', { title: 'Why go', published: JAN }),
+  );
   expect(store.searchEntries('go').map((entry) => entry.title)).toEqual(['Why go', 'Going places']);
 });
 
@@ -133,15 +136,23 @@ test('feeds match by name before address', () => {
 });
 
 test('copies left by a moved site merge and keep the strongest state', () => {
-  saveItems(item('a', { title: 'Same', url: 'https://one.example.com/post' }), item('copy', { title: 'Same', url: 'https://two.example.com/post' }));
+  saveItems(
+    item('a', { title: 'Same', url: 'https://one.example.com/post' }),
+    item('copy', { title: 'Same', url: 'https://two.example.com/post' }),
+  );
   store.toggleBookmark(store.entries(scopes.feed(feed.id)).at(-1)!.id);
 
   expect(store.mergeMoved()).toBe(1);
-  expect(store.entries(scopes.feed(feed.id))).toMatchObject([{ state: 'bookmarked', url: 'https://two.example.com/post' }]);
+  expect(store.entries(scopes.feed(feed.id))).toMatchObject([
+    { state: 'bookmarked', url: 'https://two.example.com/post' },
+  ]);
 });
 
 test('copies at different paths are different posts', () => {
-  saveItems(item('a', { title: 'Links', url: 'https://example.com/one' }), item('b', { title: 'Links', url: 'https://example.com/two' }));
+  saveItems(
+    item('a', { title: 'Links', url: 'https://example.com/one' }),
+    item('b', { title: 'Links', url: 'https://example.com/two' }),
+  );
   expect(store.mergeMoved()).toBe(0);
   expect(store.entries(scopes.feed(feed.id))).toHaveLength(2);
 });

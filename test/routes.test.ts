@@ -12,11 +12,18 @@ import { load as unreadPage } from '../src/routes/+page.server';
 let store: Store;
 let woken = 0;
 
-const item = (guid: string, published: number): Item => ({ guid, url: `https://example.com/${guid}`, title: `Post ${guid}`, text: '', published });
+const item = (guid: string, published: number): Item => ({
+  guid,
+  url: `https://example.com/${guid}`,
+  title: `Post ${guid}`,
+  text: '',
+  published,
+});
 const titles = (entries: { title: string }[]) => entries.map((entry) => entry.title);
 
 // Only what these handlers read from a request.
-const event = (params: Record<string, string> = {}, url = 'http://lagan.test/') => ({ locals: { store, wake: () => woken++ }, params, url: new URL(url) }) as never;
+const event = (params: Record<string, string> = {}, url = 'http://lagan.test/') =>
+  ({ locals: { store, wake: () => woken++ }, params, url: new URL(url) }) as never;
 
 function statusOf(run: () => unknown): number | undefined {
   try {
@@ -71,11 +78,20 @@ test('search finds feeds and entries in any state, and an empty search finds not
   expect(titles(found.entries)).toEqual(['Post backlog']);
   const feeds = await (search(event({}, 'http://lagan.test/api/search?q=exam')) as Response).json();
   expect(feeds.feeds).toEqual([{ id: 1, label: 'Example' }]);
-  expect(await (search(event({}, 'http://lagan.test/api/search?q=%20')) as Response).json()).toEqual({ feeds: [], entries: [] });
+  expect(await (search(event({}, 'http://lagan.test/api/search?q=%20')) as Response).json()).toEqual({
+    feeds: [],
+    entries: [],
+  });
 });
 
 test('a change posted from another site is refused before it reaches the app', async () => {
-  const request = new Request('http://lagan.test/api/bookmark/1', { method: 'POST', headers: { 'Sec-Fetch-Site': 'cross-site' } });
-  const response = await handle({ event: { request } as never, resolve: () => Promise.reject(new Error('reached the app')) });
+  const request = new Request('http://lagan.test/api/bookmark/1', {
+    method: 'POST',
+    headers: { 'Sec-Fetch-Site': 'cross-site' },
+  });
+  const response = await handle({
+    event: { request } as never,
+    resolve: () => Promise.reject(new Error('reached the app')),
+  });
   expect(response.status).toBe(403);
 });

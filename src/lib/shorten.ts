@@ -38,7 +38,10 @@ export function shorten(title: string, room: number, measure: Measure): string {
   const [start, end] = partsToKeep(words, ' ', space, measure);
 
   if (start > 0 || end > 0) {
-    const head = words.slice(0, start).join(' ').replace(/[,;:–—-]+$/, '');
+    const head = words
+      .slice(0, start)
+      .join(' ')
+      .replace(/[,;:–—-]+$/, '');
     const tail = words.slice(words.length - end).join(' ');
     return `${head}${ELLIPSIS}${tail}`.trim();
   }

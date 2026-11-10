@@ -36,8 +36,24 @@ const ACCEPT = 'application/rss+xml, application/atom+xml, application/feed+json
 // ---- reaching only the public internet
 
 const blocked = new BlockList();
-for (const [address, prefix] of [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.168.0.0', 16], ['224.0.0.0', 3]] as const) blocked.addSubnet(address, prefix, 'ipv4');
-for (const [address, prefix] of [['::1', 128], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8]] as const) blocked.addSubnet(address, prefix, 'ipv6');
+for (const [address, prefix] of [
+  ['0.0.0.0', 8],
+  ['10.0.0.0', 8],
+  ['100.64.0.0', 10],
+  ['127.0.0.0', 8],
+  ['169.254.0.0', 16],
+  ['172.16.0.0', 12],
+  ['192.168.0.0', 16],
+  ['224.0.0.0', 3],
+] as const)
+  blocked.addSubnet(address, prefix, 'ipv4');
+for (const [address, prefix] of [
+  ['::1', 128],
+  ['fc00::', 7],
+  ['fe80::', 10],
+  ['ff00::', 8],
+] as const)
+  blocked.addSubnet(address, prefix, 'ipv6');
 
 function isPublic(address: string): boolean {
   const mapped = address.toLowerCase().replace(/^::ffff:/, '');
@@ -57,7 +73,11 @@ async function safeFetch(start: string, headers: Record<string, string>): Promis
   let url = new URL(start);
   for (let hop = 0; hop <= 5; hop++) {
     await assertPublic(url);
-    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT, ...headers }, redirect: 'manual', signal: AbortSignal.timeout(TIMEOUT) });
+    const response = await fetch(url, {
+      headers: { 'User-Agent': USER_AGENT, ...headers },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(TIMEOUT),
+    });
     const location = response.headers.get('location');
     if (response.status < 300 || response.status >= 400 || !location) return response;
     await response.body?.cancel();
@@ -93,7 +113,10 @@ async function fetchRss(source: Pick<Source, 'ref' | 'etag' | 'last_modified'>):
   if (source.last_modified) headers['If-Modified-Since'] = source.last_modified;
   try {
     const response = await safeFetch(source.ref, headers);
-    const timing = { retryAfter: retryAfter(response.headers.get('retry-after')), maxAge: maxAge(response.headers.get('cache-control')) };
+    const timing = {
+      retryAfter: retryAfter(response.headers.get('retry-after')),
+      maxAge: maxAge(response.headers.get('cache-control')),
+    };
     if (response.status === 304) {
       await response.body?.cancel();
       return { items: [], etag: source.etag, lastModified: source.last_modified, ...timing };
@@ -103,7 +126,13 @@ async function fetchRss(source: Pick<Source, 'ref' | 'etag' | 'last_modified'>):
       return { items: [], error: `HTTP ${response.status}`, ...timing };
     }
     const parsed = parseFeed(await readLimited(response), response.headers.get('content-type') ?? '', response.url);
-    return { items: parsed.items, title: parsed.title, etag: response.headers.get('etag') ?? '', lastModified: response.headers.get('last-modified') ?? '', ...timing };
+    return {
+      items: parsed.items,
+      title: parsed.title,
+      etag: response.headers.get('etag') ?? '',
+      lastModified: response.headers.get('last-modified') ?? '',
+      ...timing,
+    };
   } catch (error) {
     return { items: [], error: errorText(error) };
   }
@@ -126,9 +155,12 @@ async function getJson(url: string): Promise<Json> {
 async function identity(did: string) {
   const known = identities.get(did);
   if (known) return known;
-  const url = did.startsWith('did:web:') ? `https://${did.slice('did:web:'.length)}/.well-known/did.json` : `https://plc.directory/${did}`;
+  const url = did.startsWith('did:web:')
+    ? `https://${did.slice('did:web:'.length)}/.well-known/did.json`
+    : `https://plc.directory/${did}`;
   const doc = await getJson(url);
-  const pds = (doc.service as Json[] | undefined)?.find((service) => service.id?.endsWith('atproto_pds'))?.serviceEndpoint as string | undefined;
+  const pds = (doc.service as Json[] | undefined)?.find((service) => service.id?.endsWith('atproto_pds'))
+    ?.serviceEndpoint as string | undefined;
   if (!pds) throw new Error('No data server for this account');
   const aka = (doc.alsoKnownAs as string[] | undefined)?.find((name) => name.startsWith('at://'));
   const found = { pds, handle: aka ? aka.slice(5) : did };
@@ -141,7 +173,9 @@ async function record(uri: string) {
   if (!did || !collection || !rkey) return null;
   try {
     const { pds, handle } = await identity(did);
-    const found = await getJson(`${pds}/xrpc/com.atproto.repo.getRecord?repo=${did}&collection=${collection}&rkey=${rkey}`);
+    const found = await getJson(
+      `${pds}/xrpc/com.atproto.repo.getRecord?repo=${did}&collection=${collection}&rkey=${rkey}`,
+    );
     return { handle, value: found.value as Json };
   } catch {
     return null;
@@ -172,7 +206,8 @@ const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
 async function fetchAtproto(did: string, since: number | null): Promise<FetchResult> {
   try {
     const { pds } = await identity(did);
-    const list = (collection: string) => getJson(`${pds}/xrpc/com.atproto.repo.listRecords?repo=${did}&collection=${collection}&limit=50`);
+    const list = (collection: string) =>
+      getJson(`${pds}/xrpc/com.atproto.repo.listRecords?repo=${did}&collection=${collection}&limit=50`);
     const [posts, reposts] = await Promise.all([list('app.bsky.feed.post'), list('app.bsky.feed.repost')]);
     const fresh = (time: number | null) => since === null || (time !== null && time >= since - 86_400_000);
     const items: Item[] = [];
@@ -187,7 +222,14 @@ async function fetchAtproto(did: string, since: number | null): Promise<FetchRes
       const subject = value.subject?.uri as string | undefined;
       if (!subject || !fresh(published)) continue;
       const target = await record(subject);
-      if (target) items.push({ guid: uri, url: postUrl(subject), title: '', text: oneLine(`Reposted @${target.handle}: ${await describe(target.value)}`), published });
+      if (target)
+        items.push({
+          guid: uri,
+          url: postUrl(subject),
+          title: '',
+          text: oneLine(`Reposted @${target.handle}: ${await describe(target.value)}`),
+          published,
+        });
     }
     return { items };
   } catch (error) {
@@ -238,7 +280,8 @@ export function earliestAfter(result: FetchResult, failures: number): number {
 }
 
 // A feed silent for two days is fetched hourly, one that posted today every few minutes.
-export const restFor = (quietFor: number, earliest: number) => Math.max(earliest, clamp(quietFor / QUIET_FACTOR, QUIET_MAX));
+export const restFor = (quietFor: number, earliest: number) =>
+  Math.max(earliest, clamp(quietFor / QUIET_FACTOR, QUIET_MAX));
 
 type Loop = { wake?: () => void; earliest: number };
 
@@ -290,7 +333,8 @@ export class Fetcher {
 
   private async run(id: number, loop: Loop): Promise<void> {
     const first = this.store.source(id);
-    if (first?.fetched_at != null) await this.rest(loop, Math.max(0, (first.next_at ?? 0) - Date.now()) + spread(START_SPREAD));
+    if (first?.fetched_at != null)
+      await this.rest(loop, Math.max(0, (first.next_at ?? 0) - Date.now()) + spread(START_SPREAD));
     for (;;) {
       const source = this.store.source(id);
       if (!source) return;

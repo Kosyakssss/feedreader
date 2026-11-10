@@ -21,5 +21,8 @@ export function capTitle(text: string): string {
 export function dateLabel(ms: number): string {
   const date = new Date(ms);
   const sameYear = date.getFullYear() === new Date().getFullYear();
-  return date.toLocaleDateString('en-US', sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+  return date.toLocaleDateString(
+    'en-US',
+    sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' },
+  );
 }

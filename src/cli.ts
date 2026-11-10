@@ -42,12 +42,20 @@ async function check(): Promise<void> {
     await Promise.all(
       sources.slice(start, start + 8).map(async (source) => {
         const result = await fetchSource({ ...source, etag: '', last_modified: '' });
-        lines.push({ label: source.label, items: result.items.length, fresh: result.items.length - store.knownCount(source.id, result.items), status: result.error ?? 'ok' });
+        lines.push({
+          label: source.label,
+          items: result.items.length,
+          fresh: result.items.length - store.knownCount(source.id, result.items),
+          status: result.error ?? 'ok',
+        });
       }),
     );
   }
   lines.sort((a, b) => a.label.localeCompare(b.label));
-  for (const line of lines) console.log(`${line.label.slice(0, 44).padEnd(44)} ${String(line.items).padStart(4)} items ${String(line.fresh).padStart(4)} new  ${line.status}`);
+  for (const line of lines)
+    console.log(
+      `${line.label.slice(0, 44).padEnd(44)} ${String(line.items).padStart(4)} items ${String(line.fresh).padStart(4)} new  ${line.status}`,
+    );
   const failed = lines.filter((line) => line.status !== 'ok').length;
   const sum = (key: 'items' | 'fresh') => lines.reduce((total, line) => total + line[key], 0);
   console.log(`\n${lines.length} feeds, ${failed} failed, ${sum('items')} items, ${sum('fresh')} new`);

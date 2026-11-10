@@ -20,7 +20,7 @@
   --pu: light-dark(#5e409d, #8b7ec8);
   --ma: light-dark(#a02f6f, #ce5d97);
 
-  --font: -apple-system, BlinkMacSystemFont, "Inter", "IBM Plex Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+  --font: -apple-system, BlinkMacSystemFont, 'Inter', 'IBM Plex Sans', 'Segoe UI', Helvetica, Arial, sans-serif;
 
   /* The motion style: everything that moves takes this long, on this curve.
      Anything that doesn't says why, where it happens. */
@@ -46,14 +46,14 @@
 
 /* Registered so it is one fixed length everywhere, even inside larger text. */
 @property --header-height {
-  syntax: "<length>";
+  syntax: '<length>';
   inherits: true;
   initial-value: 0px;
 }
 
 /* Registered so it can be animated. */
 @property --reveal {
-  syntax: "<number>";
+  syntax: '<number>';
   inherits: true;
   initial-value: 0;
 }
@@ -228,7 +228,9 @@ nav {
   anchor-name: --slash;
   background: var(--line);
   rotate: 12.5deg;
-  transition: rotate var(--slash-time) var(--ease) calc(var(--open-time) * 0.75), visibility 0s calc(var(--open-time) * 0.2);
+  transition:
+    rotate var(--slash-time) var(--ease) calc(var(--open-time) * 0.75),
+    visibility 0s calc(var(--open-time) * 0.2);
 }
 
 /* A slash stands upright when pressing its name would open a list from it. */
@@ -247,7 +249,9 @@ nav {
 .crumb:has(> .menu:not(.closing)) .slash {
   visibility: hidden;
   rotate: 0deg;
-  transition: rotate var(--slash-time) var(--ease), visibility 0s calc(var(--line-start) + var(--open-time) * 0.1);
+  transition:
+    rotate var(--slash-time) var(--ease),
+    visibility 0s calc(var(--line-start) + var(--open-time) * 0.1);
 }
 
 [aria-current] {
@@ -292,7 +296,9 @@ button.icon svg {
 }
 
 .handle {
-  transition: stroke-dasharray var(--open-time) var(--ease), stroke-dashoffset var(--open-time) var(--ease);
+  transition:
+    stroke-dasharray var(--open-time) var(--ease),
+    stroke-dashoffset var(--open-time) var(--ease);
   stroke-dasharray: 0.286 1;
   stroke-dashoffset: -0.714;
 }
@@ -360,7 +366,9 @@ html:has(#search:not(.closing)) header button.icon {
   bottom: auto;
   left: calc(anchor(center) - 0.5px);
   width: auto;
-  max-height: calc(100dvh - var(--header-height) / 2 + 0.6em); /* from the slash to just past the bottom of the window */
+  max-height: calc(
+    100dvh - var(--header-height) / 2 + 0.6em
+  ); /* from the slash to just past the bottom of the window */
   margin: 0;
   padding: var(--list-top) 0 0 0.6em;
   overflow: hidden;
@@ -378,15 +386,19 @@ html:has(#search:not(.closing)) header button.icon {
   inset: 0 auto 0 0;
   width: 1px;
   background: var(--line);
-  content: "";
+  content: '';
   transform: scaleY(var(--reveal));
   transform-origin: top;
   will-change: transform; /* drawn the same way moving and at rest */
 }
 
 .menu-list {
-  --tip: calc(var(--reveal) * (100% + var(--list-top)) - var(--list-top)); /* the end of the line, measured down this list */
-  --soft: calc(max(var(--row), 25%) * 4 * var(--reveal) * (1 - var(--reveal))); /* widest mid-way, so a fast line never pops names in, and nothing at either end */
+  --tip: calc(
+    var(--reveal) * (100% + var(--list-top)) - var(--list-top)
+  ); /* the end of the line, measured down this list */
+  --soft: calc(
+    max(var(--row), 25%) * 4 * var(--reveal) * (1 - var(--reveal))
+  ); /* widest mid-way, so a fast line never pops names in, and nothing at either end */
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: none; /* the fades and the line already say there is more */
@@ -401,22 +413,26 @@ html:has(#search:not(.closing)) header button.icon {
    that fits has nothing to scroll, so none of this applies to it. Scrolling all
    the way down also leaves one empty row, to lift the last name off the edge. */
 @property --fade-top {
-  syntax: "<length>";
+  syntax: '<length>';
   inherits: false;
   initial-value: 0px;
 }
 
 @property --fade-bottom {
-  syntax: "<length>";
+  syntax: '<length>';
   inherits: false;
   initial-value: 0px;
 }
 
 @supports (animation-timeline: scroll()) {
   .menu-list {
-    animation: fade-top linear both, fade-bottom linear both;
+    animation:
+      fade-top linear both,
+      fade-bottom linear both;
     animation-timeline: scroll(self);
-    animation-range: 0 var(--row), calc(100% - var(--row)) 100%;
+    animation-range:
+      0 var(--row),
+      calc(100% - var(--row)) 100%;
   }
 }
 
@@ -477,7 +493,10 @@ html:has(#search:not(.closing)) header button.icon {
   right: 0;
   left: 0;
   z-index: 1;
-  transition: background-color var(--open-time) var(--ease) var(--clear-after), backdrop-filter var(--open-time) var(--ease) var(--clear-after), visibility 0s calc(var(--open-time) + var(--clear-after));
+  transition:
+    background-color var(--open-time) var(--ease) var(--clear-after),
+    backdrop-filter var(--open-time) var(--ease) var(--clear-after),
+    visibility 0s calc(var(--open-time) + var(--clear-after));
 }
 
 .header-glass {
@@ -503,7 +522,7 @@ html:has(.popup:not(.closing)) .header-glass {
   position: absolute;
   inset: 0;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .03 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
-  content: "";
+  content: '';
   opacity: 0;
   transition: opacity var(--open-time) var(--ease) var(--clear-after);
 }

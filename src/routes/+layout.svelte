@@ -54,7 +54,9 @@
 <div class="header-glass"></div>
 <header>
   <Crumbs {trail} />
-  <button class="icon" aria-label="Search" data-popup-toggle onclick={toggleSearch}><SearchIcon /></button>
+  <button class="icon" aria-label="Search" data-popup-toggle onclick={toggleSearch}>
+    <SearchIcon />
+  </button>
 </header>
 
 <div class="veil"></div>
