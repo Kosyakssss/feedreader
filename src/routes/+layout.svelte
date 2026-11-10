@@ -6,6 +6,7 @@
   import Crumbs from '#lib/components/Crumbs.svelte';
   import Search from '#lib/components/Search.svelte';
   import SearchIcon from '#lib/components/SearchIcon.svelte';
+  import { cards } from '#lib/cards.svelte.ts';
   import { popups } from '#lib/popups.svelte.ts';
   import { trailFor } from '#lib/trail.ts';
   import type { LayoutProps } from './$types';
@@ -35,6 +36,7 @@
 
   // Changing page crossfades the whole page, open popup and all.
   onNavigate((navigation) => {
+    cards.close();
     if (!document.startViewTransition) return popups.reset();
     return new Promise((resolve) => {
       document.startViewTransition({

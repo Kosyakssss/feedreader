@@ -7,6 +7,8 @@ import { POST as bookmark } from '../src/routes/api/bookmark/[id]/+server';
 import { POST as readAll } from '../src/routes/api/read-all/[upto]/+server';
 import { POST as read } from '../src/routes/api/read/[id]/+server';
 import { GET as timeline } from '../src/routes/api/timeline/+server';
+import { DELETE as removeFeed } from '../src/routes/api/feeds/[id]/+server';
+import { PUT as setMutes } from '../src/routes/api/feeds/[id]/mutes/+server';
 import { GET as search } from '../src/routes/api/search/+server';
 import { load as feedPage } from '../src/routes/feed/[id]/+page.server';
 import { load as unreadPage } from '../src/routes/+page.server';
@@ -24,8 +26,13 @@ const item = (guid: string, published: number): Item => ({
 const titles = (entries: { title: string }[]) => entries.map((entry) => entry.title);
 
 // Only what these handlers read from a request.
-const event = (params: Record<string, string> = {}, url = 'http://lagan.test/') =>
-  ({ locals: { store, wake: () => woken++ }, params, url: new URL(url) }) as never;
+const event = (params: Record<string, string> = {}, url = 'http://lagan.test/', body?: unknown) =>
+  ({
+    locals: { store, wake: () => woken++, follow: () => {} },
+    params,
+    url: new URL(url),
+    request: new Request(url, { method: 'PUT', body: JSON.stringify(body ?? null) }),
+  }) as never;
 
 function statusOf(run: () => unknown): number | undefined {
   try {
@@ -111,4 +118,18 @@ test('a change posted from another site is refused before it reaches the app', a
     resolve: () => Promise.reject(new Error('reached the app')),
   });
   expect(response.status).toBe(403);
+});
+
+test("a feed's muted words are saved cleaned up, and only as a list of words", async () => {
+  const saved = await (await setMutes(event({ id: '1' }, undefined, { words: [' Sponsored', 'ad ', ''] }))).json();
+  expect(saved).toEqual({ words: ['ad', 'sponsored'] });
+  await expect(setMutes(event({ id: '1' }, undefined, { words: 'ad' }))).rejects.toMatchObject({ status: 400 });
+  await expect(setMutes(event({ id: '9' }, undefined, { words: [] }))).rejects.toMatchObject({ status: 404 });
+});
+
+test('removing a feed takes it and its entries away', () => {
+  expect((removeFeed(event({ id: '1' })) as Response).status).toBe(204);
+  expect(store.sources()).toEqual([]);
+  expect(store.entries(scopes.timeline)).toEqual([]);
+  expect(statusOf(() => removeFeed(event({ id: '1' })))).toBe(404);
 });

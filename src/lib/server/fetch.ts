@@ -69,7 +69,7 @@ async function assertPublic(url: URL): Promise<void> {
 }
 
 // Every redirect is checked, so a feed can't send us to this machine or the tailnet.
-async function safeFetch(start: string, headers: Record<string, string>): Promise<Response> {
+export async function safeFetch(start: string, headers: Record<string, string>): Promise<Response> {
   let url = new URL(start);
   for (let hop = 0; hop <= 5; hop++) {
     await assertPublic(url);
@@ -309,11 +309,14 @@ export class Fetcher {
   constructor(private store: Store) {}
 
   startAll(): void {
-    for (const source of this.store.sources()) {
-      const loop: Loop = { earliest: 0 };
-      this.loops.push(loop);
-      void this.run(source.id, loop);
-    }
+    for (const source of this.store.sources()) this.start(source.id);
+  }
+
+  // Keeps one feed fetched from now on, until it is removed.
+  start(id: number): void {
+    const loop: Loop = { earliest: 0 };
+    this.loops.push(loop);
+    void this.run(id, loop);
   }
 
   // Opening the app wakes every feed that is allowed to fetch again.

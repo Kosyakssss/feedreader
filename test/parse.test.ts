@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { cleanTitle, parseDate, parseFeed, plain } from '../src/lib/server/parse';
+import { linkedFeeds, titleOf } from '../src/lib/server/sites';
 
 const BASE = 'https://example.com/feed.xml';
 const parse = (xml: string) => parseFeed(new TextEncoder().encode(xml), 'application/xml', BASE);
@@ -100,4 +101,18 @@ test('titles that say nothing count as no title', () => {
 
 test('plain drops tags, scripts and repeated space', () => {
   expect(plain('<p>One</p><script>bad()</script>\n<p>Two &amp; three</p>')).toBe('One Two & three');
+});
+
+test("a page's feeds are found from its links, with relative addresses made whole", () => {
+  const html = `<head><title>Blog &amp; notes</title>
+    <link rel="alternate" type="application/rss+xml" title="Posts" href="/feed.xml">
+    <link rel='alternate stylesheet' type='text/css' href='/style.css'>
+    <link type="application/atom+xml" rel="alternate" href="https://example.com/atom">
+    <link rel="alternate" type="application/rss+xml" href="/feed.xml"></head>`;
+  expect(linkedFeeds(html, 'https://example.com/post/1')).toEqual([
+    { url: 'https://example.com/feed.xml', title: 'Posts' },
+    { url: 'https://example.com/atom', title: '' },
+  ]);
+  expect(titleOf(html)).toBe('Blog & notes');
+  expect(titleOf('<meta property="og:title" content="Shared title">')).toBe('Shared title');
 });

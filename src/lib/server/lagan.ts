@@ -2,7 +2,7 @@
 import { Fetcher } from './fetch';
 import { Store } from './store';
 
-export type Lagan = { store: Store; wake: () => void };
+export type Lagan = { store: Store; wake: () => void; follow: (id: number) => void };
 
 const globals = globalThis as typeof globalThis & { lagan?: Lagan };
 
@@ -15,6 +15,6 @@ export function start(): Lagan {
   if (removed) console.log(`Merged ${removed} copies of moved posts`);
   const fetcher = new Fetcher(store);
   fetcher.startAll();
-  globals.lagan = { store, wake: () => fetcher.nudge() };
+  globals.lagan = { store, wake: () => fetcher.nudge(), follow: (id) => fetcher.start(id) };
   return globals.lagan;
 }

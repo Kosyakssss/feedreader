@@ -155,8 +155,24 @@ export class Store {
     return this.db.query<Source, [number]>('SELECT * FROM sources WHERE id = ?').get(id);
   }
 
-  addSource(kind: Source['kind'], ref: string, label: string): void {
-    this.db.run('INSERT INTO sources (kind, ref, label) VALUES (?, ?, ?)', [kind, ref, label]);
+  // Adds a feed, or finds it if it is already followed. Returns its id.
+  addSource(kind: Source['kind'], ref: string, label: string, folder = ''): number {
+    this.db.run('INSERT OR IGNORE INTO sources (kind, ref, label, folder) VALUES (?, ?, ?, ?)', [
+      kind,
+      ref,
+      label,
+      folder,
+    ]);
+    return this.db.query<{ id: number }, [string]>('SELECT id FROM sources WHERE ref = ?').get(ref)!.id;
+  }
+
+  mutesBySource(): Record<number, string[]> {
+    const rows = this.db
+      .query<{ source_id: number; word: string }, []>('SELECT source_id, word FROM mutes ORDER BY word')
+      .all();
+    const all: Record<number, string[]> = {};
+    for (const row of rows) (all[row.source_id] ??= []).push(row.word);
+    return all;
   }
 
   lastPost(id: number): number {

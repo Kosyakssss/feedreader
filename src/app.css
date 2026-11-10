@@ -750,6 +750,75 @@ main:has(.actions) {
   padding-block-end: calc(var(--target) + 2rem);
 }
 
+/* A row opened into a card, hanging from a line like a menu does. It grows
+   open and folds shut on the one time and curve. */
+.card {
+  display: grid;
+  flex: 1 0 100%;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--open-time) var(--ease);
+}
+
+.card.open {
+  grid-template-rows: 1fr;
+}
+
+.card > div {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.card-body {
+  display: grid;
+  justify-items: start;
+  gap: 0.6rem;
+  margin-block: 0.6rem 0.4rem;
+  padding-inline-start: 0.8em;
+  border-inline-start: 1px solid var(--ui-3);
+}
+
+.card-body p,
+.card-body ol {
+  margin: 0;
+}
+
+.card-body li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1ch;
+  margin: 0;
+}
+
+.address {
+  overflow-wrap: anywhere;
+}
+
+/* A text field: a line to write on, like search. */
+.field {
+  display: grid;
+  gap: 0.2rem;
+  justify-self: stretch;
+}
+
+.field input {
+  padding: 0 0 0.3em;
+  border: 0;
+  border-block-end: 1px solid var(--ui);
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  color: var(--tx);
+}
+
+.field input:focus {
+  border-color: var(--ui-3);
+}
+
+.field input.failed {
+  border-color: var(--re);
+}
+
 button.more {
   margin-block: 1rem 2rem;
 }

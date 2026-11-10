@@ -21,5 +21,6 @@ export const handle: Handle = async ({ event, resolve }) => {
   }
   event.locals.store = lagan.store;
   event.locals.wake = lagan.wake;
+  event.locals.follow = lagan.follow;
   return resolve(event);
 };

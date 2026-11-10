@@ -7,4 +7,4 @@
 
 <svelte:head><title>Feeds</title></svelte:head>
 
-<FeedList feeds={data.sources} />
+<FeedList feeds={data.sources} mutes={data.mutes} />
