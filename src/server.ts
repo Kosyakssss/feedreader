@@ -15,17 +15,17 @@ const gzip = { 'Content-Encoding': 'gzip' };
 const newest = (entries: Entry[]) => entries.reduce((most, entry) => Math.max(most, entry.id), 0);
 
 async function loadAssets() {
-  const bundle = await Bun.build({ entrypoints: [`${WEB}js/titles.ts`], format: 'iife', minify: true, target: 'browser' });
-  if (!bundle.success) throw new AggregateError(bundle.logs, 'Could not build titles.ts');
-  const titles = await bundle.outputs[0]!.text();
+  const bundle = await Bun.build({ entrypoints: [`${WEB}js/main.ts`], format: 'iife', minify: true, target: 'browser' });
+  if (!bundle.success) throw new AggregateError(bundle.logs, 'Could not build main.ts');
+  const script = await bundle.outputs[0]!.text();
   const style = await Bun.file(`${WEB}style.css`).text();
   const htmx = await Bun.file(`${WEB}js/htmx.min.js`).text();
   const assets = new Map<string, Asset>([
     ['/style.css', { body: Bun.gzipSync(style), type: 'text/css; charset=utf-8' }],
-    ['/js/titles.js', { body: Bun.gzipSync(titles), type: 'text/javascript; charset=utf-8' }],
+    ['/js/main.js', { body: Bun.gzipSync(script), type: 'text/javascript; charset=utf-8' }],
     ['/js/htmx.min.js', { body: Bun.gzipSync(htmx), type: 'text/javascript; charset=utf-8' }],
   ]);
-  return { assets, version: Bun.hash(style + titles).toString(16).slice(0, 8) };
+  return { assets, version: Bun.hash(style + script).toString(16).slice(0, 8) };
 }
 
 // A page loaded from another site must not be able to change anything here.

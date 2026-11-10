@@ -122,7 +122,7 @@ function trailFor(path: string, feeds: Source[]): Crumb[] {
 
 function menuPopover(id: string, links: Link[], trail: Crumb[]): Html {
   return html`
-    <div class="menu" id="${id}" popover>
+    <div class="menu" id="${id}" popover="manual">
       <div class="menu-list">
         ${links.map(
           (link) => html`<a href="${link.href}" ${trail.some((step) => step.href === link.href) ? html`aria-current="page"` : ''}>${link.label}${link === FEEDS ? '/' : ''}</a>`,
@@ -151,7 +151,7 @@ function crumb(step: Crumb, index: number, trail: Crumb[]): Html {
 const searchIcon = html`<svg viewBox="0 0 24 24" aria-hidden="true"><path class="lens" d="M15.95 6.05C18.68 8.78 18.68 13.22 15.95 15.95C13.22 18.68 8.78 18.68 6.05 15.95C3.32 13.22 3.32 8.78 6.05 6.05C8.78 3.32 13.22 3.32 15.95 6.05Z" /><path class="handle" d="M16 16L20 20" /></svg>`;
 
 const searchPopover = html`
-  <div id="search" popover>
+  <div id="search" popover="manual">
     <div class="search-bar">
       <input
         type="text"
@@ -184,7 +184,7 @@ export function layout(options: { title: string; path: string; version: string; 
     <title>${title}</title>
     <link rel="stylesheet" href="/style.css?v=${version}">
     <script src="/js/htmx.min.js"></script>
-    <script src="/js/titles.js?v=${version}"></script>
+    <script src="/js/main.js?v=${version}"></script>
   </head>
   <body>
     <div class="header-glass"></div>

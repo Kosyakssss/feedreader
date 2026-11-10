@@ -206,7 +206,7 @@ nav {
   transition: visibility 0s var(--press-time);
 }
 
-.crumb:has(> .menu:popover-open) .press-again {
+.crumb:has(> .menu:popover-open:not(.closing)) .press-again {
   visibility: visible;
   scale: 0;
   transition: none;
@@ -247,7 +247,7 @@ nav {
   }
 }
 
-.crumb:has(> .menu:popover-open) .slash {
+.crumb:has(> .menu:popover-open:not(.closing)) .slash {
   visibility: hidden;
   rotate: 0deg;
   transition: rotate var(--slash-time) var(--ease), visibility 0s calc(var(--line-start) + var(--open-time) * 0.1);
@@ -294,20 +294,20 @@ button.icon svg {
   transition: d var(--open-time) var(--ease);
 }
 
-#search:popover-open .lens {
+#search:popover-open:not(.closing) .lens {
   d: path("M18 6C16 8 14 10 12 12C10 14 8 16 6 18C8 16 10 14 12 12C14 10 16 8 18 6Z");
 }
 
-#search:popover-open .handle {
+#search:popover-open:not(.closing) .handle {
   d: path("M6 6L18 18");
 }
 
 /* The page behind an open popup holds still. */
-html:has(:popover-open) {
+html:has(:popover-open:not(.closing)) {
   overflow: hidden;
 }
 
-html:has(#search:popover-open) header button.icon {
+html:has(#search:popover-open:not(.closing)) header button.icon {
   visibility: hidden;
   transition-delay: 0s;
 }
@@ -318,7 +318,6 @@ html:has(#search:popover-open) header button.icon {
   background: transparent;
   color: var(--tx);
   flex-direction: column;
-  transition: display var(--open-time) allow-discrete, overlay var(--open-time) allow-discrete;
 }
 
 [popover]:popover-open {
@@ -362,12 +361,12 @@ html:has(#search:popover-open) header button.icon {
   padding: var(--list-top) 0 0 0.6em;
   overflow: hidden;
   pointer-events: none;
-  transition: display var(--open-time) allow-discrete, overlay var(--open-time) allow-discrete, --reveal var(--open-time) var(--ease);
+  transition: --reveal var(--open-time) var(--ease);
 }
 
-.menu:popover-open {
+.menu:popover-open:not(.closing) {
   --reveal: 1;
-  transition-delay: 0s, 0s, var(--line-start);
+  transition-delay: var(--line-start);
 }
 
 .menu::before {
@@ -483,7 +482,7 @@ html:has(#search:popover-open) header button.icon {
   backdrop-filter: var(--glass-blur);
 }
 
-html:has(:popover-open) .header-glass {
+html:has(:popover-open:not(.closing)) .header-glass {
   background-color: transparent;
   backdrop-filter: none;
   transition-delay: 0s;
@@ -505,12 +504,12 @@ html:has(:popover-open) .header-glass {
   transition: opacity var(--open-time) var(--ease) var(--clear-after);
 }
 
-html:has(:popover-open) .veil::after {
+html:has(:popover-open:not(.closing)) .veil::after {
   opacity: 1;
   transition-delay: 0s;
 }
 
-html:has(:popover-open) .veil {
+html:has(:popover-open:not(.closing)) .veil {
   visibility: visible;
   background-color: var(--glass-tint);
   backdrop-filter: var(--glass-blur);
@@ -527,7 +526,7 @@ html:has(:popover-open) .veil {
   transition: translate var(--open-time) var(--ease);
 }
 
-#search:popover-open .search-bar {
+#search:popover-open:not(.closing) .search-bar {
   translate: 0 0;
 }
 
@@ -547,7 +546,7 @@ html:has(:popover-open) .veil {
 
 /* An exception: the text must not cross the header, so it fades in late on the
    way down and is gone almost at once on the way up. */
-#search:popover-open .search-bar input {
+#search:popover-open:not(.closing) .search-bar input {
   transition: opacity calc(var(--open-time) * 0.75) var(--ease) calc(var(--open-time) * 0.25);
 }
 
@@ -563,8 +562,8 @@ html:has(:popover-open) .veil {
   transition: opacity var(--open-time) var(--ease);
 }
 
-#search:popover-open .search-bar input,
-#search:popover-open #results {
+#search:popover-open:not(.closing) .search-bar input,
+#search:popover-open:not(.closing) #results {
   opacity: 1;
 }
 
