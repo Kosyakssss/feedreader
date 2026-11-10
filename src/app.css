@@ -794,6 +794,32 @@ main:has(.actions) {
   overflow-wrap: anywhere;
 }
 
+/* Settings: a small heading, a line saying what it is, and its buttons. */
+.setting h2 {
+  margin: 0 0 0.2rem;
+  font-size: 1em;
+  font-weight: 600;
+}
+
+.setting p {
+  margin: 0 0 0.6rem;
+}
+
+.setting-actions {
+  display: flex;
+  gap: 1ch;
+  margin-block-end: 0.6rem;
+}
+
+/* A link or label that does what a button does looks like one. */
+.button {
+  padding: 0 0.5em;
+  border: 1px solid var(--ui-2);
+  border-radius: 4px;
+  color: var(--tx-2);
+  cursor: pointer;
+}
+
 /* A field at the top of a page, for adding to it. */
 .link-field {
   margin-block-end: 1.25rem;

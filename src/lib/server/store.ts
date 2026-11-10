@@ -166,6 +166,21 @@ export class Store {
     return this.db.query<{ id: number }, [string]>('SELECT id FROM sources WHERE ref = ?').get(ref)!.id;
   }
 
+  // Adds the feeds of a list, skipping any already followed. Returns the new ids.
+  addSources(sources: Pick<Source, 'kind' | 'ref' | 'label' | 'folder'>[]): number[] {
+    return this.db.transaction(() =>
+      sources.flatMap((source) => {
+        const added = this.db.run('INSERT OR IGNORE INTO sources (kind, ref, label, folder) VALUES (?, ?, ?, ?)', [
+          source.kind,
+          source.ref,
+          source.label,
+          source.folder,
+        ]);
+        return added.changes ? [Number(added.lastInsertRowid)] : [];
+      }),
+    )();
+  }
+
   mutesBySource(): Record<number, string[]> {
     const rows = this.db
       .query<{ source_id: number; word: string }, []>('SELECT source_id, word FROM mutes ORDER BY word')
