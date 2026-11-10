@@ -36,9 +36,6 @@
 
   --glass-tint: color-mix(in srgb, var(--bg) 40%, transparent);
   --glass-blur: blur(14px);
-
-  --magnifier: path("M15.95 6.05C18.68 8.78 18.68 13.22 15.95 15.95C13.22 18.68 8.78 18.68 6.05 15.95C3.32 13.22 3.32 8.78 6.05 6.05C8.78 3.32 13.22 3.32 15.95 6.05Z");
-  --handle: path("M16 16L20 20");
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -283,23 +280,30 @@ button.icon svg {
 }
 
 /* One drawing that is both icons. Closed it is a magnifier. Open, the lens
-   flattens into one stroke of the X and the handle grows into the other. */
+   flattens into one stroke of the X and the handle grows into the other.
+   Moved and dashed rather than reshaped, since Safari can't animate a path's
+   shape. The handle is the X's whole stroke, only partly drawn. */
 .lens {
-  d: var(--magnifier);
-  transition: d var(--open-time) var(--ease);
+  vector-effect: non-scaling-stroke; /* flattened, it is still a full stroke */
+  transition: transform var(--open-time) var(--ease);
+  transform-box: view-box;
+  transform-origin: 11px 11px;
+  transform: translate(0, 0) rotate(0deg) scale(1, 1);
 }
 
 .handle {
-  d: var(--handle);
-  transition: d var(--open-time) var(--ease);
+  transition: stroke-dasharray var(--open-time) var(--ease), stroke-dashoffset var(--open-time) var(--ease);
+  stroke-dasharray: 0.286 1;
+  stroke-dashoffset: -0.714;
 }
 
 #search:popover-open:not(.closing) .lens {
-  d: path("M18 6C16 8 14 10 12 12C10 14 8 16 6 18C8 16 10 14 12 12C14 10 16 8 18 6Z");
+  transform: translate(1px, 1px) rotate(-45deg) scale(1.212, 0.001);
 }
 
 #search:popover-open:not(.closing) .handle {
-  d: path("M6 6L18 18");
+  stroke-dasharray: 0.857 1;
+  stroke-dashoffset: 0;
 }
 
 /* The page behind an open popup holds still. */
@@ -583,11 +587,12 @@ html:has(:popover-open:not(.closing)) .veil {
   }
 
   #search:popover-open .lens {
-    d: var(--magnifier);
+    transform: translate(0, 0) rotate(0deg) scale(1, 1);
   }
 
   #search:popover-open .handle {
-    d: var(--handle);
+    stroke-dasharray: 0.286 1;
+    stroke-dashoffset: -0.714;
   }
 }
 

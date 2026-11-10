@@ -148,7 +148,7 @@ function crumb(step: Crumb, index: number, trail: Crumb[]): Html {
   `;
 }
 
-const searchIcon = html`<svg viewBox="0 0 24 24" aria-hidden="true"><path class="lens" d="M15.95 6.05C18.68 8.78 18.68 13.22 15.95 15.95C13.22 18.68 8.78 18.68 6.05 15.95C3.32 13.22 3.32 8.78 6.05 6.05C8.78 3.32 13.22 3.32 15.95 6.05Z" /><path class="handle" d="M16 16L20 20" /></svg>`;
+const searchIcon = html`<svg viewBox="0 0 24 24" aria-hidden="true"><circle class="lens" cx="11" cy="11" r="7" /><path class="handle" d="M6 6L20 20" pathLength="1" /></svg>`;
 
 const searchPopover = html`
   <div id="search" popover="manual">
