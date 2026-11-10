@@ -13,7 +13,7 @@ export function start(): Lagan {
   const store = new Store('data/lagan.sqlite');
   const removed = store.mergeMoved();
   if (removed) console.log(`Merged ${removed} copies of moved posts`);
-  const fetcher = new Fetcher(store, () => {});
+  const fetcher = new Fetcher(store);
   fetcher.startAll();
   globals.lagan = { store, wake: () => fetcher.nudge() };
   return globals.lagan;

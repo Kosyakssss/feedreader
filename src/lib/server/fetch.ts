@@ -290,10 +290,7 @@ export class Fetcher {
   private hostNext = new Map<string, number>();
   private lastNudge = 0;
 
-  constructor(
-    private store: Store,
-    private onChange: (sourceId: number, added: number) => void,
-  ) {}
+  constructor(private store: Store) {}
 
   startAll(): void {
     for (const source of this.store.sources()) {
@@ -346,8 +343,7 @@ export class Fetcher {
       const quietFor = source.kind === 'atproto' ? 0 : Date.now() - this.store.lastPost(id);
       const wait = restFor(quietFor, earliest);
       try {
-        const added = this.store.save(source, result, failures, Date.now() + wait);
-        if (added > 0 || (result.error ?? '') !== source.error) this.onChange(id, added);
+        this.store.save(source, result, failures, Date.now() + wait);
       } catch (error) {
         console.error(`Feed ${source.label}: ${errorText(error)}`);
       }
