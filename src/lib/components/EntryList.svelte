@@ -9,7 +9,16 @@
     toggles = ['read', 'bookmark'],
     extra,
     empty = 'Nothing here.',
-  }: { rows: Rows; toggles?: Toggle[]; extra?: Snippet<[Entry]>; empty?: string } = $props();
+    marked,
+    onopen,
+  }: {
+    rows: Rows;
+    toggles?: Toggle[];
+    extra?: Snippet<[Entry]>;
+    empty?: string;
+    marked?: number; // the entry to show as where you are
+    onopen?: (entry: Entry) => void;
+  } = $props();
 </script>
 
 {#if rows.list.length}
@@ -21,6 +30,8 @@
         failed={(toggle) => rows.failed.has(`${entry.id} ${toggle}`)}
         ontoggle={(toggle) => rows.toggle(entry, toggle)}
         {extra}
+        marked={entry.id === marked}
+        onopen={onopen && (() => onopen(entry))}
       />
     {/each}
   </ol>

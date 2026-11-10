@@ -13,12 +13,16 @@
     failed = () => false,
     ontoggle,
     extra,
+    marked = false,
+    onopen,
   }: {
     entry: Entry;
     toggles?: Toggle[];
     failed?: (toggle: Toggle) => boolean;
     ontoggle?: (toggle: Toggle) => void;
     extra?: Snippet<[Entry]>;
+    marked?: boolean;
+    onopen?: () => void;
   } = $props();
 
   const title = $derived(capTitle(displayTitle(entry)));
@@ -26,8 +30,10 @@
 </script>
 
 <li>
-  <div class="row" class:read={entry.state === 'read'} style:view-transition-name="e{entry.id}">
-    <a class="title" href={entry.url} target="_blank" rel="noopener" {@attach fitTitle(title)}>{title}</a>
+  <div class="row" class:read={entry.state === 'read'} class:marked style:view-transition-name="e{entry.id}">
+    <a class="title" href={entry.url} target="_blank" rel="noopener" onclick={onopen} {@attach fitTitle(title)}
+      >{title}</a
+    >
     <small>
       {#if entry.page}{source}{:else}<a href={feedPath(entry.source_id)}>{source}</a>{/if}
       {dateLabel(entry.published_at)}

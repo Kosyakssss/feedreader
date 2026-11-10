@@ -705,6 +705,51 @@ li {
   margin-inline-start: -0.5ch;
 }
 
+/* Where Open next left off. */
+.row.marked .title {
+  text-decoration: underline 1px var(--ui-3);
+  text-underline-offset: 0.25em;
+}
+
+/* A page's own buttons: text on glass in the bottom corners, lined up with
+   the column. They go with the header when a popup opens. */
+.actions {
+  position: fixed;
+  right: var(--gutter);
+  bottom: 1rem;
+  left: var(--gutter);
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+  transition: opacity var(--open-time) var(--ease);
+}
+
+.actions button {
+  min-height: var(--target);
+  padding: 0 1em;
+  margin-inline: -1em;
+  border: 0;
+  border-radius: calc(var(--target) / 2);
+  background: var(--glass-tint);
+  backdrop-filter: var(--glass-blur);
+  color: var(--tx);
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+html:has(.popup:not(.closing)) .actions {
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity var(--open-time) var(--ease),
+    visibility 0s var(--open-time);
+}
+
+main:has(.actions) {
+  padding-block-end: calc(var(--target) + 2rem);
+}
+
 button.more {
   margin-block: 1rem 2rem;
 }
