@@ -7,8 +7,7 @@ export type Crumb = Link & { under?: Link[] };
 export const APP_NAME = 'Lagan';
 export const FEEDS: Link = { href: '/feeds', label: 'Feeds' };
 export const PAGES: Link[] = [
-  { href: '/all', label: 'All' },
-  { href: '/archive', label: 'Archive' },
+  { href: '/timeline', label: 'Timeline' },
   { href: '/bookmarks', label: 'Bookmarks' },
   FEEDS,
 ];

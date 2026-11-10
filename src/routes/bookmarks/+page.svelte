@@ -6,7 +6,7 @@
   let { data }: PageProps = $props();
 
   // Taking the bookmark off takes the entry off this page.
-  const rows = $derived(new Rows(data.entries, (entry) => entry.state !== 'bookmarked'));
+  const rows = $derived(new Rows(data.entries, (entry) => !entry.bookmarked));
 </script>
 
 <svelte:head><title>Bookmarks</title></svelte:head>

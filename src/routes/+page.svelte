@@ -5,8 +5,8 @@
 
   let { data }: PageProps = $props();
 
-  // Saving an entry takes it off Unread.
-  const rows = $derived(new Rows(data.entries, () => true));
+  // Marking an entry read takes it off Unread.
+  const rows = $derived(new Rows(data.entries, (entry) => entry.state !== 'unread'));
 </script>
 
 <svelte:head><title>Lagan</title></svelte:head>

@@ -5,6 +5,8 @@ import { scopes, Store } from '#lib/server/store.ts';
 import { handle } from '../src/hooks.server';
 import { POST as bookmark } from '../src/routes/api/bookmark/[id]/+server';
 import { POST as readAll } from '../src/routes/api/read-all/[upto]/+server';
+import { POST as read } from '../src/routes/api/read/[id]/+server';
+import { GET as timeline } from '../src/routes/api/timeline/+server';
 import { GET as search } from '../src/routes/api/search/+server';
 import { load as feedPage } from '../src/routes/feed/[id]/+page.server';
 import { load as unreadPage } from '../src/routes/+page.server';
@@ -57,13 +59,28 @@ test('a feed page includes the backlog, and an unknown feed is not found', () =>
   expect(statusOf(() => feedPage(event({ id: 'nope' })))).toBe(404);
 });
 
-test('bookmarking answers with the entry as it now is, and pressing again makes it read', async () => {
-  const id = store.entries(scopes.unread)[0]!.id;
-  expect((await (bookmark(event({ id: String(id) })) as Response).json()).state).toBe('bookmarked');
+test('bookmarking answers with the entry as it now is, and pressing again takes the bookmark off', async () => {
+  const id = String(store.entries(scopes.unread)[0]!.id);
+  expect(await (bookmark(event({ id })) as Response).json()).toMatchObject({ state: 'unread', bookmarked: 1 });
   expect(titles(store.entries(scopes.bookmarks))).toEqual(['Post fresh']);
-  expect(store.entries(scopes.unread)).toEqual([]);
-  expect((await (bookmark(event({ id: String(id) })) as Response).json()).state).toBe('read');
+  expect(await (bookmark(event({ id })) as Response).json()).toMatchObject({ state: 'unread', bookmarked: 0 });
   expect(statusOf(() => bookmark(event({ id: '999' })))).toBe(404);
+});
+
+test('marking read answers with the entry as it now is, and pressing again makes it unread', async () => {
+  const id = String(store.entries(scopes.unread)[0]!.id);
+  expect((await (read(event({ id })) as Response).json()).state).toBe('read');
+  expect(store.entries(scopes.unread)).toEqual([]);
+  expect((await (read(event({ id })) as Response).json()).state).toBe('unread');
+  expect(statusOf(() => read(event({ id: 'x' })))).toBe(404);
+});
+
+test('the timeline goes on after the last entry shown, and a bad cursor is refused', async () => {
+  const [newest] = store.entries(scopes.timeline);
+  const after = `${newest!.published_at}:${newest!.id}`;
+  const page = await (timeline(event({}, `http://lagan.test/api/timeline?after=${after}`)) as Response).json();
+  expect(page).toEqual({ entries: [], more: false });
+  expect(statusOf(() => timeline(event({}, 'http://lagan.test/api/timeline?after=soon')))).toBe(400);
 });
 
 test('mark all read stops at the newest entry the page showed', () => {

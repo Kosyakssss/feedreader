@@ -696,6 +696,19 @@ li {
   color: var(--tx-2);
 }
 
+/* A read entry looks like a visited link, wherever it was read. */
+.row.read .title {
+  color: var(--tx-2);
+}
+
+.row button + button {
+  margin-inline-start: -0.5ch;
+}
+
+button.more {
+  margin-block: 1rem 2rem;
+}
+
 .muted {
   color: var(--tx-2);
 }

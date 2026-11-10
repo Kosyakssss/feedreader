@@ -1,7 +1,7 @@
 // The command line: entries, add, check. The app itself is `bun run start`.
 import { parseArgs } from 'node:util';
 import { discover, fetchSource } from './lib/server/fetch';
-import { Store, type State } from './lib/server/store';
+import { Store } from './lib/server/store';
 
 const USAGE = `lagan entries [--db path] [--unread | --bookmarked]
 lagan add     [--db path] <feed url | @handle | did:...>
@@ -21,8 +21,9 @@ const [command, argument] = positionals;
 const store = new Store(values.db!);
 
 function entries(): void {
-  const state: State | undefined = values.unread ? 'unread' : values.bookmarked ? 'bookmarked' : undefined;
-  console.log(JSON.stringify(store.export(state), null, 2));
+  console.log(
+    JSON.stringify(store.export(values.unread ? 'unread' : values.bookmarked ? 'bookmarked' : undefined), null, 2),
+  );
 }
 
 async function add(): Promise<void> {

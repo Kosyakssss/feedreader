@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { beforeEach, expect, test } from 'bun:test';
 import type { FetchResult } from '../src/lib/server/fetch';
 import type { Item } from '../src/lib/server/parse';
@@ -33,7 +34,7 @@ beforeEach(() => {
 test("a feed's first fetch is backlog, later posts are unread", () => {
   saveItems(item('old'));
   expect(titles(scopes.unread)).toEqual([]);
-  expect(titles(scopes.all)).toEqual([]);
+  expect(titles(scopes.timeline)).toEqual([]);
   expect(titles(scopes.feed(feed.id))).toEqual(['Post old']);
 
   saveItems(item('new', { published: JAN + 1000 }));
@@ -85,14 +86,80 @@ test('a failed fetch keeps the old validators', () => {
   expect(feed).toMatchObject({ etag: 'one', last_modified: 'then', error: 'HTTP 500', failures: 1 });
 });
 
-test('bookmarking from any state, and removing it gives read', () => {
+test('bookmarking something never seen makes it read, and taking the bookmark off leaves it read', () => {
   saveItems(item('a'));
   const id = store.entries(scopes.feed(feed.id))[0]!.id;
-  expect(store.toggleBookmark(id)!.state).toBe('bookmarked');
+  expect(store.toggleBookmark(id)).toMatchObject({ state: 'read', bookmarked: 1 });
   expect(titles(scopes.bookmarks)).toEqual(['Post a']);
-  expect(store.toggleBookmark(id)!.state).toBe('read');
+  expect(store.toggleBookmark(id)).toMatchObject({ state: 'read', bookmarked: 0 });
   expect(titles(scopes.bookmarks)).toEqual([]);
-  expect(titles(scopes.all)).toEqual(['Post a']);
+  expect(titles(scopes.timeline)).toEqual(['Post a']);
+});
+
+test('read and bookmarked are separate: an unread entry can be bookmarked and stay unread', () => {
+  saveItems(item('backlog'));
+  saveItems(item('a', { published: JAN + 1000 }));
+  const id = store.entries(scopes.unread)[0]!.id;
+  expect(store.toggleBookmark(id)).toMatchObject({ state: 'unread', bookmarked: 1 });
+  expect(store.toggleRead(id)).toMatchObject({ state: 'read', bookmarked: 1 });
+  expect(store.toggleRead(id)!.state).toBe('unread');
+});
+
+test('the timeline comes in pages, each starting after the last one shown', () => {
+  saveItems(item('backlog'));
+  saveItems(...Array.from({ length: 5 }, (_, n) => item(`p${n}`, { published: JAN + 1000 * (n + 1) })));
+  const page = { ...scopes.timeline, limit: 2 };
+  const first = store.entries(page);
+  expect(first.map((entry) => entry.title)).toEqual(['Post p4', 'Post p3']);
+  expect(store.entries(page, first.at(-1)).map((entry) => entry.title)).toEqual(['Post p2', 'Post p1']);
+});
+
+test("a feed's muted words keep matching entries out of Unread and the timeline, not off its own page", () => {
+  saveItems(item('backlog'));
+  saveItems(item('a', { title: 'Sponsored: buy this', published: JAN + 1000 }), item('b', { published: JAN + 2000 }));
+  expect(store.setMutes(feed.id, [' SPONSORED ', 'sponsored', ''])).toEqual(['sponsored']);
+  expect(titles(scopes.unread)).toEqual(['Post b']);
+  expect(titles(scopes.timeline)).toEqual(['Post b']);
+  expect(titles(scopes.feed(feed.id))).toContain('Sponsored: buy this');
+});
+
+test('a bookmarked link is stored once: an entry a feed already has is bookmarked instead', () => {
+  saveItems(item('a'));
+  expect(store.bookmarkPage('https://example.com/a', '')).toMatchObject({ title: 'Post a', bookmarked: 1, page: 0 });
+  expect(store.bookmarkPage('https://elsewhere.example/x', 'Elsewhere')).toMatchObject({ bookmarked: 1, page: 1 });
+  expect(titles(scopes.bookmarks).toSorted()).toEqual(['Elsewhere', 'Post a']);
+  expect(store.sources().map((source) => source.label)).toEqual(['Example']);
+});
+
+test('removing a feed keeps its bookmarks as bookmarked pages', () => {
+  saveItems(item('a'), item('b'));
+  store.toggleBookmark(store.entries(scopes.feed(feed.id))[0]!.id);
+  store.removeSource(feed.id);
+  expect(store.sources()).toEqual([]);
+  expect(store.entries(scopes.bookmarks)).toHaveLength(1);
+  expect(store.entries(scopes.bookmarks)[0]!.page).toBe(1);
+});
+
+test('a database from before bookmarks were a flag of their own keeps every entry and bookmark', () => {
+  const path = `${Bun.env.TMPDIR ?? '/tmp'}/lagan-migrate-${process.pid}.sqlite`;
+  const old = new Database(path, { create: true });
+  old.run(`CREATE TABLE sources (id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('rss', 'atproto')), ref TEXT NOT NULL UNIQUE, label TEXT NOT NULL, folder TEXT NOT NULL DEFAULT '', etag TEXT NOT NULL DEFAULT '', last_modified TEXT NOT NULL DEFAULT '', fetched_at INTEGER, next_at INTEGER, failures INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '') STRICT;
+    CREATE TABLE entries (id INTEGER PRIMARY KEY, source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE, guid TEXT NOT NULL, url TEXT NOT NULL, published_at INTEGER NOT NULL, state TEXT NOT NULL CHECK (state IN ('none', 'unread', 'read', 'bookmarked')), title TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '') STRICT;
+    CREATE INDEX timeline ON entries(published_at DESC, id DESC) WHERE state <> 'none';
+    INSERT INTO sources (id, kind, ref, label) VALUES (1, 'rss', 'https://example.com/feed', 'Example');
+    INSERT INTO entries (source_id, guid, url, published_at, state, title) VALUES (1, 'a', 'https://example.com/a', 1, 'bookmarked', 'Kept'), (1, 'b', 'https://example.com/b', 2, 'unread', 'New');`);
+  old.close();
+  try {
+    const migrated = new Store(path);
+    expect(migrated.entries(scopes.bookmarks)).toMatchObject([{ title: 'Kept', state: 'read', bookmarked: 1 }]);
+    expect(migrated.entries(scopes.unread)).toMatchObject([{ title: 'New', bookmarked: 0 }]);
+    expect(new Store(path).entries(scopes.timeline)).toHaveLength(2); // opening it again changes nothing
+  } finally {
+    for (const suffix of ['', '-wal', '-shm'])
+      Bun.file(path + suffix)
+        .delete()
+        .catch(() => {});
+  }
 });
 
 test('mark all read leaves anything newer than the page unread', () => {
@@ -144,7 +211,7 @@ test('copies left by a moved site merge and keep the strongest state', () => {
 
   expect(store.mergeMoved()).toBe(1);
   expect(store.entries(scopes.feed(feed.id))).toMatchObject([
-    { state: 'bookmarked', url: 'https://two.example.com/post' },
+    { state: 'read', bookmarked: 1, url: 'https://two.example.com/post' },
   ]);
 });
 
