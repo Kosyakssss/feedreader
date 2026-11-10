@@ -88,10 +88,26 @@ async function safeFetch(start: string, headers: Record<string, string>): Promis
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-async function readLimited(response: Response): Promise<Uint8Array> {
-  const data = new Uint8Array(await response.arrayBuffer());
-  if (data.length > MAX_FEED_BYTES) throw new Error('Feed too large');
-  return data;
+// Stops reading as soon as a response passes the limit, so an endless or huge
+// answer never fills memory.
+export async function readLimited(response: Response, limit = MAX_FEED_BYTES): Promise<Uint8Array> {
+  const declared = Number(response.headers.get('content-length'));
+  if (declared > limit) {
+    await response.body?.cancel();
+    throw new Error('Feed too large');
+  }
+  const reader = response.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (let part = await reader?.read(); part && !part.done; part = await reader!.read()) {
+    size += part.value.length;
+    if (size > limit) {
+      await reader!.cancel();
+      throw new Error('Feed too large');
+    }
+    chunks.push(part.value);
+  }
+  return Bun.concatArrayBuffers(chunks, Infinity, true);
 }
 
 function retryAfter(value: string | null): number | undefined {
