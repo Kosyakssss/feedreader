@@ -203,7 +203,7 @@ nav {
   transition: visibility 0s var(--press-time);
 }
 
-.crumb:has(> .menu:popover-open:not(.closing)) .press-again {
+.crumb:has(> .menu:not(.closing)) .press-again {
   visibility: visible;
   scale: 0;
   transition: none;
@@ -244,7 +244,7 @@ nav {
   }
 }
 
-.crumb:has(> .menu:popover-open:not(.closing)) .slash {
+.crumb:has(> .menu:not(.closing)) .slash {
   visibility: hidden;
   rotate: 0deg;
   transition: rotate var(--slash-time) var(--ease), visibility 0s calc(var(--line-start) + var(--open-time) * 0.1);
@@ -297,39 +297,39 @@ button.icon svg {
   stroke-dashoffset: -0.714;
 }
 
-#search:popover-open:not(.closing) .lens {
+#search:not(.closing) .lens {
   transform: translate(1px, 1px) rotate(-45deg) scale(1.212, 0.001);
 }
 
-#search:popover-open:not(.closing) .handle {
+#search:not(.closing) .handle {
   stroke-dasharray: 0.857 1;
   stroke-dashoffset: 0;
 }
 
 /* The page behind an open popup holds still. */
-html:has(:popover-open:not(.closing)) {
+html:has(.popup:not(.closing)) {
   overflow: hidden;
 }
 
-html:has(#search:popover-open:not(.closing)) header button.icon {
+html:has(#search:not(.closing)) header button.icon {
   visibility: hidden;
   transition-delay: 0s;
 }
 
-[popover] {
-  box-sizing: border-box;
-  border: 0;
-  background: transparent;
-  color: var(--tx);
-  flex-direction: column;
-}
-
-[popover]:popover-open {
+/* A breadcrumb's menu or search, over the veil. On the page only while open
+   or closing. */
+.popup {
+  position: fixed;
+  z-index: 2;
   display: flex;
+  box-sizing: border-box;
+  flex-direction: column;
+  color: var(--tx);
 }
 
 #search {
   top: var(--header-height);
+  left: 0;
   width: 100%;
   height: calc(100dvh - var(--header-height));
   margin: 0;
@@ -368,7 +368,7 @@ html:has(#search:popover-open:not(.closing)) header button.icon {
   transition: --reveal var(--open-time) var(--ease);
 }
 
-.menu:popover-open:not(.closing) {
+.menu:not(.closing) {
   --reveal: 1;
   transition-delay: var(--line-start);
 }
@@ -486,7 +486,7 @@ html:has(#search:popover-open:not(.closing)) header button.icon {
   backdrop-filter: var(--glass-blur);
 }
 
-html:has(:popover-open:not(.closing)) .header-glass {
+html:has(.popup:not(.closing)) .header-glass {
   background-color: transparent;
   backdrop-filter: none;
   transition-delay: 0s;
@@ -508,12 +508,12 @@ html:has(:popover-open:not(.closing)) .header-glass {
   transition: opacity var(--open-time) var(--ease) var(--clear-after);
 }
 
-html:has(:popover-open:not(.closing)) .veil::after {
+html:has(.popup:not(.closing)) .veil::after {
   opacity: 1;
   transition-delay: 0s;
 }
 
-html:has(:popover-open:not(.closing)) .veil {
+html:has(.popup:not(.closing)) .veil {
   visibility: visible;
   background-color: var(--glass-tint);
   backdrop-filter: var(--glass-blur);
@@ -530,7 +530,7 @@ html:has(:popover-open:not(.closing)) .veil {
   transition: translate var(--open-time) var(--ease);
 }
 
-#search:popover-open:not(.closing) .search-bar {
+#search:not(.closing) .search-bar {
   translate: 0 0;
 }
 
@@ -550,7 +550,7 @@ html:has(:popover-open:not(.closing)) .veil {
 
 /* An exception: the text must not cross the header, so it fades in late on the
    way down and is gone almost at once on the way up. */
-#search:popover-open:not(.closing) .search-bar input {
+#search:not(.closing) .search-bar input {
   transition: opacity calc(var(--open-time) * 0.75) var(--ease) calc(var(--open-time) * 0.25);
 }
 
@@ -566,32 +566,32 @@ html:has(:popover-open:not(.closing)) .veil {
   transition: opacity var(--open-time) var(--ease);
 }
 
-#search:popover-open:not(.closing) .search-bar input,
-#search:popover-open:not(.closing) #results {
+#search:not(.closing) .search-bar input,
+#search:not(.closing) #results {
   opacity: 1;
 }
 
 /* Where each moving part starts from when a popup opens. The selectors match
    the open state exactly, or the open state wins and nothing moves. */
 @starting-style {
-  .menu:popover-open:not(.closing) {
+  .menu:not(.closing) {
     --reveal: 0;
   }
 
-  #search:popover-open:not(.closing) .search-bar {
+  #search:not(.closing) .search-bar {
     translate: 0 var(--search-rise);
   }
 
-  #search:popover-open:not(.closing) .search-bar input,
-  #search:popover-open:not(.closing) #results {
+  #search:not(.closing) .search-bar input,
+  #search:not(.closing) #results {
     opacity: 0;
   }
 
-  #search:popover-open:not(.closing) .lens {
+  #search:not(.closing) .lens {
     transform: translate(0, 0) rotate(0deg) scale(1, 1);
   }
 
-  #search:popover-open:not(.closing) .handle {
+  #search:not(.closing) .handle {
     stroke-dasharray: 0.286 1;
     stroke-dashoffset: -0.714;
   }
@@ -625,7 +625,7 @@ li {
   contain-intrinsic-block-size: auto 3em;
 }
 
-/* titles.js shortens titles that don't fit. This handles the rest: text it
+/* fit-title.ts shortens titles that don't fit. This handles the rest: text it
    can't cut at all. */
 .title {
   flex: 1 0 100%;
@@ -652,15 +652,6 @@ li {
 button.failed {
   color: var(--re);
   border-color: var(--re);
-}
-
-.htmx-request {
-  opacity: 0.5;
-}
-
-@view-transition {
-  navigation: auto;
-  types: page-change;
 }
 
 /* Page changes, and rows moving within a page, follow the motion style too. */

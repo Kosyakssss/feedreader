@@ -1,11 +1,9 @@
-// The command line: serve, entries, add, check.
+// The command line: entries, add, check. The app itself is `bun run start`.
 import { parseArgs } from 'node:util';
-import { discover, Fetcher, fetchSource } from './lib/server/fetch';
-import { createApp } from './server';
+import { discover, fetchSource } from './lib/server/fetch';
 import { Store, type State } from './lib/server/store';
 
-const USAGE = `lagan serve   [--db path] [--listen addr,addr]
-lagan entries [--db path] [--unread | --bookmarked]
+const USAGE = `lagan entries [--db path] [--unread | --bookmarked]
 lagan add     [--db path] <feed url | @handle | did:...>
 lagan check   [--db path]`;
 
@@ -14,7 +12,6 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     db: { type: 'string', default: 'data/lagan.sqlite' },
-    listen: { type: 'string', default: '127.0.0.1:8789' },
     unread: { type: 'boolean', default: false },
     bookmarked: { type: 'boolean', default: false },
   },
@@ -22,24 +19,6 @@ const { values, positionals } = parseArgs({
 
 const [command, argument] = positionals;
 const store = new Store(values.db!);
-
-async function serve(): Promise<void> {
-  const removed = store.mergeMoved();
-  if (removed) console.log(`Merged ${removed} copies of moved posts`);
-
-  const app = await createApp(store, () => fetcher.nudge());
-  const fetcher = new Fetcher(store, (id, added) => {
-    app.buildFeedsPage();
-    if (added > 0) app.rebuildEntries([id]);
-  });
-  fetcher.startAll();
-
-  for (const address of values.listen!.split(',')) {
-    const [hostname, port] = address.trim().split(':');
-    Bun.serve({ hostname, port: Number(port), fetch: app.handle });
-    console.log(`Listening on http://${address.trim()}`);
-  }
-}
 
 function entries(): void {
   const state: State | undefined = values.unread ? 'unread' : values.bookmarked ? 'bookmarked' : undefined;
@@ -74,11 +53,11 @@ async function check(): Promise<void> {
   console.log(`\n${lines.length} feeds, ${failed} failed, ${sum('items')} items, ${sum('fresh')} new`);
 }
 
-const commands: Record<string, () => void | Promise<void>> = { serve, entries, add, check };
+const commands: Record<string, () => void | Promise<void>> = { entries, add, check };
 const run = commands[command ?? ''];
 if (!run) {
   console.error(USAGE);
   process.exit(2);
 }
 await run();
-if (command !== 'serve') process.exit(0);
+process.exit(0);
