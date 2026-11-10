@@ -36,6 +36,12 @@
 
   --glass-tint: color-mix(in srgb, var(--bg) 40%, transparent);
   --glass-blur: blur(14px);
+
+  /* Touch targets: everything pressed in the app's chrome catches presses over
+     at least this much, whatever size it looks. A menu's names sit this far
+     apart on a touch screen. */
+  --target: 44px;
+  --touch-row: 40px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -197,7 +203,7 @@ nav {
    gets a moment to press again. */
 .press-again {
   position: absolute;
-  inset: 0;
+  inset: var(--reach) 0;
   visibility: hidden;
   touch-action: manipulation;
   transition: visibility 0s var(--press-time);
@@ -259,11 +265,36 @@ nav {
 }
 
 button.icon {
+  position: relative;
   flex: none;
   width: 1.4em;
   height: 1.4em;
   padding: 0;
   border: 0;
+}
+
+/* Reaches past what is drawn to make the target. `--reach` is how far each
+   side has to grow, worked out from the size of what it is set on. */
+.crumb,
+.crumb button,
+button.icon {
+  --reach: min(0px, (100% - var(--target)) / 2);
+}
+
+.crumb button,
+button.icon {
+  position: relative;
+}
+
+.crumb button::before,
+button.icon::before {
+  position: absolute;
+  inset: var(--reach) 0;
+  content: '';
+}
+
+button.icon::before {
+  inset: var(--reach);
 }
 
 /* The icon in the popup starts exactly on top of the one in the header, so
@@ -357,7 +388,7 @@ html:has(#search:not(.closing)) header button.icon {
    off the bottom of the window. A short one ends at its last name. */
 .menu {
   --row: 1.7em; /* one name, from the top of its line to the top of the next */
-  --list-top: 1.385em; /* puts the first name exactly one row below the breadcrumb */
+  --list-top: calc(1.535em - (var(--row) - 1lh) / 2); /* the first name stays exactly one row below the breadcrumb */
   --reveal: 0; /* how far down the line has reached, from 0 to 1 */
   position-anchor: --slash;
   position-visibility: always;
@@ -374,6 +405,12 @@ html:has(#search:not(.closing)) header button.icon {
   overflow: hidden;
   pointer-events: none;
   transition: --reveal var(--open-time) var(--ease);
+}
+
+@media (pointer: coarse) {
+  .menu {
+    --row: max(1.7em, var(--touch-row));
+  }
 }
 
 .menu:not(.closing) {
@@ -461,7 +498,7 @@ html:has(#search:not(.closing)) header button.icon {
 .menu-list a {
   display: block;
   overflow: hidden;
-  padding-block: 0.15em;
+  padding-block: calc((var(--row) - 1lh) / 2);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
