@@ -1,2 +1,6 @@
 /data/
 node_modules
+/.svelte-kit
+/build
+.env
+vite.config.ts.timestamp-*

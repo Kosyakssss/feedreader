@@ -1,14 +1,9 @@
 {
+  "extends": "$app/tsconfig",
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
-    "noEmit": true,
-    "skipLibCheck": true,
-    "types": ["bun"]
+    "types": ["$app/types", "bun"]
   },
-  "include": ["src", "test", "web/js/*.ts"]
+  "include": ["src", "test", "vite.config.ts"]
 }
