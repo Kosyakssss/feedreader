@@ -890,6 +890,15 @@ button.failed {
   animation-timing-function: var(--ease);
 }
 
+/* Changing page clears the veil and the glass at once: the crossfade is the
+   motion. Left to fade on its own, the veil is still blurring the live page
+   when the crossfade ends, and Safari, which crossfades a still picture of the
+   new page, shows that leftover blur for a moment after. */
+html:active-view-transition-type(page-change) :is(.header-glass, .veil),
+html:active-view-transition-type(page-change) .veil::after {
+  transition: none;
+}
+
 /* Rows move on their own only for changes within a page, like saving. Across
    pages they would jump out sharp on top of the blur and the open menu. */
 html:active-view-transition-type(page-change) .row {
