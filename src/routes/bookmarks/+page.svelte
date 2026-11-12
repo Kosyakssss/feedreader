@@ -1,6 +1,7 @@
 <script lang="ts">
   import BookmarkCard from '#lib/components/BookmarkCard.svelte';
   import Card from '#lib/components/Card.svelte';
+  import MoreButton from '#lib/components/MoreButton.svelte';
   import EntryList from '#lib/components/EntryList.svelte';
   import LinkField from '#lib/components/LinkField.svelte';
   import { Rows } from '#lib/rows.svelte.ts';
@@ -32,6 +33,9 @@
 <LinkField placeholder="Paste links to bookmark" send={bookmark} />
 <EntryList {rows} toggles={['read']}>
   {#snippet extra(entry)}
+    <MoreButton key="e{entry.id}" />
+  {/snippet}
+  {#snippet card(entry)}
     <Card key="e{entry.id}"><BookmarkCard {entry} onremove={() => rows.toggle(entry, 'bookmark')} /></Card>
   {/snippet}
 </EntryList>

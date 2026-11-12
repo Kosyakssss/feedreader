@@ -3,6 +3,7 @@
   import type { Source } from '#lib/server/store.ts';
   import Card from './Card.svelte';
   import FeedCard from './FeedCard.svelte';
+  import MoreButton from './MoreButton.svelte';
 
   type Feed = Pick<Source, 'id' | 'label'> & Partial<Source>;
 
@@ -18,6 +19,7 @@
         {#if feed.folder}<span class="muted">{feed.folder}</span>{/if}
         {#if feed.error}<span class="failed">{feed.error}</span>{/if}
         {#if mutes}
+          <span class="row-buttons"><MoreButton key="f{feed.id}" /></span>
           <Card key="f{feed.id}"><FeedCard feed={feed as Source} mutes={mutes[feed.id] ?? []} /></Card>
         {/if}
       </div>

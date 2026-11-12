@@ -706,8 +706,12 @@ li {
   color: var(--tx-2);
 }
 
-.row button + button {
-  margin-inline-start: -0.5ch;
+/* A row's buttons keep together at its right edge, beside the feed and date
+   or, when there isn't room, on a line of their own. */
+.row-buttons {
+  display: flex;
+  gap: 0.5ch;
+  margin-inline-start: auto;
 }
 
 /* Where Open next left off. */

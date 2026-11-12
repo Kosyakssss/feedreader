@@ -8,6 +8,7 @@
     rows,
     toggles = ['read', 'bookmark'],
     extra,
+    card,
     empty = 'Nothing here.',
     marked,
     onopen,
@@ -15,6 +16,7 @@
     rows: Rows;
     toggles?: Toggle[];
     extra?: Snippet<[Entry]>;
+    card?: Snippet<[Entry]>;
     empty?: string;
     marked?: number; // the entry to show as where you are
     onopen?: (entry: Entry) => void;
@@ -30,6 +32,7 @@
         failed={(toggle) => rows.failed.has(`${entry.id} ${toggle}`)}
         ontoggle={(toggle) => rows.toggle(entry, toggle)}
         {extra}
+        {card}
         marked={entry.id === marked}
         onopen={onopen && (() => onopen(entry))}
       />
