@@ -328,16 +328,19 @@ button.icon {
    side has to grow, worked out from the size of what it is set on. */
 .crumb,
 .crumb button,
+.action button,
 button.icon {
   --reach: min(0px, (100% - var(--target)) / 2);
 }
 
 .crumb button,
+.action button,
 button.icon {
   position: relative;
 }
 
 .crumb button::before,
+.action button::before,
 button.icon::before {
   position: absolute;
   inset: var(--reach) 0;
