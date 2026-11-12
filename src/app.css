@@ -74,6 +74,7 @@ html {
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --top: calc(var(--safe-top) + var(--header-height)); /* where the page starts, below the header */
+  scroll-padding-block: calc(var(--top) + 1rem) calc(var(--safe-bottom) + 1rem); /* what Tab or find scrolls to lands clear of the chrome */
   scrollbar-gutter: stable;
   -webkit-tap-highlight-color: transparent;
 }
@@ -740,6 +741,10 @@ html:has(.popup:not(.closing)) .actions {
 
 main:has(.actions) {
   padding-block-end: calc(var(--target) + 2rem + var(--safe-bottom));
+}
+
+html:has(.actions) {
+  scroll-padding-block-end: calc(var(--target) + 2rem + var(--safe-bottom));
 }
 
 /* A row opened into a card, hanging from a line like a menu does. It grows
