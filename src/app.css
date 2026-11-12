@@ -64,7 +64,16 @@
   initial-value: 0;
 }
 
+/* The page runs edge to edge, under a phone's notch, status bar and home bar
+   (viewport-fit=cover in app.html), and its chrome keeps clear of them. Defined
+   here, not on body, so the window's own scrolling can keep clear of the
+   header too. One text size: --text, which is body's. */
 html {
+  --text: calc(0.9375rem + 0.25vw);
+  --header-height: calc(1.4 * var(--text) + 1.75rem);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --top: calc(var(--safe-top) + var(--header-height)); /* where the page starts, below the header */
   scrollbar-gutter: stable;
   -webkit-tap-highlight-color: transparent;
 }
@@ -72,17 +81,18 @@ html {
 /* One text size for reading. The breadcrumbs and their menus are slightly larger,
    and the feed and date on a row slightly smaller. */
 body {
-  --header-height: calc(1.4em + 1.75rem);
   --edge: 1.25rem;
   --search-gap: 1em;
   --search-rise: calc(var(--header-height) / -2 - 0.7em - var(--search-gap));
   --column: 37em;
   --gutter: max(var(--edge), (100% - var(--column)) / 2);
+  --gutter-start: max(var(--gutter), env(safe-area-inset-left, 0px) + var(--edge));
+  --gutter-end: max(var(--gutter), env(safe-area-inset-right, 0px) + var(--edge));
   margin: 0;
   background: var(--bg);
   color: var(--tx);
   font-family: var(--font);
-  font-size: calc(0.9375rem + 0.25vw);
+  font-size: var(--text);
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -143,21 +153,24 @@ main {
   box-sizing: border-box;
   max-width: calc(var(--column) + 2 * var(--edge));
   margin-inline: auto;
-  padding: 0 var(--edge) 1rem;
+  padding: calc(var(--top) + 1rem) var(--edge) 1rem;
 }
 
-/* Named so that rows moving during a page change pass under it, not over it. */
+/* Fixed like its glass, not sticky, so that when the page bounces past its top
+   the two hold still together in every browser. Named so that rows moving
+   during a page change pass under it, not over it. */
 header {
-  position: sticky;
+  position: fixed;
   top: 0;
+  right: 0;
+  left: 0;
   z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1ch;
   height: var(--header-height);
-  margin-block-end: 1rem;
-  padding-inline: var(--gutter);
+  padding: var(--safe-top) var(--gutter-end) 0 var(--gutter-start);
   view-transition-name: header;
 }
 
@@ -365,12 +378,12 @@ html:has(#search:not(.closing)) header button.icon {
 }
 
 #search {
-  top: var(--header-height);
+  top: var(--top);
   left: 0;
   width: 100%;
-  height: calc(100dvh - var(--header-height));
+  height: calc(100dvh - var(--top));
   margin: 0;
-  padding: 0 var(--gutter) 1rem;
+  padding: 0 var(--gutter-end) calc(1rem + var(--safe-bottom)) var(--gutter-start);
   overflow: visible;
   pointer-events: none;
 }
@@ -400,7 +413,7 @@ html:has(#search:not(.closing)) header button.icon {
   left: calc(anchor(center) - 0.5px);
   width: auto;
   max-height: calc(
-    100dvh - var(--header-height) / 2 + 0.6em
+    100dvh - var(--safe-top) - var(--header-height) / 2 + 0.6em
   ); /* from the slash to just past the bottom of the window */
   margin: 0;
   padding: var(--list-top) 0 0 0.6em;
@@ -512,7 +525,7 @@ html:has(#search:not(.closing)) header button.icon {
 }
 
 .header-glass {
-  height: var(--header-height);
+  height: var(--top);
   background-color: var(--glass-tint);
   backdrop-filter: var(--glass-blur);
 }
@@ -694,9 +707,9 @@ li {
    the column. They go with the header when a popup opens. */
 .actions {
   position: fixed;
-  right: var(--gutter);
-  bottom: 1rem;
-  left: var(--gutter);
+  right: var(--gutter-end);
+  bottom: calc(1rem + var(--safe-bottom));
+  left: var(--gutter-start);
   z-index: 1;
   display: flex;
   justify-content: space-between;
@@ -726,7 +739,7 @@ html:has(.popup:not(.closing)) .actions {
 }
 
 main:has(.actions) {
-  padding-block-end: calc(var(--target) + 2rem);
+  padding-block-end: calc(var(--target) + 2rem + var(--safe-bottom));
 }
 
 /* A row opened into a card, hanging from a line like a menu does. It grows
