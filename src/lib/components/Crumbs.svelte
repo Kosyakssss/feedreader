@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { fades } from '#lib/fades.ts';
   import { popups } from '#lib/popups.svelte.ts';
   import { FEEDS, type Crumb, type Link } from '#lib/trail.ts';
 
@@ -23,7 +24,7 @@
         <a class="press-again" href={step.href} tabindex="-1" aria-hidden="true"></a>
         {#if popups.isShown(id)}
           <div class="menu popup" class:closing={popups.isClosing(id)}>
-            <div class="menu-list">
+            <div class="menu-list" {@attach fades}>
               {#each step.under as link (link.href)}
                 <a href={link.href} aria-current={onTrail(link.href)}>{label(link)}</a>
               {/each}

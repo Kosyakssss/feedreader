@@ -448,9 +448,9 @@ html:has(#search:not(.closing)) header button.icon {
   pointer-events: auto;
 }
 
-/* Names dissolve at an end only while there is more to scroll to past it. A list
-   that fits has nothing to scroll, so none of this applies to it. Scrolling all
-   the way down also leaves one empty row, to lift the last name off the edge. */
+/* How far names dissolve at each end, set by fades.ts as the list scrolls. A
+   list that scrolls also ends in one empty row, to lift the last name off the
+   edge. */
 @property --fade-top {
   syntax: '<length>';
   inherits: false;
@@ -463,38 +463,8 @@ html:has(#search:not(.closing)) header button.icon {
   initial-value: 0px;
 }
 
-@supports (animation-timeline: scroll()) {
-  .menu-list {
-    animation:
-      fade-top linear both,
-      fade-bottom linear both;
-    animation-timeline: scroll(self);
-    animation-range:
-      0 var(--row),
-      calc(100% - var(--row)) 100%;
-  }
-}
-
-@keyframes fade-top {
-  from {
-    --fade-top: 0px;
-  }
-
-  to {
-    --fade-top: var(--row);
-  }
-}
-
-@keyframes fade-bottom {
-  from {
-    --fade-bottom: var(--row);
-    padding-block-end: var(--row);
-  }
-
-  to {
-    --fade-bottom: 0px;
-    padding-block-end: var(--row);
-  }
+.menu-list.scrolls {
+  padding-block-end: var(--row);
 }
 
 .menu-list a {
