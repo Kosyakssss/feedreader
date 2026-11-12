@@ -70,7 +70,15 @@
    header too. One text size: --text, which is body's. */
 html {
   --text: calc(0.9375rem + 0.25vw);
-  --header-height: calc(1.4 * var(--text) + 1.75rem);
+
+  /* One space sets the page's rhythm: the blank between one entry's text and
+     the next, which the rows themselves decide (the space between them, plus
+     the leading around their text). Measured, so it is the space you see. The
+     breadcrumbs have one above and below them, inside the glass, and the first
+     thing on a page sits one below the glass: two below the breadcrumbs, a
+     break between the header and what it heads. */
+  --gap: calc(0.5rem + 0.3 * var(--text));
+  --header-height: calc(2 * var(--gap) + 1.29 * var(--text)); /* 1.29: the breadcrumbs' text, which is 1.1 times larger */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --top: calc(var(--safe-top) + var(--header-height)); /* where the page starts, below the header */
@@ -171,7 +179,12 @@ main {
   box-sizing: border-box;
   max-width: calc(var(--column) + 2 * var(--edge));
   margin-inline: auto;
-  padding: calc(var(--top) + 1rem) var(--edge) 1rem;
+  padding: calc(var(--top) + var(--gap) - 0.11em) var(--edge) 1rem; /* 0.11em: the leading above a line's text */
+}
+
+main > :first-child,
+.entries > li:first-child {
+  margin-block-start: 0;
 }
 
 /* Fixed like its glass, not sticky, so that when the page bounces past its top
