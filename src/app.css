@@ -77,6 +77,8 @@ html {
   scroll-padding-block: calc(var(--top) + 1rem) calc(var(--safe-bottom) + 1rem); /* what Tab or find scrolls to lands clear of the chrome */
   scrollbar-gutter: stable;
   -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%; /* a phone turned sideways keeps the same text size */
+  text-size-adjust: 100%;
 }
 
 /* One text size for reading. The breadcrumbs and their menus are slightly larger,
@@ -96,6 +98,7 @@ body {
   font-size: var(--text);
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale; /* Firefox on a Mac draws text as thin as Safari does */
   text-rendering: optimizeLegibility;
 }
 
