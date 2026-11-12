@@ -54,7 +54,8 @@
   });
 </script>
 
-<svelte:document onclick={pressed} onkeydown={key} />
+<!-- Safari on a phone shows a press (:active) only on a page that listens for touches. -->
+<svelte:document onclick={pressed} onkeydown={key} ontouchstart={() => {}} />
 
 <div class="header-glass"></div>
 <header>

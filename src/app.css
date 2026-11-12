@@ -113,6 +113,15 @@ input {
   font-size: max(1em, 16px);
 }
 
+/* Holding a finger on a button or a breadcrumb presses it, rather than selecting
+   its words. */
+button,
+header {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 button {
   padding: 0 0.5em;
   border: 1px solid var(--ui-2);
@@ -365,9 +374,11 @@ button.icon svg {
   stroke-dashoffset: 0;
 }
 
-/* The page behind an open popup holds still. */
+/* The page behind an open popup holds still, even when a list in the popup is
+   scrolled past its end, and nothing bounces. */
 html:has(.popup:not(.closing)) {
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 html:has(#search:not(.closing)) header button.icon {
@@ -462,6 +473,7 @@ html:has(#search:not(.closing)) header button.icon {
   ); /* widest mid-way, so a fast line never pops names in, and nothing at either end */
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-width: none; /* the fades and the line already say there is more */
   mask-image:
     linear-gradient(transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent),
@@ -615,6 +627,7 @@ html:has(.popup:not(.closing)) .veil {
   flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   opacity: 0;
   transition: opacity var(--open-time) var(--ease);
 }
