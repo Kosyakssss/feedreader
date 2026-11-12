@@ -388,7 +388,9 @@ html:has(#search:not(.closing)) header button.icon {
    off the bottom of the window. A short one ends at its last name. */
 .menu {
   --row: 1.7em; /* one name, from the top of its line to the top of the next */
-  --list-top: calc(1.535em - (var(--row) - 1lh) / 2); /* the first name stays exactly one row below the breadcrumb */
+  --list-top: calc(
+    1.535em + var(--row) - 1.7em - (var(--row) - 1lh) / 2
+  ); /* the first name sits one row below the breadcrumb, as far as each name is from the next */
   --reveal: 0; /* how far down the line has reached, from 0 to 1 */
   position-anchor: --slash;
   position-visibility: always;
