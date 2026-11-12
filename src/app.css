@@ -497,6 +497,9 @@ html:has(#search:not(.closing)) header button.icon {
 
 .menu-list a {
   display: block;
+  width: fit-content; /* a press beside a name is outside it, and closes the menu */
+  max-width: 100%;
+  box-sizing: border-box;
   overflow: hidden;
   padding-block: calc((var(--row) - 1lh) / 2);
   white-space: nowrap;

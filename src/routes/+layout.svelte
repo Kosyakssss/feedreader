@@ -23,9 +23,12 @@
     if (popups.isOpen('search')) search.focus();
   }
 
-  // Pressing anywhere outside an open popup closes it, and so does Escape.
+  // Pressing anywhere but a menu's names, or search, closes an open popup, and
+  // so does Escape. A menu's empty space counts as outside it.
   function pressed(event: MouseEvent): void {
-    if (popups.anyOpen && !(event.target as Element).closest('.popup, [data-popup-toggle]')) popups.close();
+    const target = event.target as Element;
+    if (!popups.anyOpen || target.closest('#search, .menu a, [data-popup-toggle]')) return;
+    popups.close();
   }
 
   function key(event: KeyboardEvent): void {
