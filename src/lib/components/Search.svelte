@@ -49,6 +49,10 @@
         placeholder="Search"
         aria-label="Search"
         autocomplete="off"
+        autocapitalize="off"
+        autocorrect="off"
+        spellcheck="false"
+        enterkeyhint="search"
       />
       <button class="icon" aria-label="Close search" data-popup-toggle onclick={() => popups.close()}>
         <SearchIcon />

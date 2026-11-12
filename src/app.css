@@ -108,6 +108,11 @@ input {
   font: inherit;
 }
 
+/* Safari on a phone zooms in on a field whose text is under 16px. */
+input {
+  font-size: max(1em, 16px);
+}
+
 button {
   padding: 0 0.5em;
   border: 1px solid var(--ui-2);

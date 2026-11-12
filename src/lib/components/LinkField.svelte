@@ -27,6 +27,18 @@
 </script>
 
 <form class="link-field field" onsubmit={submit}>
-  <input type="text" bind:value={text} {placeholder} aria-label={placeholder} autocomplete="off" disabled={busy} />
+  <!-- Addresses and handles: a phone keyboard leaves them as typed, and Return reads Go. -->
+  <input
+    type="text"
+    bind:value={text}
+    {placeholder}
+    aria-label={placeholder}
+    autocomplete="off"
+    autocapitalize="off"
+    autocorrect="off"
+    spellcheck="false"
+    enterkeyhint="go"
+    disabled={busy}
+  />
   {#if result}<p class:failed={result.failed} class:muted={!result.failed}>{result.message}</p>{/if}
 </form>

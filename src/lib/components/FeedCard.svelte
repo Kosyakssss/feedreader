@@ -49,6 +49,8 @@
       class:failed
       placeholder="none"
       autocomplete="off"
+      autocapitalize="off"
+      enterkeyhint="done"
       oninput={() => (saved = false)}
       onblur={saveMutes}
       onkeydown={(event) => event.key === 'Enter' && saveMutes()}
