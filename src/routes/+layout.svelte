@@ -50,10 +50,14 @@
     popups.close();
   }
 
-  // Changing page crossfades the whole page, open popup and all.
+  // Changing page crossfades the whole page, open popup and all. Browsers
+  // without transition types (Safari before 18.2) would refuse the options, so
+  // they change page without it.
+  const crossfades = typeof ViewTransition !== 'undefined' && 'types' in ViewTransition.prototype;
+
   onNavigate((navigation) => {
     cards.close();
-    if (!document.startViewTransition) return popups.reset();
+    if (!crossfades) return popups.reset();
     return new Promise((resolve) => {
       document.startViewTransition({
         update: async () => {
