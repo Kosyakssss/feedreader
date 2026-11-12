@@ -3,9 +3,16 @@
 // A popup stays on the page while it closes, marked closing, so the CSS can
 // play its way out. Everything that moves is in the CSS; this only decides
 // how long a closing popup stays, which is the one motion time, --open-time.
+//
+// An open popup is a step in the history, so Back closes it, as it would a
+// page. On a phone the first Back puts the keyboard away, and the next one
+// closes search.
+import { goto } from '$app/navigation';
+import { page } from '$app/state';
 import { SvelteSet } from 'svelte/reactivity';
 
 let open = $state<string | null>(null);
+let step: number | null = null; // the open popup's step in the history, made or on its way
 const closing = new SvelteSet<string>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -13,7 +20,8 @@ function openTime(): number {
   return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--open-time')) * 1000;
 }
 
-function close(): void {
+// Closes without going back: for switching popups, and for Back itself.
+function shut(): void {
   const id = open;
   if (id === null) return;
   open = null;
@@ -22,6 +30,13 @@ function close(): void {
     id,
     setTimeout(() => closing.delete(id), openTime()),
   );
+}
+
+function close(): void {
+  shut();
+  if (step === null) return;
+  step = null;
+  history.back();
 }
 
 export const popups = {
@@ -33,16 +48,31 @@ export const popups = {
     return open !== null;
   },
 
-  // Opening one closes any other. Opening one that is closing turns it back.
+  // Opening one closes any other, in the same step. Opening one that is
+  // closing turns it back.
   open(id: string): void {
     if (open === id) return;
-    close();
+    shut();
     clearTimeout(timers.get(id));
     closing.delete(id);
     open = id;
+    if (step !== null) return;
+    step = Date.now();
+    goto(page.url.href, { state: { popup: step }, shallow: true });
   },
 
   close,
+
+  get step() {
+    return step;
+  },
+
+  // Back was pressed, or the popup's step was replaced by a page: the step is
+  // gone already.
+  left(): void {
+    step = null;
+    shut();
+  },
 
   toggle(id: string): void {
     if (open === id) close();
@@ -55,5 +85,6 @@ export const popups = {
     timers.clear();
     closing.clear();
     open = null;
+    step = null;
   },
 };

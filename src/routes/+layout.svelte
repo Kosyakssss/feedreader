@@ -1,7 +1,7 @@
 <script lang="ts">
   import '../app.css';
-  import { flushSync } from 'svelte';
-  import { onNavigate } from '$app/navigation';
+  import { flushSync, onMount } from 'svelte';
+  import { goto, onNavigate } from '$app/navigation';
   import { page } from '$app/state';
   import Crumbs from '#lib/components/Crumbs.svelte';
   import Search from '#lib/components/Search.svelte';
@@ -44,6 +44,30 @@
     popups.close();
   }
 
+  // Back closes an open popup: the history has moved off its step.
+  let shown: number | undefined;
+  $effect(() => {
+    const now = page.state.popup;
+    if (shown !== undefined && shown === popups.step && now !== shown) popups.left();
+    shown = now;
+  });
+
+  // A step left over from before a reload has no popup open on it any more.
+  onMount(() => {
+    if (page.state.popup) goto(page.url.href, { state: {}, shallow: true, replace: true });
+  });
+
+  // A page opened from a popup takes the popup's step in the history, so Back
+  // from it goes to the page before, not to that page with the popup closed.
+  function follow(event: MouseEvent): void {
+    if (!page.state.popup || event.defaultPrevented || event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = (event.target as Element).closest('.popup a[href], a.press-again');
+    if (!(link instanceof HTMLAnchorElement) || link.target || link.origin !== location.origin) return;
+    event.preventDefault();
+    goto(link.href, { replace: true });
+  }
+
   function key(event: KeyboardEvent): void {
     if (event.key !== 'Escape' || !popups.anyOpen) return;
     event.preventDefault();
@@ -55,7 +79,9 @@
   // they change page without it.
   const crossfades = typeof ViewTransition !== 'undefined' && 'types' in ViewTransition.prototype;
 
+  // Opening a popup and Back from it are shallow: the page stays.
   onNavigate((navigation) => {
+    if (navigation.shallow) return;
     cards.close();
     if (!crossfades) return popups.reset();
     return new Promise((resolve) => {
@@ -72,7 +98,7 @@
 </script>
 
 <!-- Safari on a phone shows a press (:active) only on a page that listens for touches. -->
-<svelte:document onclick={pressed} onkeydown={key} ontouchstart={() => {}} />
+<svelte:document onclickcapture={follow} onclick={pressed} onkeydown={key} ontouchstart={() => {}} />
 
 <div class="header-glass"></div>
 <header>
