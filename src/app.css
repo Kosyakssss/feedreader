@@ -401,7 +401,7 @@ html:has(#search:not(.closing)) header button.icon {
   top: var(--top);
   left: 0;
   width: 100%;
-  height: calc(100dvh - var(--top));
+  height: calc(var(--visible-height, 100dvh) - var(--top)); /* above a phone's keyboard */
   margin: 0;
   padding: 0 var(--gutter-end) calc(1rem + var(--safe-bottom)) var(--gutter-start);
   overflow: visible;

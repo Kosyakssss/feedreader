@@ -23,6 +23,19 @@
     if (popups.isOpen('search')) search.focus();
   }
 
+  // A phone's keyboard covers the bottom of the window without making it any
+  // shorter, so search's results would run on under it. This is how much is
+  // still visible, at the page's own zoom, so pinching doesn't change it.
+  $effect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const update = () =>
+      document.documentElement.style.setProperty('--visible-height', `${viewport.height * viewport.scale}px`);
+    update();
+    viewport.addEventListener('resize', update);
+    return () => viewport.removeEventListener('resize', update);
+  });
+
   // Pressing anywhere but a menu's names, or search, closes an open popup, and
   // so does Escape. A menu's empty space counts as outside it.
   function pressed(event: MouseEvent): void {
