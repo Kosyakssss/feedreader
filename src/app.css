@@ -351,10 +351,9 @@ button.icon::before {
   inset: var(--reach);
 }
 
-/* The icon in the popup starts exactly on top of the one in the header, so
-   they read as one icon moving. */
+/* The icon in search starts exactly on top of the one in the header, which
+   hides while search is open, so they read as one icon moving. */
 header button.icon {
-  anchor-name: --search-icon;
   transition: visibility 0s var(--open-time);
 }
 
@@ -451,7 +450,7 @@ html:has(#search:not(.closing)) header button.icon {
   position-anchor: --slash;
   position-visibility: always;
   top: anchor(top);
-  right: anchor(--search-icon right);
+  right: var(--gutter-end); /* the search icon's right edge, the header's last thing */
   bottom: auto;
   left: calc(anchor(center) - 0.5px);
   width: auto;
@@ -954,4 +953,97 @@ html:active-view-transition-type(page-change) .row {
    behind them, so they are blurred as they go under the header instead. */
 :root:not(:active-view-transition-type(page-change))::view-transition-group(header) {
   backdrop-filter: var(--glass-blur);
+}
+
+/* On a touch screen the header is a bar at the bottom, under the thumb. Its
+   menus rise from the slash with the first name nearest it, search opens in
+   the bar's place and rides up above the keyboard, and a page's buttons stand
+   on the bar. */
+@media (pointer: coarse) {
+  html {
+    --top: var(--safe-top);
+    --bar: calc(var(--header-height) + var(--safe-bottom));
+  }
+
+  body {
+    --search-rise: 0px; /* search opens where the breadcrumbs were */
+  }
+
+  /* With no header above it, the first thing on a page sits two gaps below
+     the top of the screen, as it sits two below the breadcrumbs elsewhere. */
+  main {
+    padding-block-start: calc(var(--safe-top) + 2 * var(--gap) - 0.11em);
+  }
+
+  header {
+    top: auto;
+    bottom: 0;
+    padding: 0 var(--gutter-end) var(--safe-bottom) var(--gutter-start);
+  }
+
+  .header-glass {
+    top: auto;
+    bottom: 0;
+    height: var(--bar);
+  }
+
+  .menu {
+    top: auto;
+    bottom: anchor(bottom);
+    max-height: calc(
+      100dvh - var(--safe-bottom) - var(--header-height) / 2 + 0.6em
+    ); /* from the slash to just past the top of the window */
+    padding: 0 0 var(--list-top) 0.6em;
+  }
+
+  .menu::before {
+    transform-origin: bottom;
+  }
+
+  .menu-list {
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: flex-start;
+    mask-image:
+      linear-gradient(transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent),
+      linear-gradient(to top, #000 calc(var(--tip) - var(--soft)), transparent var(--tip));
+  }
+
+  .menu-list a {
+    flex: none; /* a long list scrolls, rather than squeezing its names */
+  }
+
+  .menu-list.scrolls {
+    padding-block: var(--row) 0;
+  }
+
+  /* Search takes the bar's place: the breadcrumbs give way to the field, and
+     the magnifier turns into the close button where it stands. With the
+     keyboard up, it sits on the keyboard, results above it. */
+  #search {
+    top: calc(var(--visible-top, 0px) + var(--safe-top));
+    height: calc(var(--visible-height, 100dvh) - var(--safe-top));
+    flex-direction: column-reverse;
+    padding: 0 var(--gutter-end) 0 var(--gutter-start);
+    transition: height var(--open-time) var(--ease);
+  }
+
+  .search-bar {
+    align-items: center;
+    height: var(--header-height);
+    margin: 0;
+    padding-block-end: max(
+      0px,
+      var(--safe-bottom) - (100dvh - var(--visible-height, 100dvh))
+    ); /* the bar's room for the home bar, until the keyboard covers that */
+  }
+
+  nav {
+    transition: opacity var(--open-time) var(--ease);
+  }
+
+  html:has(#search:not(.closing)) nav {
+    opacity: 0;
+    pointer-events: none;
+  }
 }

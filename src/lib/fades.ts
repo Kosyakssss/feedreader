@@ -6,9 +6,14 @@ export function fades(list: HTMLElement): () => void {
   function update(): void {
     const row = (list.firstElementChild as HTMLElement | null)?.offsetHeight ?? 0;
     list.classList.toggle('scrolls', list.scrollHeight > list.clientHeight);
-    const past = list.scrollHeight - list.clientHeight - list.scrollTop;
-    list.style.setProperty('--fade-top', `${Math.min(list.scrollTop, row)}px`);
-    list.style.setProperty('--fade-bottom', `${Math.max(0, Math.min(past, row))}px`);
+    // A list that rises from the bottom starts scrolled to its bottom, with
+    // scrollTop at 0 and going negative as it scrolls up.
+    const rises = getComputedStyle(list).flexDirection === 'column-reverse';
+    const range = list.scrollHeight - list.clientHeight;
+    const above = rises ? range + list.scrollTop : list.scrollTop;
+    const below = range - above;
+    list.style.setProperty('--fade-top', `${Math.max(0, Math.min(above, row))}px`);
+    list.style.setProperty('--fade-bottom', `${Math.max(0, Math.min(below, row))}px`);
   }
 
   update();

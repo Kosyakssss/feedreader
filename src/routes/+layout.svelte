@@ -24,16 +24,23 @@
   }
 
   // A phone's keyboard covers the bottom of the window without making it any
-  // shorter, so search's results would run on under it. This is how much is
-  // still visible, at the page's own zoom, so pinching doesn't change it.
+  // shorter, so search would run on under it. This is how much is still
+  // visible, at the page's own zoom so pinching doesn't change it, and how far
+  // Safari has slid the page up to show a field.
   $effect(() => {
     const viewport = window.visualViewport;
     if (!viewport) return;
-    const update = () =>
+    const update = () => {
       document.documentElement.style.setProperty('--visible-height', `${viewport.height * viewport.scale}px`);
+      document.documentElement.style.setProperty('--visible-top', `${viewport.offsetTop}px`); // where Safari has slid the page to
+    };
     update();
     viewport.addEventListener('resize', update);
-    return () => viewport.removeEventListener('resize', update);
+    viewport.addEventListener('scroll', update);
+    return () => {
+      viewport.removeEventListener('resize', update);
+      viewport.removeEventListener('scroll', update);
+    };
   });
 
   // Pressing anywhere but a menu's names, or search, closes an open popup, and

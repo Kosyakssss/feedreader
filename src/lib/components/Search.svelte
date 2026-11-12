@@ -14,7 +14,7 @@
   let inFlight: AbortController | undefined;
 
   export function focus(): void {
-    input?.focus();
+    input?.focus({ preventScroll: true }); // the page holds still; search moves itself above the keyboard
   }
 
   // Asks once typing pauses, and only the latest question counts.
