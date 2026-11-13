@@ -128,13 +128,31 @@ input {
   font-size: max(1em, 16px);
 }
 
-/* Holding a finger on a button or a breadcrumb presses it, rather than selecting
-   its words. */
+/* What can be selected. The app's own parts are things to press, as in a
+   native app: the header and its menus, buttons, and the rows of a list.
+   Pressing them twice, or holding a finger on them, never selects anything.
+   What a card opened from a row says, a page's own writing, and what is typed
+   into a field can be selected and copied. */
+button,
+header,
+.row {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.card,
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* A held finger presses a button or a breadcrumb, rather than opening the
+   menu for links and words. A row's title keeps that menu, to open the post
+   in a new tab or copy its address. */
 button,
 header {
   -webkit-touch-callout: none;
-  -webkit-user-select: none;
-  user-select: none;
 }
 
 button {

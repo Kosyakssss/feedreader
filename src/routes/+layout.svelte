@@ -79,6 +79,15 @@
     popups.visit(link.href);
   }
 
+  // A double click on what can't be selected selects nothing. Safari otherwise
+  // reaches past it for the nearest words it can select, or the space
+  // between rows.
+  function unselectable(event: MouseEvent): void {
+    if (event.detail < 2 || !(event.target instanceof Element)) return;
+    const style = getComputedStyle(event.target);
+    if ((style.userSelect || style.webkitUserSelect) === 'none') event.preventDefault();
+  }
+
   function key(event: KeyboardEvent): void {
     if (event.key !== 'Escape' || !popups.anyOpen) return;
     event.preventDefault();
@@ -109,7 +118,13 @@
 </script>
 
 <!-- Safari on a phone shows a press (:active) only on a page that listens for touches. -->
-<svelte:document onclickcapture={follow} onclick={pressed} onkeydown={key} ontouchstart={() => {}} />
+<svelte:document
+  onclickcapture={follow}
+  onclick={pressed}
+  onmousedown={unselectable}
+  onkeydown={key}
+  ontouchstart={() => {}}
+/>
 
 <div class="header-glass"></div>
 <header>
