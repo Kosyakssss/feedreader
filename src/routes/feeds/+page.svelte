@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import FeedList from '#lib/components/FeedList.svelte';
   import LinkField from '#lib/components/LinkField.svelte';
   import { library } from '#lib/library.svelte.ts';
@@ -11,7 +12,7 @@
   const mutes = $derived(library.ready ? library.mutes : (data.list?.mutes ?? {}));
 
   async function follow(text: string) {
-    const response = await fetch('/api/feeds', {
+    const response = await fetch(resolve('/api/feeds'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ url: text.trim() }),

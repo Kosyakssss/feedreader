@@ -10,12 +10,15 @@
   import { virtualKeyboard } from '#lib/keyboard.ts';
   import { library } from '#lib/library.svelte.ts';
   import { popups } from '#lib/popups.svelte.ts';
+  import { feedPath } from '#lib/format.ts';
   import { trailFor } from '#lib/trail.ts';
   import type { LayoutProps } from './$types';
 
   let { data, children }: LayoutProps = $props();
 
-  const trail = $derived(trailFor(page.url.pathname, library.ready ? library.sources : data.feeds));
+  // Where in the app this page is, whatever path the app itself is served under.
+  const here = $derived(page.route.id === '/feed/[id]' ? feedPath(Number(page.params.id)) : (page.route.id ?? '/'));
+  const trail = $derived(trailFor(here, library.ready ? library.sources : data.feeds));
 
   // The whole library comes to the device as the app starts, and stays current.
   onMount(() => library.start());

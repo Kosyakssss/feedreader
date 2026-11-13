@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import BookmarkCard from '#lib/components/BookmarkCard.svelte';
   import Card from '#lib/components/Card.svelte';
   import MoreButton from '#lib/components/MoreButton.svelte';
@@ -14,7 +15,7 @@
   const entries = $derived(library.list(data.list?.entries, library.bookmarks));
 
   async function bookmark(text: string) {
-    const response = await fetch('/api/bookmarks', {
+    const response = await fetch(resolve('/api/bookmarks'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),

@@ -6,6 +6,8 @@
 //
 // Presses change it at once and tell the server after. If the server then
 // fails, the change is undone and the button turns red.
+import { resolve } from '$app/paths';
+import { at } from '#lib/paths.ts';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import type { Library as Snapshot, Update } from '#lib/server/live.ts';
 import type { Entry, Source } from '#lib/server/store.ts';
@@ -80,7 +82,7 @@ class Library {
   // is lost: the library comes with the number of the last change in it, and
   // any change up to that number is already in it.
   private listen(): void {
-    this.stream = new EventSource('/api/live');
+    this.stream = new EventSource(resolve('/api/live'));
     this.stream.addEventListener('at', (event) => {
       // On every connection, after a sleep or a dropped network too: a copy
       // that is behind takes the whole library again.
@@ -90,7 +92,7 @@ class Library {
   }
 
   private async fetchAll(): Promise<void> {
-    const response = await fetch('/api/library').catch(() => null);
+    const response = await fetch(resolve('/api/library')).catch(() => null);
     if (!response?.ok) return; // the stream's next connection tries again
     const library = (await response.json()) as Snapshot;
     this.entries.clear();
@@ -127,7 +129,7 @@ class Library {
     this.failed.delete(`${entry.id} ${toggle}`);
     this.entries.set(entry.id, toggled(before, toggle));
     this.pending.set(entry.id, (this.pending.get(entry.id) ?? 0) + 1);
-    const saved = await post(`/api/${toggle}/${entry.id}`);
+    const saved = await post(at(`/api/${toggle}/${entry.id}`));
     const left = this.pending.get(entry.id)! - 1;
     if (left) this.pending.set(entry.id, left);
     else this.pending.delete(entry.id);
@@ -143,7 +145,7 @@ class Library {
     this.readAllFailed = false;
     const before = shown.map((entry) => this.entries.get(entry.id) ?? entry);
     for (const entry of before) if (entry.state === 'unread') this.entries.set(entry.id, { ...entry, state: 'read' });
-    if (await post(`/api/read-all/${newest}`)) return;
+    if (await post(at(`/api/read-all/${newest}`))) return;
     for (const entry of before) this.entries.set(entry.id, entry);
     this.readAllFailed = true;
   }

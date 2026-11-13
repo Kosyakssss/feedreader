@@ -4,11 +4,16 @@ import { defineConfig, loadEnv } from 'vite';
 
 export default defineConfig(({ mode }) => {
   // Where the app listens, for `dev` and for the built server alike, from a
-  // local .env file. The app is served over plain http on that one address,
-  // which the server can't tell by itself.
-  const env = { ...loadEnv(mode, process.cwd(), 'LAGAN_'), ...process.env };
+  // local .env file. Behind a proxy, such as `tailscale serve` giving it HTTPS
+  // under a path, SITE_ORIGIN is the address people open and SITE_PATH the
+  // path it lives under; the server can't tell either by itself. (Not LAGAN_:
+  // the server takes those for its own settings, and refuses any it doesn't
+  // know.)
+  const env = { ...loadEnv(mode, process.cwd(), ['LAGAN_', 'SITE_']), ...process.env };
   const host = env.LAGAN_HOST ?? '127.0.0.1';
   const port = Number(env.LAGAN_PORT ?? 8789);
+  const origin = env.SITE_ORIGIN ?? `http://${host}:${port}`;
+  const base = (env.SITE_PATH ?? '').replace(/\/$/, '') as '' | `/${string}`;
 
   return {
     plugins: [
@@ -18,7 +23,7 @@ export default defineConfig(({ mode }) => {
           runes: ({ filename }) => (filename.split(/[/\\]/).includes('node_modules') ? undefined : true),
         },
         adapter: adapter({ envPrefix: 'LAGAN_', precompress: true }),
-        paths: { origin: `http://${host}:${port}` },
+        paths: { origin, base },
       }),
     ],
     server: { host, port, strictPort: true },

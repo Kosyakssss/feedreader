@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { at } from '#lib/paths.ts';
   import { fades } from '#lib/fades.ts';
   import { popups } from '#lib/popups.svelte.ts';
   import { FEEDS, type Crumb, type Link } from '#lib/trail.ts';
@@ -16,7 +17,7 @@
     const counted = !(event instanceof PointerEvent) || event.pointerType !== 'mouse';
     const twice = event.detail > 1 || (counted && last?.href === href && event.timeStamp - last.at < 350);
     last = twice ? undefined : { href, at: event.timeStamp };
-    if (twice) popups.visit(href);
+    if (twice) popups.visit(at(href));
     else popups.toggle(id);
   }
 </script>
@@ -36,7 +37,7 @@
           <div class="menu popup" class:closing={popups.isClosing(id)}>
             <div class="menu-list" {@attach fades}>
               {#each step.under as link (link.href)}
-                <a href={link.href} aria-current={onTrail(link.href)}>{label(link)}</a>
+                <a href={at(link.href)} aria-current={onTrail(link.href)}>{label(link)}</a>
               {/each}
             </div>
           </div>

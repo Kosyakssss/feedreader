@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { refreshAll } from '$app/navigation';
 
   let result = $state<{ message: string; failed?: boolean }>();
@@ -8,7 +9,7 @@
     const file = input.files?.[0];
     if (!file) return;
     result = { message: `Reading ${file.name}…` };
-    const response = await fetch('/api/opml', {
+    const response = await fetch(resolve('/api/opml'), {
       method: 'POST',
       body: await file.text(),
       headers: { Accept: 'application/json' },
@@ -30,7 +31,7 @@
   <h2>Feeds file</h2>
   <p class="muted">OPML: the list of feeds other readers import and export.</p>
   <div class="setting-actions">
-    <a class="button" href="/api/opml" download="lagan.opml" data-sveltekit-reload>Export</a>
+    <a class="button" href={resolve('/api/opml')} download="lagan.opml" data-sveltekit-reload>Export</a>
     <label class="button"
       >Import<input type="file" accept=".opml,.xml,text/xml,text/x-opml" onchange={importFile} hidden /></label
     >

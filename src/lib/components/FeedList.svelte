@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { at } from '#lib/paths.ts';
   import { feedPath } from '#lib/format.ts';
   import type { Source } from '#lib/server/store.ts';
   import Card from './Card.svelte';
@@ -15,7 +16,7 @@
   {#each feeds as feed (feed.id)}
     <li>
       <div class="row">
-        <a href={feedPath(feed.id)}>{feed.label}</a>
+        <a href={at(feedPath(feed.id))}>{feed.label}</a>
         {#if feed.folder}<span class="muted">{feed.folder}</span>{/if}
         {#if feed.error}<span class="failed">{feed.error}</span>{/if}
         {#if mutes}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import EntryList from '#lib/components/EntryList.svelte';
   import { library, TIMELINE_STEP } from '#lib/library.svelte.ts';
   import type { Entry } from '#lib/server/store.ts';
@@ -28,7 +29,7 @@
     loading = true;
     failed = false;
     try {
-      const response = await fetch(`/api/timeline?after=${last.published_at}:${last.id}`);
+      const response = await fetch(resolve(`/api/timeline?after=${last.published_at}:${last.id}`));
       if (!response.ok) throw new Error(String(response.status));
       const page: { entries: Entry[]; more: boolean } = await response.json();
       fetched = [...fetched, ...page.entries];

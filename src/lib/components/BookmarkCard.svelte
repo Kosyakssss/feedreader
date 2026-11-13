@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { at } from '#lib/paths.ts';
+  import { resolve } from '$app/paths';
   import { refreshAll } from '$app/navigation';
   import { feedPath } from '#lib/format.ts';
   import type { Entry } from '#lib/server/store.ts';
@@ -14,7 +16,7 @@
   // A page from no feed: look for the feeds its site offers, once, on opening.
   $effect(() => {
     if (!entry.page) return;
-    fetch(`/api/discover?url=${encodeURIComponent(entry.url)}`)
+    fetch(at(`/api/discover?url=${encodeURIComponent(entry.url)}`))
       .then((response) => response.json())
       .then((found: { feeds: Found[] }) => (feeds = found.feeds))
       .catch(() => (feeds = []))
@@ -23,7 +25,7 @@
 
   async function follow(feed: Found): Promise<void> {
     feed.failed = false;
-    const response = await fetch('/api/feeds', {
+    const response = await fetch(resolve('/api/feeds'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: feed.url }),
@@ -40,7 +42,7 @@
 <div class="card-body">
   <div><button onclick={onremove}>Remove bookmark</button></div>
   {#if !entry.page}
-    <p class="muted">From <a href={feedPath(entry.source_id)}>{entry.feed}</a></p>
+    <p class="muted">From <a href={at(feedPath(entry.source_id))}>{entry.feed}</a></p>
   {:else if looking}
     <p class="muted">Looking for feeds on {site}…</p>
   {:else if feeds.length}

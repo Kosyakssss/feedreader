@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { at } from '#lib/paths.ts';
   import { fitTitle } from '#lib/fit-title.ts';
   import { leave } from '#lib/leave.ts';
   import { capTitle, dateLabel, displayTitle, feedPath } from '#lib/format.ts';
@@ -39,7 +40,7 @@
       >{title}</a
     >
     <small>
-      {#if entry.page}{source}{:else}<a href={feedPath(entry.source_id)}>{source}</a>{/if}
+      {#if entry.page}{source}{:else}<a href={at(feedPath(entry.source_id))}>{source}</a>{/if}
       {dateLabel(entry.published_at)}
     </small>
     {#if ontoggle || extra}

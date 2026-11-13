@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { keyboardOverPage } from '#lib/keyboard.ts';
   import { popups } from '#lib/popups.svelte.ts';
   import type { Entry, Source } from '#lib/server/store.ts';
@@ -40,7 +41,9 @@
       }
       inFlight = new AbortController();
       try {
-        const response = await fetch(`/api/search?q=${encodeURIComponent(asked)}`, { signal: inFlight.signal });
+        const response = await fetch(resolve(`/api/search?q=${encodeURIComponent(asked)}`), {
+          signal: inFlight.signal,
+        });
         if (response.ok) results = { query: asked, ...(await response.json()) };
       } catch {
         // replaced by a newer question, or offline: the last answer stays

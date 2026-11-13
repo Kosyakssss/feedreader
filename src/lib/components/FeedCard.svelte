@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { at } from '#lib/paths.ts';
   import type { Source } from '#lib/server/store.ts';
 
   let { feed, mutes }: { feed: Source; mutes: string[] } = $props();
@@ -12,7 +13,7 @@
   async function saveMutes(): Promise<void> {
     if (saved) return;
     failed = false;
-    const response = await fetch(`/api/feeds/${feed.id}/mutes`, {
+    const response = await fetch(at(`/api/feeds/${feed.id}/mutes`), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ words: words.split(',') }),
@@ -31,7 +32,7 @@
       confirming = true;
       return;
     }
-    const response = await fetch(`/api/feeds/${feed.id}`, { method: 'DELETE' }).catch(() => null);
+    const response = await fetch(at(`/api/feeds/${feed.id}`), { method: 'DELETE' }).catch(() => null);
     if (!response?.ok) failed = true; // otherwise the library hears it is gone
   }
 </script>
