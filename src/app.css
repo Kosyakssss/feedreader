@@ -590,10 +590,12 @@ html:has(#search:not(.closing)) header button.icon {
   backdrop-filter: var(--float-blur);
 }
 
+/* Down to nothing, rather than none: Firefox on Android, its blur once
+   removed, doesn't draw it again after a page change. */
 html:has(.popup:not(.closing)) .header-glass {
   background-color: transparent;
   box-shadow: none;
-  backdrop-filter: none;
+  backdrop-filter: blur(0) saturate(1);
   transition-delay: 0s;
 }
 
