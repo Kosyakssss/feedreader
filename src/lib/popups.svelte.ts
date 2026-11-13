@@ -6,7 +6,8 @@
 //
 // An open popup is a step in the history, so Back closes it, as it would a
 // page. On a phone the first Back puts the keyboard away, and the next one
-// closes search.
+// closes search. Not in Safari, though: there Back is a swipe that slides the
+// page itself away, which would slide away the same page to close a menu.
 import { goto } from '$app/navigation';
 import { page } from '$app/state';
 import { SvelteSet } from 'svelte/reactivity';
@@ -14,6 +15,7 @@ import { SvelteSet } from 'svelte/reactivity';
 let open = $state<string | null>(null);
 let step: number | null = null; // the open popup's step in the history, made or on its way
 let settled: Promise<unknown> = Promise.resolve(); // the history's last change for a popup, done
+const steps = typeof window !== 'undefined' && !('GestureEvent' in window); // only Safari has these
 const closing = new SvelteSet<string>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -67,7 +69,7 @@ export const popups = {
     clearTimeout(timers.get(id));
     closing.delete(id);
     open = id;
-    if (step !== null) return;
+    if (step !== null || !steps) return;
     step = Date.now();
     settled = goto(page.url.href, { state: { popup: step }, shallow: true });
   },
