@@ -792,6 +792,7 @@ li {
   position: fixed;
   bottom: calc(var(--bar) + var(--gap));
   z-index: 1;
+  display: grid;
   border: 0.5px solid var(--float-rim);
   border-radius: 999px;
   background-color: var(--float-tint);
@@ -816,8 +817,19 @@ html:has(.popup:not(.closing)) .action {
   transition-delay: 0s;
 }
 
+/* The pill's own button and the other's words share one place, so the pill
+   is as wide as the wider of them; the button fills it, its words centred. */
+.action > * {
+  grid-area: 1 / 1;
+}
+
+.twin {
+  visibility: hidden;
+}
+
 .action button {
   display: block;
+  width: 100%;
   padding: var(--pill-padding);
   border: 0;
   background: none;
