@@ -748,20 +748,25 @@ li {
 }
 
 /* A page's own buttons: words in the bottom corners, each on a pool of the
-   header's glass that runs in from the screen's edge and dissolves into the
-   page like a watercolour wash. Each pool is its own fixed box, so Safari
-   keeps it while the page bounces. They stand on --bar: the phone's bar, or
-   the bottom of the window. Below the veil, so an open popup blurs them with
-   the page, and their glass gives way to the veil's as the header's does. */
+   header's glass that runs in from the screen's edge. It is solid to a gap
+   past the words, as the header's glass is around the breadcrumbs, and only
+   then dissolves into the page like a watercolour wash. Each pool is its own
+   fixed box, so Safari keeps it while the page bounces. They stand on --bar:
+   the phone's bar, or the bottom of the window. Below the veil, so an open
+   popup blurs them with the page, and their glass gives way to the veil's as
+   the header's does. */
 .action {
-  --dissolve: 32px; /* how far in from its inner edges the wash fades out */
+  --dissolve: 48px; /* how far past its solid part the wash fades out */
   position: fixed;
   bottom: var(--bar);
   z-index: 1;
   padding-block: calc(var(--dissolve) + var(--gap) - 0.11em) calc(var(--gap) - 0.11em);
   background-color: var(--glass-tint);
   backdrop-filter: var(--glass-blur);
-  mask: var(--fallback) 0 0 / 100% 100% no-repeat; /* until wash.ts has drawn the wash */
+  mask:
+    linear-gradient(transparent, #000 var(--dissolve)) 0 0 / 100% 100% no-repeat,
+    var(--fallback) 0 0 / 100% 100% no-repeat; /* until wash.ts has drawn the wash */
+  mask-composite: intersect;
   transition:
     background-color var(--open-time) var(--ease) var(--clear-after),
     backdrop-filter var(--open-time) var(--ease) var(--clear-after);
@@ -963,6 +968,7 @@ html:active-view-transition-type(page-change) .row {
   html {
     --top: var(--safe-top);
     --bar: calc(var(--header-height) + var(--safe-bottom));
+    --below: 160px; /* taller than any browser's toolbar */
   }
 
   body {

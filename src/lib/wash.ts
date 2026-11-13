@@ -1,9 +1,11 @@
 // A watercolour wash, drawn once as a mask for a page button's pool of glass.
-// The pool runs solid from the screen's edge and from what it stands on, and
-// dissolves at its top and inner side: a wavy line, softened, with a little
-// grain where the colour thins out. Drawn into a picture at the pool's size,
-// and again only when that changes; a mask made of SVG filters is redrawn by
-// the browser on every frame the page scrolls under it, which stalls it.
+// The pool is the header's glass, solid from the screen's edge and from what
+// it stands on to a gap past the words, as the header's glass is around the
+// breadcrumbs. Only past that does it dissolve, at its top and inner side: a
+// wavy line, softened, with a little grain where the colour thins out. Drawn
+// into a picture at the pool's size, and again only when that changes; a mask
+// made of SVG filters is redrawn by the browser on every frame the page
+// scrolls under it, which stalls it.
 
 type Side = 'start' | 'end';
 
@@ -16,10 +18,15 @@ function random(seed: number): () => number {
   };
 }
 
-// A gentle swell: a few slow waves on top of each other.
-function swell(seed: number): (at: number) => number {
+// A gentle swell: a few slow waves on top of each other, together never
+// further than reach from the line they ride on.
+function swell(seed: number, reach: number): (at: number) => number {
   const next = random(seed);
-  const waves = [52, 31, 19].map((length) => ({ length, phase: next() * Math.PI * 2, size: 3 + next() * 3 }));
+  const waves = [52, 31, 19].map((length) => ({
+    length,
+    phase: next() * Math.PI * 2,
+    size: (reach / 3) * (0.5 + next() / 2),
+  }));
   return (at) =>
     waves.reduce((sum, wave) => sum + wave.size * Math.sin((at / wave.length) * Math.PI * 2 + wave.phase), 0);
 }
@@ -50,22 +57,31 @@ function draw(width: number, height: number, dissolve: number, side: Side): stri
   if (!context) return '';
   if (side === 'end') context.setTransform(-1, 0, 0, 1, width, 0); // drawn for the start, then mirrored
 
-  // The solid shape, out past the outer edges, its wavy edges a little inside
-  // the dissolve so the blur has room to fade them to nothing at the box.
-  const soft = dissolve * 0.45;
-  const top = swell(7);
-  const inner = swell(11);
-  const right = width - dissolve * 0.85;
-  const ceiling = dissolve * 0.85;
-  const far = 1e4; // drawn this far off the canvas; only its blurred shadow lands on it
+  // The solid part ends dissolve in from the top and the inner side. Past it,
+  // a wavy line runs halfway through the dissolve, round the corner and down
+  // to what the pool stands on, and its shadow, blurred, fades from solid at
+  // the solid part to nothing at the pool's edge. The shape itself is drawn
+  // far off the canvas, so that only its shadow lands on it.
+  const corner = { x: width - dissolve, y: dissolve };
+  const out = dissolve / 2; // from the solid part to the line
+  const wave = swell(7, dissolve * 0.18);
+  const far = 1e4;
+  const points: [number, number][] = [];
+  const along = (x: number, y: number, normalX: number, normalY: number, at: number) => {
+    const by = out + wave(at);
+    points.push([x + normalX * by - far, y + normalY * by]);
+  };
+  for (let x = -dissolve * 2; x <= corner.x; x += 2) along(x, corner.y, 0, -1, x);
+  const turn = (out * Math.PI) / 2;
+  for (let angle = -Math.PI / 2; angle < 0; angle += 2 / out)
+    along(corner.x, corner.y, Math.cos(angle), Math.sin(angle), corner.x + out * (angle + Math.PI / 2));
+  for (let y = corner.y; y <= height + dissolve; y += 2) along(corner.x, y, 1, 0, corner.x + turn + y - corner.y);
   context.beginPath();
-  context.moveTo(-dissolve - far, height + dissolve);
-  context.lineTo(-dissolve - far, ceiling + top(0));
-  for (let x = 0; x <= right; x += 2) context.lineTo(x - far, ceiling + top(x));
-  for (let y = ceiling; y <= height + dissolve; y += 2) context.lineTo(right + inner(y) - far, y);
+  context.moveTo(-dissolve * 2 - far, height + dissolve);
+  for (const [x, y] of points) context.lineTo(x, y);
   context.closePath();
   context.shadowColor = '#000';
-  context.shadowBlur = soft;
+  context.shadowBlur = dissolve * 0.3; // fades over about as far either side of the line
   context.shadowOffsetX = side === 'end' ? -far : far; // mirrored, the offset runs the other way
   context.fill();
 
