@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { library, type Toggle } from '#lib/library.svelte.ts';
+  import { afterNavigate } from '$app/navigation';
+  import { refitTitles } from '#lib/fit-title.ts';
+  import type { Toggle } from '#lib/library.svelte.ts';
+  import type { Selection } from '#lib/selection.svelte.ts';
   import type { Entry } from '#lib/server/store.ts';
   import type { Snippet } from 'svelte';
   import Row from './Row.svelte';
@@ -10,32 +13,52 @@
     extra,
     card,
     empty = 'Nothing here.',
-    marked,
-    onopen,
+    selection,
   }: {
     entries: Entry[];
     toggles?: Toggle[];
     extra?: Snippet<[Entry]>;
     card?: Snippet<[Entry]>;
     empty?: string;
-    marked?: number; // the entry to show as where you are
-    onopen?: (entry: Entry) => void;
+    selection?: Selection;
   } = $props();
+
+  // Another page, or another feed on this one, starts unchosen.
+  afterNavigate(() => selection?.stop());
+
+  // Rows that leave, read or bookmarked elsewhere, leave the choice too; and
+  // with nothing left to choose from, choosing ends.
+  $effect(() => {
+    if (!selection) return;
+    selection.keep(entries);
+    if (!entries.length) selection.stop();
+  });
+
+  // The boxes take room from the titles.
+  $effect(() => {
+    void selection?.choosing;
+    refitTitles();
+  });
+
+  function keydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape' && selection?.choosing && !document.querySelector('.popup:not(.closing)')) {
+      selection.stop();
+      event.preventDefault();
+    }
+  }
 </script>
 
+<svelte:document
+  onkeydown={keydown}
+  onpointermove={(event) => selection?.move(event)}
+  onpointerup={(event) => selection?.up(event)}
+  onpointercancel={(event) => selection?.up(event)}
+/>
+
 {#if entries.length}
-  <ol class="entries">
+  <ol class="entries" class:choosing={selection?.choosing}>
     {#each entries as entry (entry.id)}
-      <Row
-        {entry}
-        {toggles}
-        failed={(toggle) => library.failed.has(`${entry.id} ${toggle}`)}
-        ontoggle={(toggle) => library.toggle(entry, toggle)}
-        {extra}
-        {card}
-        marked={entry.id === marked}
-        onopen={onopen && (() => onopen(entry))}
-      />
+      <Row {entry} {toggles} {extra} {card} {selection} />
     {/each}
   </ol>
 {:else}

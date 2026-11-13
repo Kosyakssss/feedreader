@@ -13,7 +13,9 @@ function fit(link: HTMLAnchorElement, title: string): void {
   if (!list) return;
   let width = widths.get(list);
   if (width === undefined) {
-    width = list.clientWidth;
+    // Less the room the boxes take while choosing: the width a title ends up
+    // with, not whatever it has partway through their coming in.
+    width = list.clientWidth - (parseFloat(getComputedStyle(list).getPropertyValue('--check-room')) || 0);
     widths.set(list, width);
   }
   if (!width) return; // not on screen yet
@@ -22,10 +24,7 @@ function fit(link: HTMLAnchorElement, title: string): void {
     canvas = document.createElement('canvas').getContext('2d')!;
     const style = getComputedStyle(link);
     canvas.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-    addEventListener('resize', () => {
-      widths = new WeakMap();
-      for (const [other, whole] of titles) fit(other, whole);
-    });
+    addEventListener('resize', refitTitles);
   }
 
   const room = width - 1;
@@ -42,3 +41,9 @@ export const fitTitle =
     fit(link, title);
     return () => titles.delete(link);
   };
+
+// Fits every title again, to a list that changed width.
+export function refitTitles(): void {
+  widths = new WeakMap();
+  for (const [link, title] of titles) fit(link, title);
+}

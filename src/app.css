@@ -102,6 +102,7 @@ html {
   --top: calc(var(--safe-top) + var(--header-height)); /* where the page starts, below the header */
   --bar: var(--safe-bottom); /* what the page's buttons stand on: a phone's bar, or the window's edge */
   --pill-padding: 0.5em 1.05em;
+  --pill-width: 8em; /* the width the pills were settled at */
   --actions-clear: calc(
     var(--bar) + 2 * var(--gap) + 2.4 * var(--text) + 1px
   ); /* a gap, a pill (a 1.4 line, its padding, its rim), and a gap */
@@ -715,16 +716,35 @@ li {
   margin-block: 0.5rem;
 }
 
+/* A list of entries is a ledger. Each row is a title, and under it the feed
+   and the date, with dots leading across to the row's buttons. Rows stand a
+   little apart, so each reads as one thing. */
+.entries > li {
+  margin-block: 0 calc(1.2 * var(--gap) - 0.3em);
+}
+
 .row {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  column-gap: 1ch;
+  padding-block-end: 0.3em; /* room for the buttons' shadows: an off-screen row clips to its box */
+  padding-inline-start: var(--check-room);
+  transition: padding-inline-start var(--open-time) var(--ease);
 }
 
-.row small {
+.meta {
   display: flex;
-  flex: 1 1 0;
+  flex: 1 0 100%;
+  align-items: center;
+  gap: 0.6em;
+  min-width: 0;
+  min-height: 1.75em;
+}
+
+.meta small {
+  display: flex;
+  flex: 0 1 auto;
   gap: 0.3em; /* a word space */
   min-width: 0;
   color: var(--tx-2);
@@ -745,10 +765,24 @@ li {
   flex: none;
 }
 
+/* Dots, one to a tile, the tiles stretched so only whole dots fit. dots.ts
+   finds them again where these draw them, to set them moving: keep the two
+   the same. */
+.leaders {
+  flex: 1 1 0;
+  align-self: stretch;
+  min-width: 1.5em;
+  color: var(--tx-3);
+  background-image: radial-gradient(circle, currentColor 1px, transparent 1.5px);
+  background-position: 0 50%;
+  background-size: 6px 100%;
+  background-repeat: round no-repeat;
+}
+
 /* Off-screen rows skip rendering. */
 .entries > li {
   content-visibility: auto;
-  contain-intrinsic-block-size: auto 3em;
+  contain-intrinsic-block-size: auto 3.4em;
 }
 
 /* fit-title.ts shortens titles that don't fit. This handles the rest: text it
@@ -771,18 +805,184 @@ li {
   color: var(--tx-2);
 }
 
-/* A row's buttons keep together at its right edge, beside the feed and date
-   or, when there isn't room, on a line of their own. */
+/* A row's buttons: small rounds of the floating buttons' glass, each an icon,
+   keeping together at the end of the dots. */
 .row-buttons {
   display: flex;
-  gap: 0.5ch;
-  margin-inline-start: auto;
+  flex: none;
+  gap: 0.45em;
+  max-width: 12em; /* more than any row's buttons take: there to fold from */
+  transition:
+    opacity var(--open-time) var(--ease),
+    max-width var(--open-time) var(--ease),
+    margin var(--open-time) var(--ease);
 }
 
-/* Where Open next left off. */
-.row.marked .title {
-  text-decoration: underline 1px var(--ui-3);
-  text-underline-offset: 0.25em;
+.mark {
+  display: grid;
+  place-items: center;
+  width: 1.75em;
+  height: 1.75em;
+  padding: 0;
+  border: 0.5px solid var(--float-rim);
+  border-radius: 50%;
+  background-color: var(--float-tint);
+  box-shadow:
+    inset 0 0.5px 0 light-dark(rgb(255 255 255 / 0.8), rgb(255 255 255 / 0.07)),
+    0 0.5px 1px light-dark(rgb(16 15 15 / 0.07), rgb(0 0 0 / 0.35)),
+    0 3px 8px -3px light-dark(rgb(16 15 15 / 0.22), rgb(0 0 0 / 0.6));
+  color: var(--tx-2);
+  touch-action: manipulation;
+  transition:
+    color 0.15s,
+    background-color 0.15s,
+    scale 0.15s var(--ease);
+}
+
+.mark svg {
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  overflow: visible;
+}
+
+.mark.bookmark path {
+  fill: currentColor;
+  fill-opacity: 0;
+  transition: fill-opacity 0.15s;
+}
+
+.mark.read.on {
+  background-color: color-mix(in srgb, var(--cy) 10%, var(--float-tint));
+  color: var(--cy);
+}
+
+.mark.bookmark.on {
+  background-color: color-mix(in srgb, var(--or) 10%, var(--float-tint));
+  color: var(--or);
+}
+
+.mark.bookmark.on path {
+  fill-opacity: 1;
+}
+
+@media (hover: hover) {
+  .mark:hover {
+    border-color: var(--float-rim);
+    color: var(--cy);
+  }
+
+  .mark.bookmark:hover {
+    color: var(--or);
+  }
+}
+
+.mark:active {
+  scale: 0.9;
+}
+
+.mark.failed {
+  border-color: var(--re);
+  color: var(--re);
+}
+
+/* Choosing: a box at the start of every row, the rows making room for it.
+   The row's own buttons step aside, and pressing anywhere on a row turns its
+   box. */
+@property --check-room {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+
+.entries.choosing {
+  --check-room: 1.9em;
+}
+
+.entries.choosing .row {
+  cursor: pointer;
+}
+
+.entries.choosing .row-buttons {
+  max-width: 0;
+  margin-inline-start: -0.6em; /* and the gap before them, so the dots run to the end */
+  opacity: 0;
+}
+
+.check {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  display: grid;
+  place-items: center start;
+  width: 1.9em;
+  opacity: 0;
+  scale: 0.5;
+  touch-action: none; /* a finger drags along the boxes rather than scrolling */
+  cursor: pointer;
+  transition:
+    opacity var(--open-time) var(--ease),
+    scale var(--open-time) var(--ease);
+}
+
+.entries.choosing .check {
+  opacity: 1;
+  scale: 1;
+}
+
+.check > * {
+  grid-area: 1 / 1;
+}
+
+/* A box as a Mac draws one: a softly rounded square, lit from above, and
+   filled with the accent once chosen, a tick drawn into it. */
+.check input {
+  width: 1.1em;
+  height: 1.1em;
+  margin: 0;
+  border: 0.5px solid light-dark(rgb(16 15 15 / 0.25), rgb(255 255 255 / 0.18));
+  border-radius: 0.3em;
+  appearance: none;
+  background: light-dark(linear-gradient(#fff, #fbfaf6), linear-gradient(var(--ui-2), var(--ui)));
+  box-shadow:
+    0 0.5px 1px light-dark(rgb(16 15 15 / 0.12), rgb(0 0 0 / 0.4)),
+    inset 0 0.5px 0 light-dark(rgb(255 255 255 / 0.9), rgb(255 255 255 / 0.08));
+  cursor: pointer;
+  transition:
+    background-color 0.12s,
+    scale 0.12s var(--ease);
+}
+
+.check input:checked {
+  border-color: color-mix(in srgb, var(--cy) 70%, black);
+  background: linear-gradient(color-mix(in srgb, var(--cy) 88%, white), var(--cy));
+}
+
+.check:active input {
+  scale: 0.9;
+}
+
+.check svg {
+  width: 0.8em;
+  height: 0.8em;
+  margin-inline-start: 0.15em; /* centred on the box */
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  pointer-events: none;
+  transition: stroke-dashoffset 0.16s var(--ease);
+}
+
+.check:has(:checked) svg {
+  stroke-dashoffset: 0;
 }
 
 /* A page's own buttons: pills of the header's glass with a hairline round
@@ -794,12 +994,26 @@ li {
   position: fixed;
   bottom: calc(var(--bar) + var(--gap));
   z-index: 1;
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  min-inline-size: var(--pill-width);
+  border-radius: 1.2em; /* half a pill's height: its ends round, and grown taller, a rounded square */
+  isolation: isolate;
+}
+
+/* The glass is a layer of its own behind the words, as the header's is.
+   Chromium sometimes paints the words blank when they sit in the blurring
+   element itself, until something makes it paint them again. */
+.action::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
   border: 0.5px solid var(--float-rim);
-  border-radius: 999px;
+  border-radius: inherit;
   background-color: var(--float-tint);
   box-shadow: var(--float-shadow);
   backdrop-filter: var(--float-blur);
+  content: '';
   transition:
     background-color var(--open-time) var(--ease) var(--clear-after),
     backdrop-filter var(--open-time) var(--ease) var(--clear-after);
@@ -813,20 +1027,65 @@ li {
   right: var(--gutter-end);
 }
 
-html:has(.popup:not(.closing)) .action {
+html:has(.popup:not(.closing)) .action::before {
   background-color: transparent;
-  backdrop-filter: none;
+  backdrop-filter: blur(0) saturate(1);
   transition-delay: 0s;
 }
 
-/* The pill's own button and the other's words share one place, so the pill
-   is as wide as the wider of them; the button fills it, its words centred. */
-.action > * {
-  grid-area: 1 / 1;
+/* Every word the pills may show, laid over each other with no height: the
+   pill is as wide as the widest, and stays that wide whatever it says. */
+.sizer {
+  display: grid;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
 }
 
-.twin {
-  visibility: hidden;
+.sizer > span {
+  grid-area: 1 / 1;
+  padding-inline: 1.05em;
+  white-space: nowrap;
+}
+
+/* Choosing, the right-hand pill grows upward into three, its new buttons
+   above the one it had, a hairline between each. A pill that only appears
+   for choosing rises into place. */
+.stack .grown {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--open-time) var(--ease);
+}
+
+.stack.open .grown {
+  grid-template-rows: 1fr;
+}
+
+@starting-style {
+  .stack.open .grown {
+    grid-template-rows: 0fr;
+  }
+}
+
+.stack .grown > div {
+  display: grid;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.stack .grown button + button,
+.stack.open > button {
+  border-block-start: 0.5px solid var(--float-rim);
+}
+
+.action.end {
+  transition: opacity var(--open-time) var(--ease);
+}
+
+@starting-style {
+  .action.end {
+    opacity: 0;
+  }
 }
 
 .action button {
@@ -834,19 +1093,26 @@ html:has(.popup:not(.closing)) .action {
   width: 100%;
   padding: var(--pill-padding);
   border: 0;
+  border-radius: 0;
   background: none;
   color: var(--tx);
+  white-space: nowrap;
   touch-action: manipulation;
+}
+
+.action button:disabled {
+  color: var(--tx-3);
+  cursor: default;
 }
 
 /* Coloured like a breadcrumb under the mouse, or while pressed. */
 @media (hover: hover) {
-  .action button:hover {
+  .action button:hover:enabled {
     color: var(--cy);
   }
 }
 
-.action button:active {
+.action button:active:enabled {
   color: var(--cy);
 }
 
@@ -994,7 +1260,8 @@ button.failed {
    motion. Left to fade on its own, the veil is still blurring the live page
    when the crossfade ends, and Safari, which crossfades a still picture of the
    new page, shows that leftover blur for a moment after. */
-html:active-view-transition-type(page-change) :is(.header-glass, .veil, .action),
+html:active-view-transition-type(page-change) :is(.header-glass, .veil),
+html:active-view-transition-type(page-change) .action::before,
 html:active-view-transition-type(page-change) .veil::after {
   transition: none;
 }

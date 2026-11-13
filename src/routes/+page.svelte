@@ -1,48 +1,50 @@
 <script lang="ts">
   import { MediaQuery } from 'svelte/reactivity';
-  import Actions from '#lib/components/Actions.svelte';
   import EntryList from '#lib/components/EntryList.svelte';
+  import ListActions from '#lib/components/ListActions.svelte';
   import { library } from '#lib/library.svelte.ts';
+  import { Selection } from '#lib/selection.svelte.ts';
   import type { PageProps } from './$types';
 
   let { data }: PageProps = $props();
 
-  // Marking an entry read takes it off Unread.
+  // Reading an entry, or bookmarking it, takes it off Unread.
   const entries = $derived(library.list(data.list?.entries, library.unread));
+  const selection = new Selection(() => entries);
 
-  // A phone opens one tab per press, so there it opens the next entry instead
-  // of all of them. Opening never marks anything read.
+  // Opening reads. Newest is at the top, so what comes next is at the bottom:
+  // the oldest still unread. A phone opens one tab per press, so there it
+  // opens the next entry instead of all of them.
   const touch = new MediaQuery('pointer: coarse');
-  let opened = $state<number>(); // the last entry opened, by either button or its title
+  const unread = $derived(entries.filter((entry) => entry.state === 'unread'));
 
   function openAll(): void {
-    for (const entry of entries.toReversed()) window.open(entry.url, '_blank', 'noopener');
+    const all = unread.toReversed();
+    for (const entry of all) window.open(entry.url, '_blank', 'noopener');
+    library.open(all);
   }
 
   function openNext(): void {
-    const next = entries[entries.findIndex((entry) => entry.id === opened) + 1] ?? entries[0];
+    const next = unread.at(-1);
     if (!next) return;
-    opened = next.id;
     window.open(next.url, '_blank', 'noopener');
+    library.open([next]);
   }
 </script>
 
 <svelte:head><title>Lagan</title></svelte:head>
 
 {#if entries.length}
-  <EntryList {entries} marked={opened} onopen={(entry) => (opened = entry.id)} />
-  <Actions>
-    {#snippet start()}
-      <button class:failed={library.readAllFailed} onclick={() => library.readAll(entries)}>Mark all read</button>
-    {/snippet}
+  <EntryList {entries} {selection} />
+  <ListActions {selection} words={['Open next', 'Open all']}>
     {#snippet end()}
       {#if touch.current}
-        <button onclick={openNext}>Open next</button>
+        <button disabled={!unread.length} onclick={openNext}>Open next</button>
       {:else}
-        <button onclick={openAll}>Open all</button>
+        <button disabled={!unread.length} onclick={openAll}>Open all</button>
       {/if}
     {/snippet}
-  </Actions>
+  </ListActions>
 {:else}
   <p>Nothing unread.</p>
 {/if}

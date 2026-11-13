@@ -1,6 +1,8 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import EntryList from '#lib/components/EntryList.svelte';
+  import ListActions from '#lib/components/ListActions.svelte';
+  import { Selection } from '#lib/selection.svelte.ts';
   import { library, TIMELINE_STEP } from '#lib/library.svelte.ts';
   import type { Entry } from '#lib/server/store.ts';
   import type { PageProps } from './$types';
@@ -17,6 +19,7 @@
 
   const everything = $derived(library.list([...(data.list?.entries ?? []), ...fetched], library.timeline));
   const entries = $derived(library.ready ? everything.slice(0, shown) : everything);
+  const selection = new Selection(() => entries);
   const more = $derived(library.ready ? everything.length > shown : (moreSent ?? data.list?.more ?? false));
 
   async function showMore(): Promise<void> {
@@ -44,7 +47,8 @@
 
 <svelte:head><title>Timeline</title></svelte:head>
 
-<EntryList {entries} />
+<EntryList {entries} {selection} />
+{#if entries.length}<ListActions {selection} />{/if}
 {#if more}
   <button class="more" class:failed disabled={loading} onclick={showMore}>Show more</button>
 {/if}
