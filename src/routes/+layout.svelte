@@ -33,6 +33,9 @@
     const update = () => {
       document.documentElement.style.setProperty('--visible-height', `${viewport.height * viewport.scale}px`);
       document.documentElement.style.setProperty('--visible-top', `${viewport.offsetTop}px`); // where Safari has slid the page to
+      // The keyboard covers the window's bottom without making it shorter.
+      const keyboard = Math.max(0, window.innerHeight - viewport.height * viewport.scale);
+      document.documentElement.style.setProperty('--keyboard', `${keyboard}px`);
     };
     update();
     viewport.addEventListener('resize', update);

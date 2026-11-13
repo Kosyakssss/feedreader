@@ -1013,9 +1013,9 @@ html:active-view-transition-type(page-change) .row {
     height: var(--header-height);
     margin: 0;
     padding-block-end: max(
-      0px,
-      var(--safe-bottom) - (100dvh - var(--visible-height, 100dvh))
-    ); /* the bar's room for the home bar, until the keyboard covers that */
+      var(--safe-bottom) - var(--keyboard, 0px),
+      min(var(--keyboard, 0px), var(--gap))
+    ); /* room for the home bar, and once the keyboard is up, a gap above it */
   }
 
   nav {
