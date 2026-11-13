@@ -773,6 +773,17 @@ html:has(.popup:not(.closing)) .action {
   touch-action: manipulation;
 }
 
+/* Coloured like a breadcrumb under the mouse, or while pressed. */
+@media (hover: hover) {
+  .action button:hover {
+    color: var(--cy);
+  }
+}
+
+.action button:active {
+  color: var(--cy);
+}
+
 /* The last entry can scroll clear of the words, to a gap above their pool. */
 main:has(.actions) {
   padding-block-end: var(--actions-clear);
