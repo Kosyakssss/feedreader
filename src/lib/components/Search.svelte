@@ -17,6 +17,13 @@
     input?.focus({ preventScroll: true }); // the page holds still; search moves itself above the keyboard
   }
 
+  // Closing puts the keyboard away at once. Left focused, the field would
+  // keep it up while search fades, and Android's keyboard changes its keys
+  // when the field goes.
+  $effect(() => {
+    if (!popups.isOpen('search')) input?.blur();
+  });
+
   // Asks once typing pauses, and only the latest question counts.
   function ask(): void {
     clearTimeout(timer);
