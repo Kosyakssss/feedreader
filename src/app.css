@@ -929,10 +929,31 @@ html:active-view-transition-type(page-change) .row {
   view-transition-name: none !important;
 }
 
-/* Rows that move within a page pass over the glass, which is part of the page
-   behind them, so they are blurred as they go under the header instead. */
-:root:not(:active-view-transition-type(page-change))::view-transition-group(header) {
+/* Rows that move within a page are lifted out of the page's picture, so glass
+   left in that picture would suddenly blur a page without them. The glass is
+   lifted out too, as its tint alone, and blurs whatever passes under it as it
+   goes, just as it does at rest. */
+html:active-view-transition:not(:active-view-transition-type(page-change)) .header-glass {
+  view-transition-name: glass;
+}
+
+html:active-view-transition:not(:active-view-transition-type(page-change)) .action.start {
+  view-transition-name: action-start;
+}
+
+html:active-view-transition:not(:active-view-transition-type(page-change)) .action.end {
+  view-transition-name: action-end;
+}
+
+::view-transition-group(glass),
+::view-transition-group(action-start),
+::view-transition-group(action-end) {
   backdrop-filter: var(--glass-blur);
+}
+
+::view-transition-group(action-start),
+::view-transition-group(action-end) {
+  border-radius: 999px;
 }
 
 /* On a touch screen the header is a bar at the bottom, under the thumb. Its
