@@ -721,9 +721,26 @@ li {
 }
 
 .row small {
+  display: flex;
+  flex: 1 1 0;
+  gap: 0.3em; /* a word space */
+  min-width: 0;
   color: var(--tx-2);
   font-size: 0.875em;
   font-variant-numeric: tabular-nums;
+}
+
+/* A long feed name gives way first, shortened, so the date and the buttons
+   keep their line. */
+.row .source {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.row .date {
+  flex: none;
 }
 
 /* Off-screen rows skip rendering. */

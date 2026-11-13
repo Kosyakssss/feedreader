@@ -40,8 +40,10 @@
       >{title}</a
     >
     <small>
-      {#if entry.page}{source}{:else}<a href={at(feedPath(entry.source_id))}>{source}</a>{/if}
-      {dateLabel(entry.published_at)}
+      <span class="source">
+        {#if entry.page}{source}{:else}<a href={at(feedPath(entry.source_id))}>{source}</a>{/if}
+      </span>
+      <span class="date">{dateLabel(entry.published_at)}</span>
     </small>
     {#if ontoggle || extra}
       <span class="row-buttons">
