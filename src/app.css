@@ -961,10 +961,19 @@ html:active-view-transition-type(page-change) .row {
     padding: 0 var(--gutter-end) var(--safe-bottom) var(--gutter-start);
   }
 
+  /* Safari on an iPhone floats its toolbar over the page, and may place the
+     window's bottom above it or leave a gap under the bar as the toolbar
+     shrinks. The bar's glass, and the veil, carry on below the window's
+     bottom, so that whatever shows under and around the toolbar is the bar,
+     not the page. Elsewhere that is off the screen. */
   .header-glass {
     top: auto;
-    bottom: 0;
-    height: var(--bar);
+    bottom: calc(-1 * var(--below));
+    height: calc(var(--bar) + var(--below));
+  }
+
+  .veil {
+    bottom: calc(-1 * var(--below));
   }
 
   .menu {
