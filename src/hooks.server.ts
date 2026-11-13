@@ -20,6 +20,7 @@ export const handle: Handle = async ({ event, resolve }) => {
     return new Response('Forbidden', { status: 403 });
   }
   event.locals.store = lagan.store;
+  event.locals.live = lagan.live;
   event.locals.wake = lagan.wake;
   event.locals.follow = lagan.follow;
   return resolve(event);

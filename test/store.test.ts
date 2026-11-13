@@ -2,7 +2,7 @@ import { Database } from 'bun:sqlite';
 import { beforeEach, expect, test } from 'bun:test';
 import type { FetchResult } from '../src/lib/server/fetch';
 import type { Item } from '../src/lib/server/parse';
-import { scopes, Store, type Source } from '../src/lib/server/store';
+import { scopes, Store, type Change, type Source } from '../src/lib/server/store';
 
 let store: Store;
 let feed: Source;
@@ -167,8 +167,11 @@ test('mark all read leaves anything newer than the page unread', () => {
   saveItems(item('a', { published: JAN + 1000 }));
   const newest = store.entries(scopes.unread)[0]!.id;
   saveItems(item('b', { published: JAN + 2000 }));
-  expect(store.readAll(newest)).toEqual([feed.id]);
+  const changes: Change[] = [];
+  store.onChange = (change) => changes.push(change);
+  store.readAll(newest);
   expect(titles(scopes.unread)).toEqual(['Post b']);
+  expect(changes).toEqual([{ entries: [newest] }]); // copies of the app are told which entries changed
 });
 
 test('search finds titles in every state, not body text', () => {

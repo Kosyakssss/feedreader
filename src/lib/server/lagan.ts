@@ -1,8 +1,9 @@
 // The one database and fetcher the running app uses.
 import { Fetcher } from './fetch';
+import { Live } from './live';
 import { Store } from './store';
 
-export type Lagan = { store: Store; wake: () => void; follow: (id: number) => void };
+export type Lagan = { store: Store; live: Live; wake: () => void; follow: (id: number) => void };
 
 const globals = globalThis as typeof globalThis & { lagan?: Lagan };
 
@@ -13,8 +14,9 @@ export function start(): Lagan {
   const store = new Store('data/lagan.sqlite');
   const removed = store.mergeMoved();
   if (removed) console.log(`Merged ${removed} copies of moved posts`);
+  const live = new Live(store);
   const fetcher = new Fetcher(store);
   fetcher.startAll();
-  globals.lagan = { store, wake: () => fetcher.nudge(), follow: (id) => fetcher.start(id) };
+  globals.lagan = { store, live, wake: () => fetcher.nudge(), follow: (id) => fetcher.start(id) };
   return globals.lagan;
 }

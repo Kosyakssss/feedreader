@@ -1,9 +1,11 @@
+import type { Live } from '#lib/server/live.ts';
 import type { Store } from '#lib/server/store.ts';
 
 declare global {
   namespace App {
     interface Locals {
       store: Store;
+      live: Live;
       wake: () => void; // lets every feed that may fetch again do so now
       follow: (id: number) => void; // starts fetching a feed just added
     }

@@ -128,8 +128,13 @@ function matchWords(typed: string[], title: string[]): 'exact' | 'partial' | nul
   return result;
 }
 
+// What a change touched, told to whoever keeps a copy: some entries, the
+// feeds (their names, errors, folders, muted words), or too much to list.
+export type Change = { entries: number[] } | { sources: true } | { everything: true };
+
 export class Store {
   private db: Database;
+  onChange: (change: Change) => void = () => {};
 
   constructor(path: string) {
     this.db = new Database(path, { create: true });
@@ -157,18 +162,19 @@ export class Store {
 
   // Adds a feed, or finds it if it is already followed. Returns its id.
   addSource(kind: Source['kind'], ref: string, label: string, folder = ''): number {
-    this.db.run('INSERT OR IGNORE INTO sources (kind, ref, label, folder) VALUES (?, ?, ?, ?)', [
+    const added = this.db.run('INSERT OR IGNORE INTO sources (kind, ref, label, folder) VALUES (?, ?, ?, ?)', [
       kind,
       ref,
       label,
       folder,
     ]);
+    if (added.changes) this.onChange({ sources: true });
     return this.db.query<{ id: number }, [string]>('SELECT id FROM sources WHERE ref = ?').get(ref)!.id;
   }
 
   // Adds the feeds of a list, skipping any already followed. Returns the new ids.
   addSources(sources: Pick<Source, 'kind' | 'ref' | 'label' | 'folder'>[]): number[] {
-    return this.db.transaction(() =>
+    const ids = this.db.transaction(() =>
       sources.flatMap((source) => {
         const added = this.db.run('INSERT OR IGNORE INTO sources (kind, ref, label, folder) VALUES (?, ?, ?, ?)', [
           source.kind,
@@ -179,6 +185,8 @@ export class Store {
         return added.changes ? [Number(added.lastInsertRowid)] : [];
       }),
     )();
+    if (ids.length) this.onChange({ sources: true });
+    return ids;
   }
 
   mutesBySource(): Record<number, string[]> {
@@ -214,8 +222,8 @@ export class Store {
       `INSERT OR IGNORE INTO entries (source_id, guid, url, published_at, state, title, text) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
 
-    return this.db.transaction(() => {
-      let changed = 0;
+    const saved = this.db.transaction(() => {
+      const touched: number[] = [];
       for (const item of result.items) {
         // Some sites change every item's id when they redeploy. The same title at
         // the same moment in the same feed is the same post, unless the other one
@@ -226,10 +234,10 @@ export class Store {
             : undefined;
         const usable =
           item.published !== null && item.published > EARLIEST_DATE && item.published <= now + DAY && !allSameDate;
-        changed += old
-          ? repoint.run(item.guid, item.url, old.id).changes
-          : insert.run(source.id, item.guid, item.url, usable ? item.published : now, state, item.title, item.text)
-              .changes;
+        const done = old
+          ? repoint.run(item.guid, item.url, old.id)
+          : insert.run(source.id, item.guid, item.url, usable ? item.published : now, state, item.title, item.text);
+        if (done.changes) touched.push(old ? old.id : Number(done.lastInsertRowid));
       }
       const failed = !!result.error;
       this.db.run(
@@ -244,8 +252,11 @@ export class Store {
           source.id,
         ],
       );
-      return changed;
+      return touched;
     })();
+    if (saved.length) this.onChange({ entries: saved });
+    if ((result.error ?? '') !== source.error) this.onChange({ sources: true });
+    return saved.length;
   }
 
   knownCount(sourceId: number, items: FetchResult['items']): number {
@@ -312,12 +323,14 @@ export class Store {
       `UPDATE entries SET bookmarked = 1 - bookmarked, state = CASE WHEN state = 'none' AND bookmarked = 0 THEN 'read' ELSE state END WHERE id = ?`,
       [id],
     );
+    this.onChange({ entries: [id] });
     return this.entry(id);
   }
 
   // Read becomes unread; unread, or never seen, becomes read.
   toggleRead(id: number): Entry | null {
     this.db.run(`UPDATE entries SET state = CASE state WHEN 'read' THEN 'unread' ELSE 'read' END WHERE id = ?`, [id]);
+    this.onChange({ entries: [id] });
     return this.entry(id);
   }
 
@@ -332,6 +345,7 @@ export class Store {
         `UPDATE entries SET bookmarked = 1, state = CASE state WHEN 'none' THEN 'read' ELSE state END WHERE id = ?`,
         [known.id],
       );
+      this.onChange({ entries: [known.id] });
       return this.entry(known.id)!;
     }
     const { id } = this.db
@@ -339,6 +353,7 @@ export class Store {
         `INSERT INTO entries (source_id, guid, url, published_at, state, bookmarked, title) VALUES (?, ?, ?, ?, 'read', 1, ?) RETURNING id`,
       )
       .get(this.pageSource(), url, url, Date.now(), title)!;
+    this.onChange({ entries: [id] });
     return this.entry(id)!;
   }
 
@@ -350,6 +365,7 @@ export class Store {
 
   setTitle(id: number, title: string): void {
     this.db.run('UPDATE entries SET title = ? WHERE id = ?', [title, id]);
+    this.onChange({ entries: [id] });
   }
 
   // Removes a feed and its entries. Bookmarks stay, as bookmarked pages.
@@ -361,6 +377,7 @@ export class Store {
       ]);
       this.db.run(`DELETE FROM sources WHERE id = ? AND kind <> 'page'`, [id]);
     })();
+    this.onChange({ everything: true });
   }
 
   mutes(sourceId: number): string[] {
@@ -376,18 +393,39 @@ export class Store {
       this.db.run('DELETE FROM mutes WHERE source_id = ?', [sourceId]);
       for (const word of clean) this.db.run('INSERT INTO mutes (source_id, word) VALUES (?, ?)', [sourceId, word]);
     })();
+    this.onChange({ sources: true });
     return this.mutes(sourceId);
   }
 
   // Marks entries read up to the newest one the page was showing, so anything
-  // that arrived after the page loaded stays unread. Returns the feeds touched.
-  readAll(upto: number): number[] {
+  // that arrived after the page loaded stays unread.
+  readAll(upto: number): void {
     const rows = this.db
-      .query<{ source_id: number }, [number]>(
-        `UPDATE entries SET state = 'read' WHERE state = 'unread' AND id <= ? RETURNING source_id`,
+      .query<{ id: number }, [number]>(
+        `UPDATE entries SET state = 'read' WHERE state = 'unread' AND id <= ? RETURNING id`,
       )
       .all(upto);
-    return [...new Set(rows.map((row) => row.source_id))];
+    if (rows.length) this.onChange({ entries: rows.map((row) => row.id) });
+  }
+
+  // Everything a copy of the app shows: every entry, and every feed with its
+  // muted words. Searching stays here, with the full text.
+  library(): { entries: Entry[]; sources: Source[]; mutes: Record<number, string[]> } {
+    const entries = this.db
+      .query<Entry, []>(
+        `SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id ORDER BY e.published_at DESC, e.id DESC`,
+      )
+      .all();
+    return { entries, sources: this.sources(), mutes: this.mutesBySource() };
+  }
+
+  entriesById(ids: number[]): Entry[] {
+    if (!ids.length) return [];
+    return this.db
+      .query<Entry, number[]>(
+        `SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id WHERE e.id IN (${ids.map(() => '?').join(',')})`,
+      )
+      .all(...ids);
   }
 
   export(only?: 'unread' | 'bookmarked') {
