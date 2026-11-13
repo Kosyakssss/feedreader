@@ -10,16 +10,20 @@ export const GET: RequestHandler = ({ locals, request }) => {
     start(controller) {
       const send = (text: string) => controller.enqueue(encoder.encode(text));
       send(`event: at\ndata: ${locals.live.version}\n\n`);
-      const unlisten = locals.live.listen((update) => send(`data: ${JSON.stringify(update)}\n\n`));
+      let ended = false;
+      const end = () => {
+        if (ended) return;
+        ended = true;
+        stop?.();
+        controller.close();
+      };
+      const unlisten = locals.live.listen((update) => send(`data: ${JSON.stringify(update)}\n\n`), end);
       const beat = setInterval(() => send(': still here\n\n'), 25_000);
       stop = () => {
         unlisten();
         clearInterval(beat);
       };
-      request.signal.addEventListener('abort', () => {
-        stop?.();
-        controller.close();
-      });
+      request.signal.addEventListener('abort', end);
     },
     cancel: () => stop?.(),
   });

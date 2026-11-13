@@ -18,5 +18,14 @@ export function start(): Lagan {
   const fetcher = new Fetcher(store);
   fetcher.startAll();
   globals.lagan = { store, live, wake: () => fetcher.nudge(), follow: (id) => fetcher.start(id) };
+
+  // Asked to stop, the server finishes the requests it is answering first.
+  // The live streams never finish by themselves, so they end at once. Once
+  // the server has stopped, so does everything else: the fetchers would only
+  // sleep until their next fetch, which the next start makes anyway.
+  const endStreams = () => live.close();
+  process.once('SIGTERM', endStreams);
+  process.once('SIGINT', endStreams);
+  process.once('sveltekit:shutdown' as 'exit', () => process.exit(0));
   return globals.lagan;
 }

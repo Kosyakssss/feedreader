@@ -13,7 +13,7 @@ export type Update =
 
 export class Live {
   version = 0;
-  private listeners = new Set<(update: Update) => void>();
+  private listeners = new Set<{ send: (update: Update) => void; end: () => void }>();
 
   constructor(private store: Store) {
     store.onChange = (change) => {
@@ -29,12 +29,20 @@ export class Live {
     return { version: this.version, ...this.store.library() };
   }
 
-  listen(listener: (update: Update) => void): () => void {
+  // `end` is called if the server stops while the stream is open.
+  listen(send: (update: Update) => void, end: () => void): () => void {
+    const listener = { send, end };
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
+  // Ends every open stream, so that a server stopping needn't wait on them.
+  close(): void {
+    for (const listener of this.listeners) listener.end();
+    this.listeners.clear();
+  }
+
   private send(update: Update): void {
-    for (const listener of this.listeners) listener(update);
+    for (const listener of this.listeners) listener.send(update);
   }
 }
