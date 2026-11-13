@@ -33,6 +33,8 @@ export type Entry = {
   text: string; // only filled in for untitled entries, the only rows that show it
 };
 
+export type Mark = { read?: boolean; bookmarked?: boolean };
+
 export type Scope = { where: string; args?: SQLQueryBindings[]; limit?: number };
 export type Cursor = { published_at: number; id: number }; // where a page of entries ended
 
@@ -41,7 +43,7 @@ const NOT_MUTED = `NOT EXISTS (SELECT 1 FROM mutes m WHERE m.source_id = entries
 export const TIMELINE_PAGE = 200;
 
 export const scopes = {
-  unread: { where: `state = 'unread' AND ${NOT_MUTED}` },
+  unread: { where: `state = 'unread' AND bookmarked = 0 AND ${NOT_MUTED}` },
   timeline: { where: `state <> 'none' AND ${NOT_MUTED}`, limit: TIMELINE_PAGE },
   bookmarks: { where: 'bookmarked = 1' },
   feed: (id: number): Scope => ({ where: 'source_id = ?', args: [id] }),
@@ -316,22 +318,25 @@ export class Store {
     return [...byName, ...byOther];
   }
 
-  // Bookmarking something never seen counts as seeing it, so it joins the
-  // timeline as read. Taking a bookmark off leaves read and unread alone.
-  toggleBookmark(id: number): Entry | null {
-    this.db.run(
-      `UPDATE entries SET bookmarked = 1 - bookmarked, state = CASE WHEN state = 'none' AND bookmarked = 0 THEN 'read' ELSE state END WHERE id = ?`,
-      [id],
-    );
-    this.onChange({ entries: [id] });
-    return this.entry(id);
-  }
-
-  // Read becomes unread; unread, or never seen, becomes read.
-  toggleRead(id: number): Entry | null {
-    this.db.run(`UPDATE entries SET state = CASE state WHEN 'read' THEN 'unread' ELSE 'read' END WHERE id = ?`, [id]);
-    this.onChange({ entries: [id] });
-    return this.entry(id);
+  // Marks entries read or unread, bookmarked or not: one pressed, or several
+  // chosen together. Bookmarking something never seen counts as seeing it, so
+  // it joins the timeline as read; otherwise read and bookmarked are separate.
+  // Answers with the entries as they now are.
+  mark(ids: number[], change: Mark): Entry[] {
+    this.db.transaction(() => {
+      for (const id of ids) {
+        if (change.read !== undefined)
+          this.db.run('UPDATE entries SET state = ? WHERE id = ?', [change.read ? 'read' : 'unread', id]);
+        if (change.bookmarked !== undefined)
+          this.db.run(
+            `UPDATE entries SET bookmarked = ?1, state = CASE WHEN ?1 AND state = 'none' THEN 'read' ELSE state END WHERE id = ?2`,
+            [change.bookmarked ? 1 : 0, id],
+          );
+      }
+    })();
+    const entries = ids.map((id) => this.entry(id)).filter((entry) => entry !== null);
+    if (entries.length) this.onChange({ entries: entries.map((entry) => entry.id) });
+    return entries;
   }
 
   // A page bookmarked from its link. If some feed already has it, that entry
@@ -395,17 +400,6 @@ export class Store {
     })();
     this.onChange({ sources: true });
     return this.mutes(sourceId);
-  }
-
-  // Marks entries read up to the newest one the page was showing, so anything
-  // that arrived after the page loaded stays unread.
-  readAll(upto: number): void {
-    const rows = this.db
-      .query<{ id: number }, [number]>(
-        `UPDATE entries SET state = 'read' WHERE state = 'unread' AND id <= ? RETURNING id`,
-      )
-      .all(upto);
-    if (rows.length) this.onChange({ entries: rows.map((row) => row.id) });
   }
 
   // Everything a copy of the app shows: every entry, and every feed with its

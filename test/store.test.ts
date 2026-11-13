@@ -89,20 +89,34 @@ test('a failed fetch keeps the old validators', () => {
 test('bookmarking something never seen makes it read, and taking the bookmark off leaves it read', () => {
   saveItems(item('a'));
   const id = store.entries(scopes.feed(feed.id))[0]!.id;
-  expect(store.toggleBookmark(id)).toMatchObject({ state: 'read', bookmarked: 1 });
+  expect(store.mark([id], { bookmarked: true })).toMatchObject([{ state: 'read', bookmarked: 1 }]);
   expect(titles(scopes.bookmarks)).toEqual(['Post a']);
-  expect(store.toggleBookmark(id)).toMatchObject({ state: 'read', bookmarked: 0 });
+  expect(store.mark([id], { bookmarked: false })).toMatchObject([{ state: 'read', bookmarked: 0 }]);
   expect(titles(scopes.bookmarks)).toEqual([]);
   expect(titles(scopes.timeline)).toEqual(['Post a']);
 });
 
-test('read and bookmarked are separate: an unread entry can be bookmarked and stay unread', () => {
+test('a bookmarked entry leaves Unread but stays unread, and comes back when the bookmark comes off', () => {
   saveItems(item('backlog'));
   saveItems(item('a', { published: JAN + 1000 }));
   const id = store.entries(scopes.unread)[0]!.id;
-  expect(store.toggleBookmark(id)).toMatchObject({ state: 'unread', bookmarked: 1 });
-  expect(store.toggleRead(id)).toMatchObject({ state: 'read', bookmarked: 1 });
-  expect(store.toggleRead(id)!.state).toBe('unread');
+  expect(store.mark([id], { bookmarked: true })).toMatchObject([{ state: 'unread', bookmarked: 1 }]);
+  expect(titles(scopes.unread)).toEqual([]);
+  store.mark([id], { bookmarked: false });
+  expect(titles(scopes.unread)).toEqual(['Post a']);
+});
+
+test('marking sets entries chosen together, whatever each was, and tells copies of the app which changed', () => {
+  saveItems(item('backlog'));
+  saveItems(item('a', { published: JAN + 1000 }), item('b', { published: JAN + 2000 }));
+  const [b, a] = store.entries(scopes.unread).map((entry) => entry.id);
+  store.mark([a!], { read: true });
+  const changes: Change[] = [];
+  store.onChange = (change) => changes.push(change);
+  expect(store.mark([a!, b!, 999], { read: true }).map((entry) => entry.state)).toEqual(['read', 'read']);
+  expect(changes).toEqual([{ entries: [a!, b!] }]);
+  store.mark([a!, b!], { read: false });
+  expect(titles(scopes.unread)).toEqual(['Post b', 'Post a']);
 });
 
 test('the timeline comes in pages, each starting after the last one shown', () => {
@@ -133,7 +147,7 @@ test('a bookmarked link is stored once: an entry a feed already has is bookmarke
 
 test('removing a feed keeps its bookmarks as bookmarked pages', () => {
   saveItems(item('a'), item('b'));
-  store.toggleBookmark(store.entries(scopes.feed(feed.id))[0]!.id);
+  store.mark([store.entries(scopes.feed(feed.id))[0]!.id], { bookmarked: true });
   store.removeSource(feed.id);
   expect(store.sources()).toEqual([]);
   expect(store.entries(scopes.bookmarks)).toHaveLength(1);
@@ -160,18 +174,6 @@ test('a database from before bookmarks were a flag of their own keeps every entr
         .delete()
         .catch(() => {});
   }
-});
-
-test('mark all read leaves anything newer than the page unread', () => {
-  saveItems(item('backlog'));
-  saveItems(item('a', { published: JAN + 1000 }));
-  const newest = store.entries(scopes.unread)[0]!.id;
-  saveItems(item('b', { published: JAN + 2000 }));
-  const changes: Change[] = [];
-  store.onChange = (change) => changes.push(change);
-  store.readAll(newest);
-  expect(titles(scopes.unread)).toEqual(['Post b']);
-  expect(changes).toEqual([{ entries: [newest] }]); // copies of the app are told which entries changed
 });
 
 test('search finds titles in every state, not body text', () => {
@@ -210,7 +212,7 @@ test('copies left by a moved site merge and keep the strongest state', () => {
     item('a', { title: 'Same', url: 'https://one.example.com/post' }),
     item('copy', { title: 'Same', url: 'https://two.example.com/post' }),
   );
-  store.toggleBookmark(store.entries(scopes.feed(feed.id)).at(-1)!.id);
+  store.mark([store.entries(scopes.feed(feed.id)).at(-1)!.id], { bookmarked: true });
 
   expect(store.mergeMoved()).toBe(1);
   expect(store.entries(scopes.feed(feed.id))).toMatchObject([
