@@ -13,6 +13,7 @@ import { SvelteSet } from 'svelte/reactivity';
 
 let open = $state<string | null>(null);
 let step: number | null = null; // the open popup's step in the history, made or on its way
+let settled: Promise<unknown> = Promise.resolve(); // the history's last change for a popup, done
 const closing = new SvelteSet<string>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -36,7 +37,17 @@ function close(): void {
   shut();
   if (step === null) return;
   step = null;
+  settled = new Promise((done) => addEventListener('popstate', done, { once: true }));
   history.back();
+}
+
+// Goes to a page from a popup, the page taking the popup's step, so that Back
+// from it goes to the page before, not to this one with the popup closed.
+// Going to the page already open just closes the popup.
+async function visit(href: string): Promise<void> {
+  await settled;
+  if (new URL(href, location.href).pathname === location.pathname) return close();
+  await goto(href, { replace: step !== null });
 }
 
 export const popups = {
@@ -58,10 +69,11 @@ export const popups = {
     open = id;
     if (step !== null) return;
     step = Date.now();
-    goto(page.url.href, { state: { popup: step }, shallow: true });
+    settled = goto(page.url.href, { state: { popup: step }, shallow: true });
   },
 
   close,
+  visit,
 
   get step() {
     return step;

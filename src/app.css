@@ -32,7 +32,6 @@
   --slash-time: calc(var(--open-time) * 0.4);
   --line-start: calc(var(--slash-time) / 2);
 
-  --press-time: max(var(--line-start) + var(--open-time), 0.2s); /* as long as the line is moving */
   --clear-after: calc(var(--open-time) * 0.35); /* how long the page stays blurred after a popup starts closing */
 
   --glass-tint: color-mix(in srgb, var(--bg) 40%, transparent);
@@ -243,34 +242,9 @@ nav {
   touch-action: manipulation;
 }
 
-.crumb:has(> :is(button, .press-again):active) {
+.crumb:has(> button:active) {
   --line: var(--cy);
   color: var(--cy);
-}
-
-/* Covers the name while its menu animates, opening or closing. Fully open it
-   stays visible but has no size, so that closing can start at full size and
-   only then hide. Reduced motion has no animation to wait for, so it still
-   gets a moment to press again. */
-.press-again {
-  position: absolute;
-  inset: var(--reach) 0;
-  visibility: hidden;
-  touch-action: manipulation;
-  transition: visibility 0s var(--press-time);
-}
-
-.crumb:has(> .menu:not(.closing)) .press-again {
-  visibility: visible;
-  scale: 0;
-  transition: none;
-  animation: press-again var(--press-time) step-end;
-}
-
-@keyframes press-again {
-  from {
-    scale: 1;
-  }
 }
 
 /* Drawn, not typed, so it is exactly as thick as the line it becomes. It shares
@@ -292,12 +266,12 @@ nav {
 
 /* A slash stands upright when pressing its name would open a list from it. */
 @media (hover: hover) {
-  .crumb:has(> :is(button, .press-again):hover) {
+  .crumb:has(> button:hover) {
     --line: var(--cy);
     color: var(--cy);
   }
 
-  .crumb:has(> :is(button, .press-again):hover) .slash {
+  .crumb:has(> button:hover) .slash {
     rotate: 0deg;
     transition-delay: 0s;
   }

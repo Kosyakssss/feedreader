@@ -64,15 +64,14 @@
     if (page.state.popup) goto(page.url.href, { state: {}, shallow: true, replace: true });
   });
 
-  // A page opened from a popup takes the popup's step in the history, so Back
-  // from it goes to the page before, not to that page with the popup closed.
+  // A page opened from a popup takes the popup's step in the history.
   function follow(event: MouseEvent): void {
-    if (!page.state.popup || event.defaultPrevented || event.button !== 0) return;
+    if (!popups.step || event.defaultPrevented || event.button !== 0) return;
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    const link = (event.target as Element).closest('.popup a[href], a.press-again');
+    const link = (event.target as Element).closest('.popup a[href]');
     if (!(link instanceof HTMLAnchorElement) || link.target || link.origin !== location.origin) return;
     event.preventDefault();
-    goto(link.href, { replace: true });
+    popups.visit(link.href);
   }
 
   function key(event: KeyboardEvent): void {
