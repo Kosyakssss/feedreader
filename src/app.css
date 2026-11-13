@@ -37,6 +37,22 @@
   --glass-tint: color-mix(in srgb, var(--bg) 40%, transparent);
   --glass-blur: blur(14px);
 
+  /* Glass that floats over the page, rather than lying along its edge as the
+     header does: denser, so the words on it stay clear of what passes under,
+     with a rim catching the light and a soft shadow lifting it off the page.
+     In the dark a shadow barely shows, so there it is a shade lighter than
+     the page instead, as nearer things are. */
+  --float-tint: color-mix(in srgb, light-dark(var(--bg), var(--ui)) 72%, transparent);
+  --float-blur: blur(20px) saturate(1.5);
+  --float-rim: light-dark(
+    color-mix(in srgb, var(--tx) 11%, transparent),
+    color-mix(in srgb, var(--tx) 16%, transparent)
+  );
+  --float-shadow:
+    inset 0 0.5px 0 light-dark(rgb(255 255 255 / 0.7), rgb(255 255 255 / 0.06)),
+    0 0.5px 1px light-dark(rgb(16 15 15 / 0.06), rgb(0 0 0 / 0.3)),
+    0 10px 26px -10px light-dark(rgb(16 15 15 / 0.26), rgb(0 0 0 / 0.7));
+
   /* Touch targets: everything pressed in the app's chrome catches presses over
      at least this much, whatever size it looks. A menu's names sit this far
      apart on a touch screen. */
@@ -85,10 +101,10 @@ html {
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --top: calc(var(--safe-top) + var(--header-height)); /* where the page starts, below the header */
   --bar: var(--safe-bottom); /* what the page's buttons stand on: a phone's bar, or the window's edge */
-  --pill-padding: 0.3em 0.85em;
+  --pill-padding: 0.5em 1.05em;
   --actions-clear: calc(
-    var(--bar) + 2 * var(--gap) + 2 * var(--text) + 2px
-  ); /* a gap, a pill (a 1.4 line, its padding, its hairline), and a gap */
+    var(--bar) + 2 * var(--gap) + 2.4 * var(--text) + 1px
+  ); /* a gap, a pill (a 1.4 line, its padding, its rim), and a gap */
   scroll-padding-block: calc(var(--top) + var(--gap)) calc(var(--bar) + var(--gap)); /* what Tab or find scrolls to lands clear of the chrome */
   scrollbar-gutter: stable;
   -webkit-tap-highlight-color: transparent;
@@ -749,10 +765,11 @@ li {
   position: fixed;
   bottom: calc(var(--bar) + var(--gap));
   z-index: 1;
-  border: 1px solid var(--ui-2);
+  border: 0.5px solid var(--float-rim);
   border-radius: 999px;
-  background-color: var(--glass-tint);
-  backdrop-filter: var(--glass-blur);
+  background-color: var(--float-tint);
+  box-shadow: var(--float-shadow);
+  backdrop-filter: var(--float-blur);
   transition:
     background-color var(--open-time) var(--ease) var(--clear-after),
     backdrop-filter var(--open-time) var(--ease) var(--clear-after);
