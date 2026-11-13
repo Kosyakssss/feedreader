@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { keyboardOverPage } from '#lib/keyboard.ts';
   import { popups } from '#lib/popups.svelte.ts';
   import type { Entry, Source } from '#lib/server/store.ts';
   import FeedList from './FeedList.svelte';
@@ -14,6 +15,7 @@
   let inFlight: AbortController | undefined;
 
   export function focus(): void {
+    keyboardOverPage(true);
     input?.focus({ preventScroll: true }); // the page holds still; search moves itself above the keyboard
   }
 
@@ -21,7 +23,9 @@
   // keep it up while search fades, and Android's keyboard changes its keys
   // when the field goes.
   $effect(() => {
-    if (!popups.isOpen('search')) input?.blur();
+    if (popups.isOpen('search')) return;
+    input?.blur();
+    keyboardOverPage(false);
   });
 
   // Asks once typing pauses, and only the latest question counts.

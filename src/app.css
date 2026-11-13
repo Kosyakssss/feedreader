@@ -1035,9 +1035,17 @@ html:active-view-transition-type(page-change) .veil::after {
      keyboard up, it sits on the keyboard, results above it. */
   #search {
     top: calc(var(--visible-top, 0px) + var(--safe-top));
-    height: calc(var(--visible-height, 100dvh) - var(--safe-top));
+    height: calc(var(--visible-height, 100dvh) - var(--safe-top) - var(--keyboard-over, 0px));
     flex-direction: column-reverse;
-    padding: 0 var(--gutter-end) 0 var(--gutter-start); /* follows the keyboard as it moves, no slower */
+    padding: 0 var(--gutter-end) 0 var(--gutter-start);
+  }
+
+  /* A keyboard laid over the page says how tall it will be as it starts to
+     rise, so search rises with it, on about the time and curve Android's
+     keyboard moves on. A page that shrinks for the keyboard does so step by
+     step or all at once, and search follows each step as it comes. */
+  html[data-keyboard-over] #search {
+    transition: height 0.28s cubic-bezier(0.2, 0, 0, 1);
   }
 
   .search-bar {

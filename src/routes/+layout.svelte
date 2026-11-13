@@ -7,6 +7,7 @@
   import Search from '#lib/components/Search.svelte';
   import SearchIcon from '#lib/components/SearchIcon.svelte';
   import { cards } from '#lib/cards.svelte.ts';
+  import { virtualKeyboard } from '#lib/keyboard.ts';
   import { library } from '#lib/library.svelte.ts';
   import { popups } from '#lib/popups.svelte.ts';
   import { trailFor } from '#lib/trail.ts';
@@ -39,14 +40,21 @@
       document.documentElement.style.setProperty('--visible-top', `${viewport.offsetTop}px`); // where Safari has slid the page to
       // The keyboard covers the window's bottom without making it shorter.
       // Chrome counts innerHeight to the keyboard, so the window's height is
-      // taken from the page's box instead.
-      const keyboard = Math.max(0, document.documentElement.clientHeight - viewport.height * viewport.scale);
-      document.documentElement.style.setProperty('--keyboard', `${keyboard}px`);
+      // taken from the page's box instead. A keyboard laid over the page
+      // shrinks nothing, and says itself how tall it is.
+      const over = keyboard?.overlaysContent ? keyboard.boundingRect.height : 0;
+      const shrunk = Math.max(0, document.documentElement.clientHeight - viewport.height * viewport.scale);
+      document.documentElement.style.setProperty('--keyboard-over', `${over}px`);
+      document.documentElement.toggleAttribute('data-keyboard-over', !!keyboard?.overlaysContent);
+      document.documentElement.style.setProperty('--keyboard', `${shrunk + over}px`);
     };
+    const keyboard = virtualKeyboard();
     update();
     viewport.addEventListener('resize', update);
     viewport.addEventListener('scroll', update);
+    keyboard?.addEventListener('geometrychange', update);
     return () => {
+      keyboard?.removeEventListener('geometrychange', update);
       viewport.removeEventListener('resize', update);
       viewport.removeEventListener('scroll', update);
     };
