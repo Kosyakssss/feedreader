@@ -1024,8 +1024,7 @@ html:active-view-transition-type(page-change) .row {
     top: calc(var(--visible-top, 0px) + var(--safe-top));
     height: calc(var(--visible-height, 100dvh) - var(--safe-top));
     flex-direction: column-reverse;
-    padding: 0 var(--gutter-end) 0 var(--gutter-start);
-    transition: height var(--open-time) var(--ease);
+    padding: 0 var(--gutter-end) 0 var(--gutter-start); /* follows the keyboard as it moves, no slower */
   }
 
   .search-bar {

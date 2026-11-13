@@ -34,7 +34,9 @@
       document.documentElement.style.setProperty('--visible-height', `${viewport.height * viewport.scale}px`);
       document.documentElement.style.setProperty('--visible-top', `${viewport.offsetTop}px`); // where Safari has slid the page to
       // The keyboard covers the window's bottom without making it shorter.
-      const keyboard = Math.max(0, window.innerHeight - viewport.height * viewport.scale);
+      // Chrome counts innerHeight to the keyboard, so the window's height is
+      // taken from the page's box instead.
+      const keyboard = Math.max(0, document.documentElement.clientHeight - viewport.height * viewport.scale);
       document.documentElement.style.setProperty('--keyboard', `${keyboard}px`);
     };
     update();
