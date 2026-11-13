@@ -1,5 +1,6 @@
 <script lang="ts">
   import { fitTitle } from '#lib/fit-title.ts';
+  import { leave } from '#lib/leave.ts';
   import { capTitle, dateLabel, displayTitle, feedPath } from '#lib/format.ts';
   import type { Toggle } from '#lib/rows.svelte.ts';
   import type { Entry } from '#lib/server/store.ts';
@@ -32,8 +33,8 @@
   const source = $derived(entry.page ? new URL(entry.url).hostname.replace(/^www\./, '') : entry.feed);
 </script>
 
-<li>
-  <div class="row" class:read={entry.state === 'read'} class:marked style:view-transition-name="e{entry.id}">
+<li transition:leave>
+  <div class="row" class:read={entry.state === 'read'} class:marked>
     <a class="title" href={entry.url} target="_blank" rel="noopener" onclick={onopen} {@attach fitTitle(title)}
       >{title}</a
     >

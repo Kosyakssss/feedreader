@@ -195,8 +195,8 @@ main > :first-child,
 }
 
 /* Fixed like its glass, not sticky, so that when the page bounces past its top
-   the two hold still together in every browser. Named so that rows moving
-   during a page change pass under it, not over it. */
+   the two hold still together in every browser. Named, so that a page change
+   crossfades the breadcrumbs on their own, over the page. */
 header {
   position: fixed;
   top: 0;
@@ -682,7 +682,7 @@ li {
   font-variant-numeric: tabular-nums;
 }
 
-/* Off-screen rows skip rendering, which also keeps them out of view transitions. */
+/* Off-screen rows skip rendering. */
 .entries > li {
   content-visibility: auto;
   contain-intrinsic-block-size: auto 3em;
@@ -906,7 +906,7 @@ button.failed {
   border-color: var(--re);
 }
 
-/* Page changes, and rows moving within a page, follow the motion style too. */
+/* Page changes follow the motion style too. */
 ::view-transition-group(*),
 ::view-transition-old(*),
 ::view-transition-new(*) {
@@ -921,39 +921,6 @@ button.failed {
 html:active-view-transition-type(page-change) :is(.header-glass, .veil, .action),
 html:active-view-transition-type(page-change) .veil::after {
   transition: none;
-}
-
-/* Rows move on their own only for changes within a page, like saving. Across
-   pages they would jump out sharp on top of the blur and the open menu. */
-html:active-view-transition-type(page-change) .row {
-  view-transition-name: none !important;
-}
-
-/* Rows that move within a page are lifted out of the page's picture, so glass
-   left in that picture would suddenly blur a page without them. The glass is
-   lifted out too, as its tint alone, and blurs whatever passes under it as it
-   goes, just as it does at rest. */
-html:active-view-transition:not(:active-view-transition-type(page-change)) .header-glass {
-  view-transition-name: glass;
-}
-
-html:active-view-transition:not(:active-view-transition-type(page-change)) .action.start {
-  view-transition-name: action-start;
-}
-
-html:active-view-transition:not(:active-view-transition-type(page-change)) .action.end {
-  view-transition-name: action-end;
-}
-
-::view-transition-group(glass),
-::view-transition-group(action-start),
-::view-transition-group(action-end) {
-  backdrop-filter: var(--glass-blur);
-}
-
-::view-transition-group(action-start),
-::view-transition-group(action-end) {
-  border-radius: 999px;
 }
 
 /* On a touch screen the header is a bar at the bottom, under the thumb. Its
