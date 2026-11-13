@@ -85,9 +85,10 @@ html {
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --top: calc(var(--safe-top) + var(--header-height)); /* where the page starts, below the header */
   --bar: var(--safe-bottom); /* what the page's buttons stand on: a phone's bar, or the window's edge */
+  --pill-padding: 0.3em 0.85em;
   --actions-clear: calc(
-    var(--bar) + 3 * var(--gap) + 1.18 * var(--text)
-  ); /* their words, a gap either side, and a gap */
+    var(--bar) + 2 * var(--gap) + 2 * var(--text) + 2px
+  ); /* a gap, a pill (a 1.4 line, its padding, its hairline), and a gap */
   scroll-padding-block: calc(var(--top) + var(--gap)) calc(var(--bar) + var(--gap)); /* what Tab or find scrolls to lands clear of the chrome */
   scrollbar-gutter: stable;
   -webkit-tap-highlight-color: transparent;
@@ -721,41 +722,30 @@ li {
   text-underline-offset: 0.25em;
 }
 
-/* A page's own buttons: words in the bottom corners, each on a pool of the
-   header's glass that runs in from the screen's edge. It is solid to a gap
-   past the words, as the header's glass is around the breadcrumbs, and only
-   then dissolves into the page like a watercolour wash. Each pool is its own
-   fixed box, so Safari keeps it while the page bounces. They stand on --bar:
-   the phone's bar, or the bottom of the window. Below the veil, so an open
-   popup blurs them with the page, and their glass gives way to the veil's as
-   the header's does. */
+/* A page's own buttons: pills of the header's glass with a hairline round
+   them, floating a gap above what they stand on, --bar: the phone's bar, or
+   the bottom of the window. Each is its own fixed box, so Safari keeps it
+   while the page bounces. Below the veil, so an open popup blurs them with
+   the page, and their glass gives way to the veil's as the header's does. */
 .action {
-  --dissolve: 48px; /* how far past its solid part the wash fades out */
   position: fixed;
-  bottom: var(--bar);
+  bottom: calc(var(--bar) + var(--gap));
   z-index: 1;
-  padding-block: calc(var(--dissolve) + var(--gap) - 0.11em) calc(var(--gap) - 0.11em);
+  border: 1px solid var(--ui-2);
+  border-radius: 999px;
   background-color: var(--glass-tint);
   backdrop-filter: var(--glass-blur);
-  mask:
-    linear-gradient(transparent, #000 var(--dissolve)) 0 0 / 100% 100% no-repeat,
-    var(--fallback) 0 0 / 100% 100% no-repeat; /* until wash.ts has drawn the wash */
-  mask-composite: intersect;
   transition:
     background-color var(--open-time) var(--ease) var(--clear-after),
     backdrop-filter var(--open-time) var(--ease) var(--clear-after);
 }
 
 .action.start {
-  --fallback: linear-gradient(to right, #000 calc(100% - var(--dissolve)), transparent);
-  left: 0;
-  padding-inline: var(--gutter-start) calc(var(--edge) + var(--dissolve));
+  left: var(--gutter-start);
 }
 
 .action.end {
-  --fallback: linear-gradient(to left, #000 calc(100% - var(--dissolve)), transparent);
-  right: 0;
-  padding-inline: calc(var(--edge) + var(--dissolve)) var(--gutter-end);
+  right: var(--gutter-end);
 }
 
 html:has(.popup:not(.closing)) .action {
@@ -766,7 +756,7 @@ html:has(.popup:not(.closing)) .action {
 
 .action button {
   display: block;
-  padding: 0;
+  padding: var(--pill-padding);
   border: 0;
   background: none;
   color: var(--tx);
@@ -784,7 +774,7 @@ html:has(.popup:not(.closing)) .action {
   color: var(--cy);
 }
 
-/* The last entry can scroll clear of the words, to a gap above their pool. */
+/* The last entry can scroll clear of the pills, to a gap above them. */
 main:has(.actions) {
   padding-block-end: var(--actions-clear);
 }
