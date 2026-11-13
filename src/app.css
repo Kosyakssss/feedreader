@@ -571,18 +571,28 @@ html:has(#search:not(.closing)) header button.icon {
   z-index: 1;
   transition:
     background-color var(--open-time) var(--ease) var(--clear-after),
+    box-shadow var(--open-time) var(--ease) var(--clear-after),
     backdrop-filter var(--open-time) var(--ease) var(--clear-after),
     visibility 0s calc(var(--open-time) + var(--clear-after));
 }
 
+/* The header is the floating glass too, as a band along the window's edge
+   rather than a shape: its rim runs only along the side that faces the page,
+   and its shadow falls only onto the page. --lift is 1 for the band at the
+   top, casting down, and -1 for one at the bottom, casting up. */
 .header-glass {
+  --lift: 1;
   height: var(--top);
-  background-color: var(--glass-tint);
-  backdrop-filter: var(--glass-blur);
+  background-color: var(--float-tint);
+  box-shadow:
+    0 calc(var(--lift) * 0.5px) 0 var(--float-rim),
+    0 calc(var(--lift) * 6px) 22px -14px light-dark(rgb(16 15 15 / 0.3), rgb(0 0 0 / 0.8));
+  backdrop-filter: var(--float-blur);
 }
 
 html:has(.popup:not(.closing)) .header-glass {
   background-color: transparent;
+  box-shadow: none;
   backdrop-filter: none;
   transition-delay: 0s;
 }
@@ -991,6 +1001,7 @@ html:active-view-transition-type(page-change) .veil::after {
      bottom, so that whatever shows under and around the toolbar is the bar,
      not the page. Elsewhere that is off the screen. */
   .header-glass {
+    --lift: -1;
     top: auto;
     bottom: calc(-1 * var(--below));
     height: calc(var(--bar) + var(--below));
