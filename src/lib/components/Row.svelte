@@ -2,7 +2,7 @@
   import { fitTitle } from '#lib/fit-title.ts';
   import { leave } from '#lib/leave.ts';
   import { capTitle, dateLabel, displayTitle, feedPath } from '#lib/format.ts';
-  import type { Toggle } from '#lib/rows.svelte.ts';
+  import type { Toggle } from '#lib/library.svelte.ts';
   import type { Entry } from '#lib/server/store.ts';
   import type { Snippet } from 'svelte';
 

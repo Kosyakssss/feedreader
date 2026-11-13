@@ -2,13 +2,13 @@
   import { MediaQuery } from 'svelte/reactivity';
   import Actions from '#lib/components/Actions.svelte';
   import EntryList from '#lib/components/EntryList.svelte';
-  import { Rows } from '#lib/rows.svelte.ts';
+  import { library } from '#lib/library.svelte.ts';
   import type { PageProps } from './$types';
 
   let { data }: PageProps = $props();
 
   // Marking an entry read takes it off Unread.
-  const rows = $derived(new Rows(data.entries, (entry) => entry.state !== 'unread'));
+  const entries = $derived(library.list(data.list?.entries, library.unread));
 
   // A phone opens one tab per press, so there it opens the next entry instead
   // of all of them. Opening never marks anything read.
@@ -16,11 +16,11 @@
   let opened = $state<number>(); // the last entry opened, by either button or its title
 
   function openAll(): void {
-    for (const entry of rows.list.toReversed()) window.open(entry.url, '_blank', 'noopener');
+    for (const entry of entries.toReversed()) window.open(entry.url, '_blank', 'noopener');
   }
 
   function openNext(): void {
-    const next = rows.list[rows.list.findIndex((entry) => entry.id === opened) + 1] ?? rows.list[0];
+    const next = entries[entries.findIndex((entry) => entry.id === opened) + 1] ?? entries[0];
     if (!next) return;
     opened = next.id;
     window.open(next.url, '_blank', 'noopener');
@@ -29,11 +29,11 @@
 
 <svelte:head><title>Lagan</title></svelte:head>
 
-{#if rows.list.length}
-  <EntryList {rows} marked={opened} onopen={(entry) => (opened = entry.id)} />
+{#if entries.length}
+  <EntryList {entries} marked={opened} onopen={(entry) => (opened = entry.id)} />
   <Actions>
     {#snippet start()}
-      <button class:failed={rows.readAllFailed} onclick={() => rows.readAll()}>Mark all read</button>
+      <button class:failed={library.readAllFailed} onclick={() => library.readAll(entries)}>Mark all read</button>
     {/snippet}
     {#snippet end()}
       {#if touch.current}

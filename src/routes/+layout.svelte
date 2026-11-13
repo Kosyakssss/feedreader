@@ -7,13 +7,17 @@
   import Search from '#lib/components/Search.svelte';
   import SearchIcon from '#lib/components/SearchIcon.svelte';
   import { cards } from '#lib/cards.svelte.ts';
+  import { library } from '#lib/library.svelte.ts';
   import { popups } from '#lib/popups.svelte.ts';
   import { trailFor } from '#lib/trail.ts';
   import type { LayoutProps } from './$types';
 
   let { data, children }: LayoutProps = $props();
 
-  const trail = $derived(trailFor(page.url.pathname, data.feeds));
+  const trail = $derived(trailFor(page.url.pathname, library.ready ? library.sources : data.feeds));
+
+  // The whole library comes to the device as the app starts, and stays current.
+  onMount(() => library.start());
   let search: Search;
 
   // Focused in the same press that opens it, or a phone won't show its keyboard.

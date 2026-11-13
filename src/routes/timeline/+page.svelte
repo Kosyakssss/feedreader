@@ -1,19 +1,29 @@
 <script lang="ts">
   import EntryList from '#lib/components/EntryList.svelte';
-  import { Rows } from '#lib/rows.svelte.ts';
+  import { library, TIMELINE_STEP } from '#lib/library.svelte.ts';
   import type { Entry } from '#lib/server/store.ts';
   import type { PageProps } from './$types';
 
   let { data }: PageProps = $props();
 
-  const rows = $derived(new Rows(data.entries));
-  let more = $derived(data.more);
+  // A step at a time, as reading goes on. With the library here the next
+  // step is already on the device; before it is, it comes from the server.
+  let shown = $state(TIMELINE_STEP);
+  let fetched = $state<Entry[]>([]);
+  let moreSent = $state<boolean>(); // what the server said with the last step it sent
   let loading = $state(false);
   let failed = $state(false);
 
-  // The next 200, after the last entry shown.
+  const everything = $derived(library.list([...(data.list?.entries ?? []), ...fetched], library.timeline));
+  const entries = $derived(library.ready ? everything.slice(0, shown) : everything);
+  const more = $derived(library.ready ? everything.length > shown : (moreSent ?? data.list?.more ?? false));
+
   async function showMore(): Promise<void> {
-    const last = rows.list.at(-1);
+    if (library.ready) {
+      shown += TIMELINE_STEP;
+      return;
+    }
+    const last = entries.at(-1);
     if (!last || loading) return;
     loading = true;
     failed = false;
@@ -21,8 +31,8 @@
       const response = await fetch(`/api/timeline?after=${last.published_at}:${last.id}`);
       if (!response.ok) throw new Error(String(response.status));
       const page: { entries: Entry[]; more: boolean } = await response.json();
-      rows.list = [...rows.list, ...page.entries];
-      more = page.more;
+      fetched = [...fetched, ...page.entries];
+      moreSent = page.more;
     } catch {
       failed = true;
     } finally {
@@ -33,7 +43,7 @@
 
 <svelte:head><title>Timeline</title></svelte:head>
 
-<EntryList {rows} />
+<EntryList {entries} />
 {#if more}
   <button class="more" class:failed disabled={loading} onclick={showMore}>Show more</button>
 {/if}

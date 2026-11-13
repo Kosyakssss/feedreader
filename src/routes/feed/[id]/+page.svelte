@@ -1,13 +1,14 @@
 <script lang="ts">
   import EntryList from '#lib/components/EntryList.svelte';
-  import { Rows } from '#lib/rows.svelte.ts';
+  import { library } from '#lib/library.svelte.ts';
   import type { PageProps } from './$types';
 
   let { data }: PageProps = $props();
 
-  const rows = $derived(new Rows(data.entries));
+  const entries = $derived(library.list(data.list?.entries, library.feed(data.id)));
+  const label = $derived(library.source(data.id)?.label ?? data.list?.label);
 </script>
 
-<svelte:head><title>{data.label}</title></svelte:head>
+<svelte:head><title>{label}</title></svelte:head>
 
-<EntryList {rows} />
+<EntryList {entries} />

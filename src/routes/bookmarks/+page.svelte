@@ -4,14 +4,14 @@
   import MoreButton from '#lib/components/MoreButton.svelte';
   import EntryList from '#lib/components/EntryList.svelte';
   import LinkField from '#lib/components/LinkField.svelte';
-  import { Rows } from '#lib/rows.svelte.ts';
+  import { library } from '#lib/library.svelte.ts';
   import type { Entry } from '#lib/server/store.ts';
   import type { PageProps } from './$types';
 
   let { data }: PageProps = $props();
 
   // Taking the bookmark off takes the entry off this page.
-  const rows = $derived(new Rows(data.entries, (entry) => !entry.bookmarked));
+  const entries = $derived(library.list(data.list?.entries, library.bookmarks));
 
   async function bookmark(text: string) {
     const response = await fetch('/api/bookmarks', {
@@ -20,22 +20,21 @@
       body: JSON.stringify({ text }),
     });
     if (!response.ok) return { message: 'Could not save those.', failed: true };
-    const { entries }: { entries: Entry[] } = await response.json();
-    if (!entries.length) return { message: 'No links in that.', failed: true };
-    const added = new Set(entries.map((entry) => entry.id));
-    rows.list = [...entries, ...rows.list.filter((entry) => !added.has(entry.id))];
-    return { message: entries.length === 1 ? 'Bookmarked.' : `Bookmarked ${entries.length}.` };
+    const { entries: added }: { entries: Entry[] } = await response.json();
+    if (!added.length) return { message: 'No links in that.', failed: true };
+    library.put(added);
+    return { message: added.length === 1 ? 'Bookmarked.' : `Bookmarked ${added.length}.` };
   }
 </script>
 
 <svelte:head><title>Bookmarks</title></svelte:head>
 
 <LinkField placeholder="Paste links to bookmark" send={bookmark} />
-<EntryList {rows} toggles={['read']}>
+<EntryList {entries} toggles={['read']}>
   {#snippet extra(entry)}
     <MoreButton key="e{entry.id}" />
   {/snippet}
   {#snippet card(entry)}
-    <Card key="e{entry.id}"><BookmarkCard {entry} onremove={() => rows.toggle(entry, 'bookmark')} /></Card>
+    <Card key="e{entry.id}"><BookmarkCard {entry} onremove={() => library.toggle(entry, 'bookmark')} /></Card>
   {/snippet}
 </EntryList>

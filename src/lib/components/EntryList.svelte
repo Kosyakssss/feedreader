@@ -1,11 +1,11 @@
 <script lang="ts">
-  import type { Rows, Toggle } from '#lib/rows.svelte.ts';
+  import { library, type Toggle } from '#lib/library.svelte.ts';
   import type { Entry } from '#lib/server/store.ts';
   import type { Snippet } from 'svelte';
   import Row from './Row.svelte';
 
   let {
-    rows,
+    entries,
     toggles = ['read', 'bookmark'],
     extra,
     card,
@@ -13,7 +13,7 @@
     marked,
     onopen,
   }: {
-    rows: Rows;
+    entries: Entry[];
     toggles?: Toggle[];
     extra?: Snippet<[Entry]>;
     card?: Snippet<[Entry]>;
@@ -23,14 +23,14 @@
   } = $props();
 </script>
 
-{#if rows.list.length}
+{#if entries.length}
   <ol class="entries">
-    {#each rows.list as entry (entry.id)}
+    {#each entries as entry (entry.id)}
       <Row
         {entry}
         {toggles}
-        failed={(toggle) => rows.failed.has(`${entry.id} ${toggle}`)}
-        ontoggle={(toggle) => rows.toggle(entry, toggle)}
+        failed={(toggle) => library.failed.has(`${entry.id} ${toggle}`)}
+        ontoggle={(toggle) => library.toggle(entry, toggle)}
         {extra}
         {card}
         marked={entry.id === marked}

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { refreshAll } from '$app/navigation';
   import type { Source } from '#lib/server/store.ts';
 
   let { feed, mutes }: { feed: Source; mutes: string[] } = $props();
@@ -33,8 +32,7 @@
       return;
     }
     const response = await fetch(`/api/feeds/${feed.id}`, { method: 'DELETE' }).catch(() => null);
-    if (response?.ok) await refreshAll();
-    else failed = true;
+    if (!response?.ok) failed = true; // otherwise the library hears it is gone
   }
 </script>
 

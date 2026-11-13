@@ -10,8 +10,7 @@ import { GET as timeline } from '../src/routes/api/timeline/+server';
 import { DELETE as removeFeed } from '../src/routes/api/feeds/[id]/+server';
 import { PUT as setMutes } from '../src/routes/api/feeds/[id]/mutes/+server';
 import { GET as search } from '../src/routes/api/search/+server';
-import { load as feedPage } from '../src/routes/feed/[id]/+page.server';
-import { load as unreadPage } from '../src/routes/+page.server';
+import { GET as list } from '../src/routes/api/list/+server';
 
 let store: Store;
 let woken = 0;
@@ -52,18 +51,23 @@ beforeEach(() => {
   woken = 0;
 });
 
-test('Unread shows new posts but not the backlog, and opening it wakes the feeds', () => {
-  const data = unreadPage(event()) as { entries: { title: string }[] };
+test('Unread shows new posts but not the backlog, and opening it wakes the feeds', async () => {
+  const data = (await (await list(event({}, 'http://lagan.test/api/list?of=unread'))).json()) as {
+    entries: { title: string }[];
+  };
   expect(titles(data.entries)).toEqual(['Post fresh']);
   expect(woken).toBe(1);
 });
 
-test('a feed page includes the backlog, and an unknown feed is not found', () => {
-  const data = feedPage(event({ id: '1' })) as { label: string; entries: { title: string }[] };
+test('a feed page includes the backlog, and an unknown feed is not found', async () => {
+  const data = (await (await list(event({}, 'http://lagan.test/api/list?feed=1'))).json()) as {
+    label: string;
+    entries: { title: string }[];
+  };
   expect(data.label).toBe('Example');
   expect(titles(data.entries)).toEqual(['Post fresh', 'Post backlog']);
-  expect(statusOf(() => feedPage(event({ id: '999' })))).toBe(404);
-  expect(statusOf(() => feedPage(event({ id: 'nope' })))).toBe(404);
+  expect(statusOf(() => list(event({}, 'http://lagan.test/api/list?feed=999')))).toBe(404);
+  expect(statusOf(() => list(event({}, 'http://lagan.test/api/list?feed=nope')))).toBe(404);
 });
 
 test('bookmarking answers with the entry as it now is, and pressing again takes the bookmark off', async () => {
