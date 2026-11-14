@@ -4,13 +4,5 @@
   "categories": {
     "correctness": "error",
     "suspicious": "warn"
-  },
-  "rules": {
-    "import/no-unassigned-import": [
-      "warn",
-      {
-        "allow": ["**/*.css"]
-      }
-    ]
   }
 }

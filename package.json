@@ -6,27 +6,22 @@
     "#lib/*": "./src/lib/*"
   },
   "scripts": {
-    "dev": "bunx --bun vite dev",
-    "build": "bunx --bun vite build",
-    "start": "bun ./build",
+    "dev": "bun --hot src/server.ts",
+    "start": "bun src/server.ts",
     "lagan": "bun src/cli.ts",
-    "prepare": "svelte-kit sync || echo ''",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check": "tsc --noEmit",
     "lint": "oxlint --deny-warnings",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "test": "bun test"
   },
+  "dependencies": {
+    "htmx.org": "2.0.11"
+  },
   "devDependencies": {
-    "@sveltejs/adapter-bun": "^1.0.0",
-    "@sveltejs/kit": "^3.1.1",
-    "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@types/bun": "^1.4.4",
     "oxfmt": "^0.78.0",
     "oxlint": "^1.93.0",
-    "svelte": "^5.57.3",
-    "svelte-check": "^4.7.8",
-    "typescript": "^6.0.3",
-    "vite": "^8.3.7"
+    "typescript": "^6.0.3"
   }
 }

@@ -2,7 +2,7 @@ import { Database } from 'bun:sqlite';
 import { beforeEach, expect, test } from 'bun:test';
 import type { FetchResult } from '../src/lib/server/fetch';
 import type { Item } from '../src/lib/server/parse';
-import { scopes, Store, type Change, type Source } from '../src/lib/server/store';
+import { scopes, Store, type Source } from '../src/lib/server/store';
 
 let store: Store;
 let feed: Source;
@@ -106,15 +106,12 @@ test('a bookmarked entry leaves Unread but stays unread, and comes back when the
   expect(titles(scopes.unread)).toEqual(['Post a']);
 });
 
-test('marking sets entries chosen together, whatever each was, and tells copies of the app which changed', () => {
+test('marking sets entries chosen together, whatever each was', () => {
   saveItems(item('backlog'));
   saveItems(item('a', { published: JAN + 1000 }), item('b', { published: JAN + 2000 }));
   const [b, a] = store.entries(scopes.unread).map((entry) => entry.id);
   store.mark([a!], { read: true });
-  const changes: Change[] = [];
-  store.onChange = (change) => changes.push(change);
   expect(store.mark([a!, b!, 999], { read: true }).map((entry) => entry.state)).toEqual(['read', 'read']);
-  expect(changes).toEqual([{ entries: [a!, b!] }]);
   store.mark([a!, b!], { read: false });
   expect(titles(scopes.unread)).toEqual(['Post b', 'Post a']);
 });

@@ -45,7 +45,7 @@ export const scopes = {
   // The newest hundred, read or not: everything older is the archive.
   latest: { where: `state <> 'none' AND ${NOT_MUTED}`, limit: 100 },
   bookmarks: { where: 'bookmarked = 1' },
-  feed: (id: number): Scope => ({ where: 'source_id = ?', args: [id] }),
+  feed: (id: number): Scope => ({ where: 'source_id = ?', args: [id], limit: 100 }),
 } satisfies Record<string, Scope | ((id: number) => Scope)>;
 
 const SCHEMA = `
@@ -129,13 +129,8 @@ function matchWords(typed: string[], title: string[]): 'exact' | 'partial' | nul
   return result;
 }
 
-// What a change touched, told to whoever keeps a copy: some entries, the
-// feeds (their names, errors, folders, muted words), or too much to list.
-export type Change = { entries: number[] } | { sources: true } | { everything: true };
-
 export class Store {
   private db: Database;
-  onChange: (change: Change) => void = () => {};
 
   constructor(path: string) {
     this.db = new Database(path, { create: true });
@@ -176,7 +171,6 @@ export class Store {
         return added.changes ? [Number(added.lastInsertRowid)] : [];
       }),
     )();
-    if (ids.length) this.onChange({ sources: true });
     return ids;
   }
 
@@ -245,8 +239,6 @@ export class Store {
       );
       return touched;
     })();
-    if (saved.length) this.onChange({ entries: saved });
-    if ((result.error ?? '') !== source.error) this.onChange({ sources: true });
     return saved.length;
   }
 
@@ -317,9 +309,7 @@ export class Store {
           );
       }
     })();
-    const entries = ids.map((id) => this.entry(id)).filter((entry) => entry !== null);
-    if (entries.length) this.onChange({ entries: entries.map((entry) => entry.id) });
-    return entries;
+    return ids.map((id) => this.entry(id)).filter((entry) => entry !== null);
   }
 
   // A page bookmarked from its link. If some feed already has it, that entry
@@ -334,7 +324,6 @@ export class Store {
         `INSERT INTO entries (source_id, guid, url, published_at, state, bookmarked, title) VALUES (?, ?, ?, ?, 'read', 1, ?) RETURNING id`,
       )
       .get(this.pageSource(), url, url, Date.now(), title)!;
-    this.onChange({ entries: [id] });
     return this.entry(id)!;
   }
 
@@ -353,7 +342,6 @@ export class Store {
       ]);
       this.db.run(`DELETE FROM sources WHERE id = ? AND kind <> 'page'`, [id]);
     })();
-    this.onChange({ everything: true });
   }
 
   mutes(sourceId: number): string[] {
@@ -369,14 +357,7 @@ export class Store {
       this.db.run('DELETE FROM mutes WHERE source_id = ?', [sourceId]);
       for (const word of clean) this.db.run('INSERT INTO mutes (source_id, word) VALUES (?, ?)', [sourceId, word]);
     })();
-    this.onChange({ sources: true });
     return this.mutes(sourceId);
-  }
-
-  // Everything a copy of the app shows: every entry, and every feed with its
-  // muted words.
-  library(): { entries: Entry[]; sources: Source[]; mutes: Record<number, string[]> } {
-    return { entries: this.allEntries(), sources: this.sources(), mutes: this.mutesBySource() };
   }
 
   // Every entry, newest first, as rows show them.
@@ -386,15 +367,6 @@ export class Store {
         `SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id ORDER BY e.published_at DESC, e.id DESC`,
       )
       .all();
-  }
-
-  entriesById(ids: number[]): Entry[] {
-    if (!ids.length) return [];
-    return this.db
-      .query<Entry, number[]>(
-        `SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id WHERE e.id IN (${ids.map(() => '?').join(',')})`,
-      )
-      .all(...ids);
   }
 
   export(only?: 'unread' | 'bookmarked') {

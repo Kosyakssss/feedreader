@@ -1,9 +1,16 @@
 {
-  "extends": "$app/tsconfig",
   "compilerOptions": {
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext", "DOM"],
+    "types": ["bun"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
-    "types": ["$app/types", "bun"]
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true
   },
-  "include": ["src", "test", "vite.config.ts"]
+  "include": ["src", "test"]
 }
