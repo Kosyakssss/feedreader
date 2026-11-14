@@ -216,3 +216,23 @@ test('copies at different paths are different posts', () => {
   expect(store.mergeMoved()).toBe(0);
   expect(store.entries(scopes.feed(feed.id))).toHaveLength(2);
 });
+
+test('pages kept from their links belong to their sites, and so does what is kept from a feed no longer followed', () => {
+  saveItems(item('a'));
+  const page = store.bookmarkPage('https://www.youtube.com/watch?v=1', 'Logical fallacies - YouTube');
+  expect(page).toMatchObject({ feed: 'youtube.com', page: 1 });
+  expect(store.bookmarkPage('https://youtube.com/watch?v=2', 'Two').source_id).toBe(page.source_id);
+  const a = store.entries(scopes.feed(feed.id))[0]!;
+  store.mark([a.id], { bookmarked: true });
+  store.removeSource(feed.id);
+  expect(store.entry(a.id)).toMatchObject({ feed: 'example.com', page: 1, bookmarked: 1 });
+  expect(store.sources()).toEqual([]); // sites aren't feeds
+});
+
+test("a site's cuts tidy its titles, in any case, and never leave one empty", () => {
+  const page = store.bookmarkPage('https://youtube.com/watch?v=1', 'Logical fallacies - YouTube');
+  store.setCuts(page.source_id, ['- youtube', ' ']);
+  expect(store.entry(page.id)!.title).toBe('Logical fallacies');
+  store.setCuts(page.source_id, ['Logical fallacies - YouTube']);
+  expect(store.entry(page.id)!.title).toBe('Logical fallacies - YouTube');
+});

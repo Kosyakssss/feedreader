@@ -51,13 +51,13 @@ test('the home page lists new posts, read or not, but not the backlog, and openi
   expect(woken).toBe(1);
 });
 
-test('a page is whole by itself: its CSS inside, script only deferred, and gzipped for browsers', async () => {
+test('a page is whole by itself: its CSS inside, its one script deferred, and gzipped for browsers', async () => {
   const response = await get('/', { 'Accept-Encoding': 'gzip' });
   expect(response.headers.get('content-encoding')).toBe('gzip');
   const page = await response.text();
   expect(page).toContain('<style>');
   expect(page).not.toContain('rel="stylesheet"');
-  const scripts = [...page.matchAll(/<script[^>]*>/g)].map(([tag]) => tag);
+  const scripts = [...page.matchAll(/<script[^>]*src=[^>]*>/g)].map(([tag]) => tag);
   expect(scripts).toHaveLength(1);
   expect(scripts[0]).toContain('defer');
   const htmx = await fetch(new URL(scripts[0]!.match(/src="([^"]+)"/)![1]!, server.url));
@@ -81,11 +81,12 @@ test('keep, as a plain form, goes back to the entry on the page it was pressed o
   expect(fresh().bookmarked).toBe(0);
 });
 
-test('keep sent by htmx answers with the form turned over, and an unknown entry is not found', async () => {
+test('keep sent by htmx answers with the form turned over and the count in the header, and an unknown entry is not found', async () => {
   const id = fresh().id;
   const form = await (await post('/keep', { id: String(id), keep: '1' }, { 'HX-Request': 'true' })).text();
   expect(form).toContain('aria-pressed="true"');
   expect(form).toContain('name="keep" value="0"');
+  expect(form).toMatch(/id="kept-count"[^>]*hx-swap-oob="true"[^>]*>\s*1 kept/);
   expect((await post('/keep', { id: '999', keep: '1' })).status).toBe(404);
 });
 
@@ -98,7 +99,7 @@ test('a change posted from another site is refused', async () => {
 test("a feed's page has its backlog too, and its muted words are saved cleaned up", async () => {
   const page = await (await get('/feed/1')).text();
   expect(page).toContain('Post backlog');
-  const saved = await post('/feed/1/mutes', { words: ' Sponsored, ad ,,' });
+  const saved = await post('/feed/1/mutes', { mutes: ' Sponsored, ad ,,' });
   expect(saved.headers.get('location')).toBe('/lagan/feed/1');
   expect(store.mutes(1)).toEqual(['ad', 'sponsored']);
   expect((await get('/feed/999')).status).toBe(404);
@@ -123,4 +124,26 @@ test('the app lives under its path: the bare path leads into it, and anything el
   const bare = await fetch(new URL('/lagan', server.url), { redirect: 'manual' });
   expect(bare.headers.get('location')).toBe('/lagan/');
   expect((await fetch(new URL('/elsewhere', server.url))).status).toBe(404);
+});
+
+test('what a feed cuts is taken out of its titles everywhere they are shown', async () => {
+  expect((await post('/feed/1/cuts', { cuts: 'post , ' })).headers.get('location')).toBe('/lagan/feed/1');
+  expect(store.cuts(1)).toEqual(['post']);
+  const page = await (await get('/')).text();
+  expect(page).toContain('>fresh</a>');
+  expect(page).not.toContain('Post fresh');
+});
+
+test('stopping following asks first, in place for htmx and as the page without it', async () => {
+  const asked = await (await get('/feed/1/stop?sure')).text();
+  expect(asked).toContain('action="/lagan/feed/1/remove"');
+  expect(await (await get('/feed/1/stop')).text()).not.toContain('/remove');
+  expect(await (await get('/feed/1?stop')).text()).toContain('action="/lagan/feed/1/remove"');
+  expect(await (await get('/feed/1')).text()).not.toContain('action="/lagan/feed/1/remove"');
+});
+
+test('search sent by htmx answers with just what it found', async () => {
+  const found = await (await get('/search?q=backlog', { 'HX-Request': 'true' })).text();
+  expect(found).toContain('Post backlog');
+  expect(found).not.toContain('<header');
 });

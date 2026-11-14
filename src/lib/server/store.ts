@@ -8,7 +8,7 @@ export type State = 'none' | 'unread' | 'read';
 
 export type Source = {
   id: number;
-  kind: 'rss' | 'atproto' | 'page'; // 'page' holds bookmarked pages that came from no feed
+  kind: 'rss' | 'atproto' | 'page'; // 'page' is a site whose pages were kept from their links, not from a feed
   ref: string;
   label: string;
   folder: string;
@@ -78,6 +78,11 @@ CREATE TABLE IF NOT EXISTS mutes (
   word TEXT NOT NULL, -- lower case
   PRIMARY KEY (source_id, word)
 ) STRICT;
+CREATE TABLE IF NOT EXISTS cuts (
+  source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+  text TEXT NOT NULL, -- taken out of the source's titles wherever it appears
+  PRIMARY KEY (source_id, text)
+) STRICT;
 CREATE UNIQUE INDEX IF NOT EXISTS source_guid ON entries(source_id, guid) WHERE guid <> '';
 CREATE UNIQUE INDEX IF NOT EXISTS source_url ON entries(source_id, url) WHERE url <> '';
 CREATE INDEX IF NOT EXISTS timeline ON entries(published_at DESC, id DESC) WHERE state <> 'none';
@@ -129,6 +134,17 @@ function matchWords(typed: string[], title: string[]): 'exact' | 'partial' | nul
   return result;
 }
 
+// A title with every cut taken out wherever it appears, in any case. A cut
+// that would leave nothing leaves the title as it was.
+export function cutFrom(title: string, cuts: string[]): string {
+  const escaped = cuts.map((cut) => cut.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const cut = title
+    .replace(new RegExp(escaped.join('|'), 'gi'), ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cut || title;
+}
+
 export class Store {
   private db: Database;
 
@@ -144,6 +160,22 @@ export class Store {
       this.db.run(SCHEMA);
     }
     this.db.run('PRAGMA foreign_keys = ON');
+    this.splitPages();
+  }
+
+  // Pages kept from their links once all belonged to one source, "Pages".
+  // Each now belongs to its site's.
+  private splitPages(): void {
+    const old = this.db.query<{ id: number }, []>(`SELECT id FROM sources WHERE kind = 'page' AND ref = 'pages'`).get();
+    if (!old) return;
+    const pages = this.db.query<{ id: number; url: string }, [number]>(
+      'SELECT id, url FROM entries WHERE source_id = ?',
+    );
+    this.db.transaction(() => {
+      for (const page of pages.all(old.id))
+        this.db.run('UPDATE OR IGNORE entries SET source_id = ? WHERE id = ?', [this.siteSource(page.url), page.id]);
+      this.db.run('DELETE FROM sources WHERE id = ?', [old.id]);
+    })();
   }
 
   sources(): Source[] {
@@ -252,18 +284,20 @@ export class Store {
   // Newest first.
   entries(scope: Scope): Entry[] {
     const limit = scope.limit ? `LIMIT ${scope.limit}` : '';
-    return this.db
+    const rows = this.db
       .query<Entry, SQLQueryBindings[]>(
         `SELECT ${ROW} FROM (SELECT * FROM entries WHERE ${scope.where} ORDER BY published_at DESC, id DESC ${limit}) e
          JOIN sources s ON s.id = e.source_id ORDER BY e.published_at DESC, e.id DESC`,
       )
       .all(...(scope.args ?? []));
+    return this.cut(rows);
   }
 
   entry(id: number): Entry | null {
-    return this.db
+    const row = this.db
       .query<Entry, [number]>(`SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id WHERE e.id = ?`)
       .get(id);
+    return row && this.cut([row])[0]!;
   }
 
   // Finds entries in any state by what their row shows as a title.
@@ -323,25 +357,61 @@ export class Store {
       .query<{ id: number }, [number, string, string, number, string]>(
         `INSERT INTO entries (source_id, guid, url, published_at, state, bookmarked, title) VALUES (?, ?, ?, ?, 'read', 1, ?) RETURNING id`,
       )
-      .get(this.pageSource(), url, url, Date.now(), title)!;
+      .get(this.siteSource(url), url, url, Date.now(), title)!;
     return this.entry(id)!;
   }
 
-  // The one source that bookmarked pages belong to, made the first time it's needed.
-  private pageSource(): number {
-    this.db.run(`INSERT OR IGNORE INTO sources (kind, ref, label) VALUES ('page', 'pages', 'Pages')`);
-    return this.db.query<{ id: number }, []>(`SELECT id FROM sources WHERE kind = 'page'`).get()!.id;
+  // The source a page kept from its link belongs to: its site, made the
+  // first time one of its pages is kept.
+  private siteSource(url: string): number {
+    const site = URL.parse(url)?.hostname.replace(/^www\./, '') || url;
+    this.db.run(`INSERT OR IGNORE INTO sources (kind, ref, label) VALUES ('page', ?, ?)`, [site, site]);
+    return this.db.query<{ id: number }, [string]>('SELECT id FROM sources WHERE ref = ?').get(site)!.id;
   }
 
-  // Removes a feed and its entries. Bookmarks stay, as bookmarked pages.
+  // Removes a feed and its entries. What was kept stays, as pages of its site.
   removeSource(id: number): void {
+    const kept = this.db.query<{ id: number; url: string }, [number]>(
+      'SELECT id, url FROM entries WHERE source_id = ? AND bookmarked = 1',
+    );
     this.db.transaction(() => {
-      this.db.run('UPDATE OR IGNORE entries SET source_id = ? WHERE source_id = ? AND bookmarked = 1', [
-        this.pageSource(),
-        id,
-      ]);
+      for (const entry of kept.all(id))
+        this.db.run('UPDATE OR IGNORE entries SET source_id = ? WHERE id = ?', [this.siteSource(entry.url), entry.id]);
       this.db.run(`DELETE FROM sources WHERE id = ? AND kind <> 'page'`, [id]);
     })();
+  }
+
+  cuts(sourceId: number): string[] {
+    return this.db
+      .query<{ text: string }, [number]>('SELECT text FROM cuts WHERE source_id = ? ORDER BY text')
+      .all(sourceId)
+      .map((row) => row.text);
+  }
+
+  setCuts(sourceId: number, texts: string[]): string[] {
+    const clean = [...new Set(texts.map((text) => text.trim()).filter(Boolean))];
+    this.db.transaction(() => {
+      this.db.run('DELETE FROM cuts WHERE source_id = ?', [sourceId]);
+      for (const text of clean) this.db.run('INSERT INTO cuts (source_id, text) VALUES (?, ?)', [sourceId, text]);
+    })();
+    return this.cuts(sourceId);
+  }
+
+  // Titles with their source's cuts taken out.
+  private cut(entries: Entry[]): Entry[] {
+    const cuts = Map.groupBy(
+      this.db.query<{ source_id: number; text: string }, []>('SELECT source_id, text FROM cuts').all(),
+      (cut) => cut.source_id,
+    );
+    for (const entry of entries) {
+      const texts = cuts.get(entry.source_id);
+      if (texts && entry.title)
+        entry.title = cutFrom(
+          entry.title,
+          texts.map((cut) => cut.text),
+        );
+    }
+    return entries;
   }
 
   mutes(sourceId: number): string[] {
@@ -362,11 +432,12 @@ export class Store {
 
   // Every entry, newest first, as rows show them.
   private allEntries(): Entry[] {
-    return this.db
+    const rows = this.db
       .query<Entry, []>(
         `SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id ORDER BY e.published_at DESC, e.id DESC`,
       )
       .all();
+    return this.cut(rows);
   }
 
   export(only?: 'unread' | 'bookmarked') {
