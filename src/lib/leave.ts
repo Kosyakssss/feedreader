@@ -69,19 +69,15 @@ export function depart(row: HTMLElement, entry: () => Entry): () => TransitionCo
     const draw = closing(row, false);
     const duration = motion.closeAt + time;
     const shown = (ms: number) => 1 - quintOut(clamp((ms - motion.closeAt) / time));
-    let played = false;
     return {
       duration,
       css: (left) => draw(shown((1 - left) * duration)),
       tick: (left) => {
         const ms = (1 - left) * duration;
-        // Back to the start once it has played: the row came back before it
-        // had gone, as when its press failed, and is put back as it was.
-        if (left === 1 && played) {
-          played = false;
-          return restore();
-        }
-        played ||= ms > 0;
+        // Back to the start on a row no longer leaving (Svelte makes a
+        // leaving row inert): it came back before it had gone, as when its
+        // press failed, and is put back as it was.
+        if (left === 1 && !row.inert) return restore();
         if (ms >= motion.closeAt) content.style.visibility = 'hidden';
         motion.play(ms, shown(ms));
       },
