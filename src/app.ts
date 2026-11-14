@@ -31,7 +31,7 @@ export function sameOrigin(request: Request): boolean {
 function compressed(request: Request, response: Response): Response {
   const type = response.headers.get('content-type') ?? '';
   const accepts = /\bgzip\b/.test(request.headers.get('accept-encoding') ?? '');
-  if (!/^text\//.test(type) || !accepts || !response.body) return response;
+  if (!type.startsWith('text/') || !accepts || !response.body) return response;
   const headers = new Headers(response.headers);
   headers.set('content-encoding', 'gzip');
   headers.delete('content-length');
