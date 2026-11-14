@@ -156,6 +156,7 @@ p {
 .keep button {
   position: relative;
   min-width: 3.75em;
+  min-height: 0;
   padding: 0 0.75em;
   border: 0;
   border-radius: 1em;
@@ -214,7 +215,8 @@ p {
   }
 }
 
-/* A line to type into, with its button. */
+/* Fields and buttons: one height and one size of text everywhere, a group
+   of them as wide as the page, and buttons in a row sharing it. */
 .field {
   display: flex;
   gap: 0.5rem;
@@ -223,26 +225,33 @@ p {
 
 .label {
   display: block;
-  margin-block-end: 0.375rem;
+  margin-block: 0.75rem 0.375rem;
   font-size: 0.875rem;
 }
 
-.label + .field {
-  margin-block-end: 1.25rem;
+input,
+button,
+.button {
+  box-sizing: border-box;
+  min-height: 2.75rem;
+  padding: 0 0.75em;
+  border: 1px solid var(--line);
+  border-radius: 0.5em;
+  font: inherit;
+  font-size: 1rem;
+}
+
+[hidden] {
+  display: none;
 }
 
 input {
   display: block;
-  box-sizing: border-box;
   width: 100%;
   flex: 1;
   min-width: 0;
-  padding: 0.45em 0.65em;
-  border: 1px solid var(--line);
-  border-radius: 0.5em;
   background: color-mix(in srgb, var(--link) 12%, transparent);
   color: var(--link);
-  font: inherit;
 }
 
 input::placeholder {
@@ -257,15 +266,13 @@ input:focus-visible {
 
 button,
 .button {
-  display: inline-block;
-  padding: 0.45em 0.9em;
-  border: 1px solid var(--line);
-  border-radius: 0.5em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   color: var(--link);
-  font: inherit;
-  line-height: inherit;
   text-decoration: none;
+  white-space: nowrap;
   cursor: pointer;
   transition: scale 0.1s;
 }
@@ -283,13 +290,15 @@ button.filled {
 }
 
 .buttons {
-  display: flex;
+  display: grid;
+  grid-auto-columns: 1fr;
+  grid-auto-flow: column;
   gap: 0.5rem;
-  margin-block-end: 1.25rem;
+  margin-block: 1rem 1.5rem;
 }
 
-/* A feed's name, a link to its site, with Edit at its end; and in its
-   place while editing, the name and the address. */
+/* A feed's name, a link to its site, with Edit at its end; and in their
+   place while editing, all its settings, a line closing them off. */
 .title {
   display: flex;
   gap: 1rem;
@@ -303,39 +312,76 @@ button.filled {
   overflow-wrap: anywhere;
 }
 
-.edit {
-  margin-block-end: 1.25rem;
+.edit,
+.editing .title {
+  display: none;
 }
 
-.edit input {
-  margin-block-end: 0.75rem;
-}
-
-.edit .buttons button {
-  flex: 1;
-}
-
-/* Stop following fills the width, and so does the question it asks first:
-   the same row, split in two, so nothing moves. */
-.stop {
-  margin-block: 0.25rem 2rem;
-}
-
-.stop > * {
-  flex: 1;
-  text-align: center;
-}
-
-.stop form button {
-  width: 100%;
-}
-
-.stop.sure > .button {
-  flex: 0 0 auto;
-}
-
-.stop.sure .filled {
+.editing .edit {
+  display: block;
   animation: fade 0.15s ease-out;
+}
+
+.edit .note {
+  margin-block: 0.75rem 0;
+}
+
+.edit .buttons {
+  margin-block: 1rem 0;
+}
+
+.edit .stop {
+  margin-block-start: 1.5rem;
+}
+
+.edit hr {
+  margin: 1.5rem 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+/* Stop following fills the width. Pressed, it fills in and gives half the
+   row to Cancel, which grows out of its side. */
+.buttons.stop {
+  grid-template-columns: 1fr 0fr;
+  gap: 0;
+  transition:
+    grid-template-columns 0.25s cubic-bezier(0.3, 0.7, 0.2, 1),
+    gap 0.25s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+
+.stop button {
+  min-width: 0;
+  overflow: hidden;
+  transition:
+    background-color 0.2s,
+    color 0.2s,
+    border-color 0.2s;
+}
+
+.stop button:last-child {
+  visibility: hidden;
+  padding: 0;
+  border-width: 0;
+  transition: visibility 0.25s;
+}
+
+.stop.sure {
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.stop.sure button:first-child {
+  border-color: var(--link);
+  background: var(--link);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.stop.sure button:last-child {
+  visibility: visible;
+  border-width: 1px;
+  transition: none;
 }
 
 @keyframes fade {
@@ -352,8 +398,7 @@ button.filled {
 }
 
 .found input {
-  margin-block: 0.375rem 0.75rem;
-  font-size: 1rem;
+  margin-block-start: 0.375rem;
 }
 
 .feeds {
@@ -372,7 +417,12 @@ button.filled {
   }
 
   .keep.fresh button,
-  .stop.sure .filled {
+  .editing .edit {
     animation: none;
+  }
+
+  .buttons.stop,
+  .stop button {
+    transition: none;
   }
 }

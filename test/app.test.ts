@@ -43,6 +43,9 @@ beforeEach(() => {
 
 afterEach(() => server.stop(true));
 
+const edit = (fields: Record<string, string>) =>
+  post('/feed/1/edit', { label: 'Example', ref: 'https://example.com/feed', mutes: '', cuts: '', ...fields });
+
 test('the home page lists new posts but not the backlog, and opening it wakes the feeds', async () => {
   const page = await (await get('/')).text();
   expect(page).toContain('Post fresh');
@@ -98,7 +101,7 @@ test('a change posted from another site is refused', async () => {
 test("a feed's page has its backlog too, and its muted words are saved cleaned up", async () => {
   const page = await (await get('/feed/1')).text();
   expect(page).toContain('Post backlog');
-  const saved = await post('/feed/1/mutes', { mutes: ' Sponsored, ad ,,' });
+  const saved = await edit({ mutes: ' Sponsored, ad ,,' });
   expect(saved.headers.get('location')).toBe('/lagan/feed/1');
   expect(store.mutes(1)).toEqual(['ad', 'sponsored']);
   expect((await get('/feed/999')).status).toBe(404);
@@ -126,19 +129,11 @@ test('the app lives under its path: the bare path leads into it, and anything el
 });
 
 test('what a feed cuts is taken out of its titles everywhere they are shown', async () => {
-  expect((await post('/feed/1/cuts', { cuts: 'post , ' })).headers.get('location')).toBe('/lagan/feed/1');
+  expect((await edit({ cuts: 'post , ' })).headers.get('location')).toBe('/lagan/feed/1');
   expect(store.cuts(1)).toEqual(['post']);
   const page = await (await get('/')).text();
   expect(page).toContain('>fresh</a>');
   expect(page).not.toContain('Post fresh');
-});
-
-test('stopping following asks first, in place for htmx and as the page without it', async () => {
-  const asked = await (await get('/feed/1/stop?sure')).text();
-  expect(asked).toContain('action="/lagan/feed/1/remove"');
-  expect(await (await get('/feed/1/stop')).text()).not.toContain('/remove');
-  expect(await (await get('/feed/1?stop')).text()).toContain('action="/lagan/feed/1/remove"');
-  expect(await (await get('/feed/1')).text()).not.toContain('action="/lagan/feed/1/remove"');
 });
 
 test('search sent by htmx answers with just what it found', async () => {
@@ -168,25 +163,26 @@ test('following what was looked over adds each feed under the name it was given'
   expect(store.sources().map((source) => source.label)).toEqual(['Alpha', 'Example', 'https://b.example/feed']);
 });
 
-test("a feed's name can be changed in place, and its page has edit and stop but a site's has neither", async () => {
-  expect(await (await get('/feed/1/edit')).text()).toContain('name="label" value="Example"');
-  const renamed = await post('/feed/1/edit', { label: 'Renamed', ref: 'https://example.com/feed' });
+test("a feed's edit saves its name and settings at once, and a failed one comes back open with what was typed", async () => {
+  const renamed = await edit({ label: 'Renamed', mutes: 'ad' });
   expect(renamed.headers.get('location')).toBe('/lagan/feed/1');
   expect(store.source(1)!.label).toBe('Renamed');
-  const site = store.keepPage('https://youtube.com/watch?v=1', 'A video - YouTube');
-  const page = await (await get(`/feed/${site.source_id}`)).text();
-  expect(page).toContain('href="https://youtube.com/"');
-  expect(page).toContain('/cuts"');
-  expect(page).not.toContain('/edit"');
-  expect(page).not.toContain('/stop');
+  expect(store.mutes(1)).toEqual(['ad']);
+  const failed = await edit({ label: 'Typed', ref: 'http://127.0.0.1:1/feed' });
+  expect(failed.status).toBe(422);
+  const page = await failed.text();
+  expect(page).toContain('class="head editing"');
+  expect(page).toContain('value="Typed"');
+  expect(page).toContain('Can’t follow that address: it isn’t on the public web.');
+  expect(store.source(1)!.label).toBe('Renamed');
 });
 
-test("a site's page is not a feed's: the feed-only addresses don't answer for it", async () => {
+test('a page kept from its link leads to its site, which has no page here', async () => {
   const site = store.keepPage('https://youtube.com/watch?v=1', 'A video').source_id;
-  for (const path of ['/edit', '/name', '/stop']) expect((await get(`/feed/${site}${path}`)).status).toBe(404);
+  expect(await (await get('/kept')).text()).toContain('href="https://youtube.com/" target="_blank"');
+  expect((await get(`/feed/${site}`)).status).toBe(404);
   expect((await post(`/feed/${site}/remove`, {})).status).toBe(404);
   expect((await post(`/feed/${site}/edit`, { label: 'x', ref: 'https://example.com/feed' })).status).toBe(404);
-  expect((await post(`/feed/${site}/cuts`, { cuts: '- YouTube' })).status).toBe(303);
 });
 
 test('keep sent by htmx clears what Chrome fetched ahead, which it has made stale', async () => {

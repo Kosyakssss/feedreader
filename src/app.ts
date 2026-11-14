@@ -8,7 +8,7 @@ import { readOpml, sourceFor, writeOpml } from '#lib/server/opml.ts';
 import { findFeed, pageTitle } from '#lib/server/sites.ts';
 import { scopes, type Source } from '#lib/server/store.ts';
 import { html, type Html } from '#lib/html.ts';
-import { address, pages, type Found } from './pages';
+import { address, pages, type Edited, type Found } from './pages';
 
 type Handler = (request: Bun.BunRequest) => Response | Promise<Response>;
 
@@ -52,8 +52,7 @@ const sent = (page: Html, status = 200) =>
 
 // Back to a page after a change, saying how it went.
 const see = (location: string) => new Response(null, { status: 303, headers: { Location: location } });
-const saying = (path: string, said: string) =>
-  `${path}${path.includes('?') ? '&' : '?'}said=${encodeURIComponent(said)}`;
+const saying = (path: string, said: string) => `${path}?said=${encodeURIComponent(said)}`;
 
 const text = (form: FormData, name: string) => String(form.get(name) ?? '').trim();
 const reason = (thrown: unknown) => (thrown instanceof Error ? thrown.message : String(thrown));
@@ -64,7 +63,9 @@ const fromHtmx = (request: Request) =>
 // Why no feed was found, in plain words.
 function plainly(thrown: unknown): string {
   const said = reason(thrown);
-  if (/ENOTFOUND|EAI_AGAIN|ECONN|timed? ?out|abort|certificate|TLS|reach/i.test(said)) return 'couldn’t reach it';
+  if (/ENOTFOUND|EAI_AGAIN|ECONN|connect|timed? ?out|abort|certificate|TLS|reach/i.test(said))
+    return 'couldn’t reach it';
+  if (/not a public address/i.test(said)) return 'it isn’t on the public web';
   const status = /^HTTP (\d+)/.exec(said)?.[1];
   if (status) return status === '404' ? 'nothing at that address' : `the site answered ${status}`;
   return 'no feed there';
@@ -87,30 +88,34 @@ export function app({ store, wake, follow }: Lagan, base = '') {
   const followed = (ref: string) => store.sources().find((source) => source.ref === ref);
 
   // The feed an address names, and what to do with it if there is one. A
-  // site pages were kept from is no feed, unless the address says it may be.
+  // site pages were kept from is no feed.
   const withSource =
-    (
-      handler: (source: Source, request: Bun.BunRequest) => Response | Promise<Response>,
-      kinds: Source['kind'][] = ['rss', 'atproto'],
-    ): Handler =>
+    (handler: (source: Source, request: Bun.BunRequest) => Response | Promise<Response>): Handler =>
     (request) => {
       const id = Number((request.params as { id?: string }).id);
       const source = Number.isInteger(id) ? store.source(id) : null;
-      return source && kinds.includes(source.kind) ? handler(source, request) : missing();
+      return source && source.kind !== 'page' ? handler(source, request) : missing();
     };
-  const anySource = ['rss', 'atproto', 'page'] satisfies Source['kind'][];
 
-  // A feed's or a site's page, asking whatever the address asks.
-  function feedPage(source: Source, request: Request): Response {
-    const list = store.entries(scopes.feed(source.id));
-    if (source.kind === 'page') return sent(views.site(counts(), source, store.cuts(source.id), list));
-    const settings = { mutes: store.mutes(source.id), cuts: store.cuts(source.id) };
-    const asks = query(request);
-    // Back from an edit that failed, with what was typed.
-    const typed = { label: asks.get('label') ?? source.label, ref: asks.get('ref') ?? undefined };
-    const ask = { edit: asks.has('edit'), stop: asks.has('stop'), note: asks.get('said'), typed };
-    return sent(views.feed(counts(), source, settings, list, ask));
-  }
+  // A feed's page; after an edit that failed, with the edit open, what was
+  // typed, and why.
+  const feedPage = (source: Source, failed?: { note: string; typed: Edited }) =>
+    sent(
+      views.feed(
+        counts(),
+        source,
+        store.entries(scopes.feed(source.id)),
+        {
+          label: source.label,
+          ref: address(source),
+          mutes: store.mutes(source.id).join(', '),
+          cuts: store.cuts(source.id).join(', '),
+          ...failed?.typed,
+        },
+        failed?.note,
+      ),
+      failed ? 422 : 200,
+    );
 
   // The page a keep was pressed on, to go back to. Only its path is used,
   // so it can't send anyone anywhere else.
@@ -211,61 +216,40 @@ export function app({ store, wake, follow }: Lagan, base = '') {
       },
     },
 
-    [at('/feed/:id')]: { GET: withSource((source, request) => feedPage(source, request), anySource) },
+    [at('/feed/:id')]: { GET: withSource((source) => feedPage(source)) },
 
-    // A feed's name, or editing it in its place.
-    [at('/feed/:id/name')]: { GET: withSource((source) => sent(views.name(source))) },
+    // Everything about a feed at once: its name, its address (a feed there,
+    // of whatever kind), its muted words and its cuts.
     [at('/feed/:id/edit')]: {
-      GET: withSource((source) => sent(views.edit(source))),
-      // A new name, and maybe a new address: a feed there, of whatever kind.
       POST: withSource(async (source, request) => {
         const form = await request.formData();
-        const [label, ref] = [text(form, 'label'), text(form, 'ref')];
-        // Back to the form, with what was typed and what went wrong.
-        const again = (note: string) =>
-          see(
-            saying(
-              at(`/feed/${source.id}?edit&label=${encodeURIComponent(label)}&ref=${encodeURIComponent(ref)}`),
-              note,
-            ),
-          );
+        const typed = {
+          label: text(form, 'label'),
+          ref: text(form, 'ref'),
+          mutes: text(form, 'mutes'),
+          cuts: text(form, 'cuts'),
+        };
+        const failed = (note: string) => feedPage(source, { note, typed });
         // The address as the form showed it is no change, however it is written.
-        if (ref && ref !== source.ref && ref !== address(source)) {
+        if (typed.ref && typed.ref !== source.ref && typed.ref !== address(source)) {
           let found;
           try {
-            found = await findFeed(ref);
+            found = await findFeed(typed.ref);
           } catch (thrown) {
-            return again(`No feed there: ${plainly(thrown)}.`);
+            return failed(`Can’t follow that address: ${plainly(thrown)}.`);
           }
           const other = followed(found.ref);
-          if (other && other.id !== source.id) return again(`That is ${other.label}, followed already.`);
+          if (other && other.id !== source.id) return failed(`That is ${other.label}, followed already.`);
           if (found.ref !== source.ref) {
             store.readdress(source.id, found.kind, found.ref);
             follow(source.id);
           }
         }
-        store.rename(source.id, label || source.label);
+        store.rename(source.id, typed.label || source.label);
+        store.setMutes(source.id, typed.mutes.split(','));
+        store.setCuts(source.id, typed.cuts.split(','));
         return see(at(`/feed/${source.id}`));
       }),
-    },
-
-    // Asking whether to stop following, or no longer asking.
-    [at('/feed/:id/stop')]: {
-      GET: withSource((source, request) => sent(views.stop(source, query(request).has('sure')))),
-    },
-
-    [at('/feed/:id/mutes')]: {
-      POST: withSource(async (source, request) => {
-        store.setMutes(source.id, text(await request.formData(), 'mutes').split(','));
-        return see(at(`/feed/${source.id}`));
-      }),
-    },
-
-    [at('/feed/:id/cuts')]: {
-      POST: withSource(async (source, request) => {
-        store.setCuts(source.id, text(await request.formData(), 'cuts').split(','));
-        return see(at(`/feed/${source.id}`));
-      }, anySource),
     },
 
     // What was kept from it stays, as pages of its site.

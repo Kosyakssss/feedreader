@@ -12,13 +12,12 @@ const USAGE = `lagan entries  [--kept]               entries, newest first
 lagan keep     <entry id>...          keep entries
 lagan unkeep   <entry id>...          stop keeping them
 lagan feeds                           feeds followed, with their settings
-lagan sites                           sites pages were kept from, with theirs
 lagan follow   <link | @handle>...    follow feeds, or the first feed of a site
-lagan rename   <feed id> <name>       rename a feed or a site
+lagan rename   <feed id> <name>       rename a feed
 lagan move     <feed id> <link>       point a feed at another address
 lagan unfollow <feed id>              stop following; what was kept stays
 lagan mutes    <feed id> [word]...    its muted words, or set them: entries with any are hidden ("" for none)
-lagan cuts     <id> [text]...         a feed's or site's cuts, or set them: taken out of titles ("" for none)
+lagan cuts     <feed id> [text]...    its cuts, or set them: taken out of its titles ("" for none)
 lagan opml     export | import <file>
 lagan check                           fetch every feed, without saving, and report
 
@@ -44,11 +43,10 @@ function usage(): never {
   process.exit(2);
 }
 
-// The feed or site an id names.
-function sourceOf(id: string | undefined, kinds: Source['kind'][] = ['rss', 'atproto', 'page']): Source {
+// The feed an id names.
+function feedOf(id: string | undefined): Source {
   const source = id && /^\d+$/.test(id) ? store.source(Number(id)) : null;
-  if (!source || !kinds.includes(source.kind))
-    throw new Error(`No ${kinds.includes('page') ? 'feed or site' : 'feed'} ${id ?? ''}`);
+  if (!source || source.kind === 'page') throw new Error(`No feed ${id ?? ''}`);
   return source;
 }
 
@@ -86,7 +84,7 @@ async function follow(): Promise<void> {
 }
 
 async function move(): Promise<void> {
-  const source = sourceOf(rest[0], ['rss', 'atproto']);
+  const source = feedOf(rest[0]);
   if (!rest[1]) usage();
   const { kind, ref } = await findFeed(rest[1]);
   if (ref === source.ref) return void console.log(`${source.label} already fetches ${ref}`);
@@ -139,10 +137,9 @@ const commands: Record<string, () => void | Promise<void>> = {
   keep: keeping(true),
   unkeep: keeping(false),
   feeds: () => print(store.sources().map(withSettings)),
-  sites: () => print(store.sites().map(withSettings)),
   follow,
   rename: () => {
-    const source = sourceOf(rest[0]);
+    const source = feedOf(rest[0]);
     const name = rest.slice(1).join(' ').trim();
     if (!name) usage();
     store.rename(source.id, name);
@@ -150,16 +147,16 @@ const commands: Record<string, () => void | Promise<void>> = {
   },
   move,
   unfollow: () => {
-    const source = sourceOf(rest[0], ['rss', 'atproto']);
+    const source = feedOf(rest[0]);
     store.removeSource(source.id);
     console.log(`Stopped following ${source.label}`);
   },
   mutes: () => {
-    const source = sourceOf(rest[0], ['rss', 'atproto']);
+    const source = feedOf(rest[0]);
     print(rest.length > 1 ? store.setMutes(source.id, words()) : store.mutes(source.id));
   },
   cuts: () => {
-    const source = sourceOf(rest[0]);
+    const source = feedOf(rest[0]);
     print(rest.length > 1 ? store.setCuts(source.id, words()) : store.cuts(source.id));
   },
   opml,

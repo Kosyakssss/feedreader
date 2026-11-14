@@ -109,10 +109,10 @@ test('a link kept is stored once: an entry a feed already has is kept instead', 
   expect(store.keepPage('https://elsewhere.example/x', 'Elsewhere')).toMatchObject({
     kept: 1,
     feed: 'elsewhere.example',
+    site: 'elsewhere.example',
   });
   expect(titles(scopes.kept).toSorted()).toEqual(['Elsewhere', 'Post a']);
   expect(store.sources().map((source) => source.label)).toEqual(['Example']);
-  expect(store.sites().map((site) => site.label)).toEqual(['elsewhere.example']);
 });
 
 test('a database from when entries had a state, bookmarked one of them, keeps every entry, what was kept and the backlog', () => {
@@ -233,12 +233,11 @@ test('a database from when entries had a read state and bookmarked was a column,
   old.close();
   try {
     const migrated = new Store(path);
-    expect(migrated.entries(scopes.kept).map((entry) => [entry.title, entry.feed])).toEqual([
+    expect(migrated.entries(scopes.kept).map((entry) => [entry.title, entry.site])).toEqual([
       ['Video', 'youtube.com'],
-      ['Kept post', 'Example'],
+      ['Kept post', null],
     ]);
     expect(migrated.entries(scopes.latest).map((entry) => entry.title)).toEqual(['Video', 'Kept post']);
-    expect(migrated.sites().map((site) => site.ref)).toEqual(['youtube.com']);
   } finally {
     for (const suffix of ['', '-wal', '-shm'])
       Bun.file(path + suffix)
