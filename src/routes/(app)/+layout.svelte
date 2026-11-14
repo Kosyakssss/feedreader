@@ -1,5 +1,5 @@
 <script lang="ts">
-  import '../app.css';
+  import '../../app.css';
   import { flushSync, onMount } from 'svelte';
   import { goto, onNavigate } from '$app/navigation';
   import { page } from '$app/state';
@@ -16,8 +16,10 @@
 
   let { data, children }: LayoutProps = $props();
 
-  // Where in the app this page is, whatever path the app itself is served under.
-  const here = $derived(page.route.id === '/feed/[id]' ? feedPath(Number(page.params.id)) : (page.route.id ?? '/'));
+  // Where in the app this page is, whatever path the app itself is served
+  // under, and outside the group these pages share.
+  const route = $derived(page.route.id?.replace('/(app)', '') || '/');
+  const here = $derived(route === '/feed/[id]' ? feedPath(Number(page.params.id)) : route);
   const trail = $derived(trailFor(here, library.ready ? library.sources : data.feeds));
 
   // The whole library comes to the device as the app starts, and stays current.
@@ -140,6 +142,13 @@
   onkeydown={key}
   ontouchstart={() => {}}
 />
+
+<!-- Before any CSS arrives, the window is already the app's colour, light or
+     dark, and so are the browser's bars where it colours them. -->
+<svelte:head>
+  <meta name="theme-color" content="#fffcf0" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#100f0f" media="(prefers-color-scheme: dark)" />
+</svelte:head>
 
 <div class="header-glass"></div>
 <header>

@@ -127,6 +127,6 @@ test("a feed's muted words are saved cleaned up, and only as a list of words", a
 test('removing a feed takes it and its entries away', () => {
   expect((removeFeed(event({ id: '1' })) as Response).status).toBe(204);
   expect(store.sources()).toEqual([]);
-  expect(store.entries(scopes.timeline)).toEqual([]);
+  expect(store.entries(scopes.latest)).toEqual([]);
   expect(statusOf(() => removeFeed(event({ id: '1' })))).toBe(404);
 });

@@ -84,7 +84,6 @@ class Library {
 
   // What belongs on each page, by the same rules as the server's lists.
   unread = (entry: Entry) => entry.state === 'unread' && !entry.bookmarked && !this.muted(entry);
-  timeline = (entry: Entry) => entry.state !== 'none' && !this.muted(entry);
   bookmarks = (entry: Entry) => entry.bookmarked === 1;
   feed = (id: number) => (entry: Entry) => entry.source_id === id;
   source = (id: number) => this.sources.find((source) => source.id === id);

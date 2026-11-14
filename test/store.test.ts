@@ -34,7 +34,7 @@ beforeEach(() => {
 test("a feed's first fetch is backlog, later posts are unread", () => {
   saveItems(item('old'));
   expect(titles(scopes.unread)).toEqual([]);
-  expect(titles(scopes.timeline)).toEqual([]);
+  expect(titles(scopes.latest)).toEqual([]);
   expect(titles(scopes.feed(feed.id))).toEqual(['Post old']);
 
   saveItems(item('new', { published: JAN + 1000 }));
@@ -93,7 +93,7 @@ test('bookmarking something never seen makes it read, and taking the bookmark of
   expect(titles(scopes.bookmarks)).toEqual(['Post a']);
   expect(store.mark([id], { bookmarked: false })).toMatchObject([{ state: 'read', bookmarked: 0 }]);
   expect(titles(scopes.bookmarks)).toEqual([]);
-  expect(titles(scopes.timeline)).toEqual(['Post a']);
+  expect(titles(scopes.latest)).toEqual(['Post a']);
 });
 
 test('a bookmarked entry leaves Unread but stays unread, and comes back when the bookmark comes off', () => {
@@ -124,7 +124,7 @@ test("a feed's muted words keep matching entries out of Unread and the timeline,
   saveItems(item('a', { title: 'Sponsored: buy this', published: JAN + 1000 }), item('b', { published: JAN + 2000 }));
   expect(store.setMutes(feed.id, [' SPONSORED ', 'sponsored', ''])).toEqual(['sponsored']);
   expect(titles(scopes.unread)).toEqual(['Post b']);
-  expect(titles(scopes.timeline)).toEqual(['Post b']);
+  expect(titles(scopes.latest)).toEqual(['Post b']);
   expect(titles(scopes.feed(feed.id))).toContain('Sponsored: buy this');
 });
 
@@ -158,7 +158,7 @@ test('a database from before bookmarks were a flag of their own keeps every entr
     const migrated = new Store(path);
     expect(migrated.entries(scopes.bookmarks)).toMatchObject([{ title: 'Kept', state: 'read', bookmarked: 1 }]);
     expect(migrated.entries(scopes.unread)).toMatchObject([{ title: 'New', bookmarked: 0 }]);
-    expect(new Store(path).entries(scopes.timeline)).toHaveLength(2); // opening it again changes nothing
+    expect(new Store(path).entries(scopes.latest)).toHaveLength(2); // opening it again changes nothing
   } finally {
     for (const suffix of ['', '-wal', '-shm'])
       Bun.file(path + suffix)

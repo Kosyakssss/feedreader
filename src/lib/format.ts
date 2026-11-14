@@ -26,7 +26,3 @@ export function dateLabel(ms: number): string {
     sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' },
   );
 }
-
-// How many entries the timeline shows at a time, the server's first step and
-// each one after it on the device.
-export const TIMELINE_STEP = 200;

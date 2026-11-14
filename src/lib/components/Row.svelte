@@ -83,7 +83,7 @@
       <small>
         <span class="source">
           {#if entry.page}{source}{:else}<a
-              href={resolve('/feed/[id]', { id: String(entry.source_id) })}
+              href={resolve('/(app)/feed/[id]', { id: String(entry.source_id) })}
               draggable={choosing ? 'false' : undefined}>{source}</a
             >{/if}
         </span>

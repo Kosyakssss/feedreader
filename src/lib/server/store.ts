@@ -1,6 +1,6 @@
 // Everything that reads or writes the database.
 import { Database, type SQLQueryBindings } from 'bun:sqlite';
-import { displayTitle, TIMELINE_STEP } from '../format';
+import { displayTitle } from '../format';
 import type { FetchResult } from './fetch';
 
 // none: from before the feed was followed, shown only on its own page.
@@ -42,7 +42,8 @@ const NOT_MUTED = `NOT EXISTS (SELECT 1 FROM mutes m WHERE m.source_id = entries
 
 export const scopes = {
   unread: { where: `state = 'unread' AND bookmarked = 0 AND ${NOT_MUTED}` },
-  timeline: { where: `state <> 'none' AND ${NOT_MUTED}`, limit: TIMELINE_STEP },
+  // The newest hundred, read or not: everything older is the archive.
+  latest: { where: `state <> 'none' AND ${NOT_MUTED}`, limit: 100 },
   bookmarks: { where: 'bookmarked = 1' },
   feed: (id: number): Scope => ({ where: 'source_id = ?', args: [id] }),
 } satisfies Record<string, Scope | ((id: number) => Scope)>;

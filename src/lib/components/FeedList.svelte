@@ -15,7 +15,7 @@
   {#each feeds as feed (feed.id)}
     <li>
       <div class="row">
-        <a href={resolve('/feed/[id]', { id: String(feed.id) })}>{feed.label}</a>
+        <a href={resolve('/(app)/feed/[id]', { id: String(feed.id) })}>{feed.label}</a>
         {#if feed.folder}<span class="muted">{feed.folder}</span>{/if}
         {#if feed.error}<span class="failed">{feed.error}</span>{/if}
         {#if mutes}

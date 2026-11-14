@@ -40,7 +40,7 @@
 <div class="card-body">
   <div><button onclick={onremove}>Remove bookmark</button></div>
   {#if !entry.page}
-    <p class="muted">From <a href={resolve('/feed/[id]', { id: String(entry.source_id) })}>{entry.feed}</a></p>
+    <p class="muted">From <a href={resolve('/(app)/feed/[id]', { id: String(entry.source_id) })}>{entry.feed}</a></p>
   {:else if looking}
     <p class="muted">Looking for feeds on {site}…</p>
   {:else if feeds.length}
