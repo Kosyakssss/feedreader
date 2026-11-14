@@ -17,8 +17,6 @@ import type { Entry, Mark, Source } from '#lib/server/store.ts';
 
 export type Toggle = 'read' | 'bookmark';
 
-export const TIMELINE_STEP = 200; // how many more entries the timeline shows each time
-
 const newestFirst = (a: Entry, b: Entry) => b.published_at - a.published_at || b.id - a.id;
 
 const HELD = 'lagan:held'; // where opened entries wait while this tab is on another site

@@ -1,6 +1,6 @@
 // Everything that reads or writes the database.
 import { Database, type SQLQueryBindings } from 'bun:sqlite';
-import { displayTitle } from '../format';
+import { displayTitle, TIMELINE_STEP } from '../format';
 import type { FetchResult } from './fetch';
 
 // none: from before the feed was followed, shown only on its own page.
@@ -39,11 +39,10 @@ export type Scope = { where: string; args?: SQLQueryBindings[]; limit?: number }
 
 // Entries whose title has one of their feed's muted words in it.
 const NOT_MUTED = `NOT EXISTS (SELECT 1 FROM mutes m WHERE m.source_id = entries.source_id AND instr(lower(entries.title), m.word) > 0)`;
-export const TIMELINE_PAGE = 200;
 
 export const scopes = {
   unread: { where: `state = 'unread' AND bookmarked = 0 AND ${NOT_MUTED}` },
-  timeline: { where: `state <> 'none' AND ${NOT_MUTED}`, limit: TIMELINE_PAGE },
+  timeline: { where: `state <> 'none' AND ${NOT_MUTED}`, limit: TIMELINE_STEP },
   bookmarks: { where: 'bookmarked = 1' },
   feed: (id: number): Scope => ({ where: 'source_id = ?', args: [id] }),
 } satisfies Record<string, Scope | ((id: number) => Scope)>;

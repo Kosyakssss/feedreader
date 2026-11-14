@@ -1,6 +1,7 @@
 <script lang="ts">
   import EntryList from '#lib/components/EntryList.svelte';
-  import { library, TIMELINE_STEP } from '#lib/library.svelte.ts';
+  import { TIMELINE_STEP } from '#lib/format.ts';
+  import { library } from '#lib/library.svelte.ts';
   import type { PageProps } from './$types';
 
   let { data }: PageProps = $props();
