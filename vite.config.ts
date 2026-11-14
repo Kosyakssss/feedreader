@@ -24,6 +24,8 @@ export default defineConfig(({ mode }) => {
         },
         adapter: adapter({ envPrefix: 'LAGAN_', precompress: true }),
         paths: { origin, base },
+        // A page's CSS comes inside it, so the page needs no second request.
+        inlineStyleThreshold: Infinity,
       }),
     ],
     server: { host, port, strictPort: true },

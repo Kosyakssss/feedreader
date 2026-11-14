@@ -23,5 +23,19 @@ export const handle: Handle = async ({ event, resolve }) => {
   event.locals.live = lagan.live;
   event.locals.wake = lagan.wake;
   event.locals.follow = lagan.follow;
-  return resolve(event);
+  return compressed(event.request, await resolve(event));
 };
+
+// Pages go out gzipped, small enough to arrive in the connection's first
+// round trip. The server built for Bun only compresses its static files.
+function compressed(request: Request, response: Response): Response {
+  const html = response.headers.get('content-type')?.startsWith('text/html');
+  const accepts = /\bgzip\b/.test(request.headers.get('accept-encoding') ?? '');
+  if (!html || !accepts || !response.body || response.headers.has('content-encoding')) return response;
+  const headers = new Headers(response.headers);
+  headers.set('content-encoding', 'gzip');
+  headers.delete('content-length');
+  headers.append('vary', 'accept-encoding');
+  const body = response.body.pipeThrough(new CompressionStream('gzip'));
+  return new Response(body, { status: response.status, statusText: response.statusText, headers });
+}
