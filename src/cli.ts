@@ -64,7 +64,7 @@ function keeping(kept: boolean) {
   return () => {
     const ids = rest.map(Number);
     if (!ids.length || !ids.every(Number.isInteger)) usage();
-    print(store.keep(ids, kept).map(({ id, title, kept }) => ({ id, title, kept: kept === 1 })));
+    print(store.keep(ids, kept).map((entry) => ({ id: entry.id, title: entry.title, kept: entry.kept === 1 })));
   };
 }
 
