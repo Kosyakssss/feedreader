@@ -1,6 +1,7 @@
 // Every page, as HTML. Each one is whole by itself, its CSS inside it. htmx,
 // cached after the first page, saves a few things from reloading the page:
-// keep, editing a feed's name, stopping following, and search as it is typed. Each still works as a plain link or form without it.
+// keep, editing a feed's name, stopping following, and search as it is
+// typed. Each still works as a plain link or form without it.
 import { displayTitle } from '#lib/format.ts';
 import { html, raw, type Html, type Part } from '#lib/html.ts';
 import type { Entry, Source } from '#lib/server/store.ts';
