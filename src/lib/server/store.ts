@@ -36,7 +36,6 @@ export type Entry = {
 export type Mark = { read?: boolean; bookmarked?: boolean };
 
 export type Scope = { where: string; args?: SQLQueryBindings[]; limit?: number };
-export type Cursor = { published_at: number; id: number }; // where a page of entries ended
 
 // Entries whose title has one of their feed's muted words in it.
 const NOT_MUTED = `NOT EXISTS (SELECT 1 FROM mutes m WHERE m.source_id = entries.source_id AND instr(lower(entries.title), m.word) > 0)`;
@@ -164,26 +163,16 @@ export class Store {
 
   // Adds a feed, or finds it if it is already followed. Returns its id.
   addSource(kind: Source['kind'], ref: string, label: string, folder = ''): number {
-    const added = this.db.run('INSERT OR IGNORE INTO sources (kind, ref, label, folder) VALUES (?, ?, ?, ?)', [
-      kind,
-      ref,
-      label,
-      folder,
-    ]);
-    if (added.changes) this.onChange({ sources: true });
+    this.addSources([{ kind, ref, label, folder }]);
     return this.db.query<{ id: number }, [string]>('SELECT id FROM sources WHERE ref = ?').get(ref)!.id;
   }
 
   // Adds the feeds of a list, skipping any already followed. Returns the new ids.
   addSources(sources: Pick<Source, 'kind' | 'ref' | 'label' | 'folder'>[]): number[] {
+    const insert = this.db.query('INSERT OR IGNORE INTO sources (kind, ref, label, folder) VALUES (?, ?, ?, ?)');
     const ids = this.db.transaction(() =>
       sources.flatMap((source) => {
-        const added = this.db.run('INSERT OR IGNORE INTO sources (kind, ref, label, folder) VALUES (?, ?, ?, ?)', [
-          source.kind,
-          source.ref,
-          source.label,
-          source.folder,
-        ]);
+        const added = insert.run(source.kind, source.ref, source.label, source.folder);
         return added.changes ? [Number(added.lastInsertRowid)] : [];
       }),
     )();
@@ -268,16 +257,15 @@ export class Store {
     return items.filter((item) => known.get(sourceId, item.guid, item.url, item.title, item.published ?? 0)).length;
   }
 
-  // Newest first. With `after`, the entries that come after that one.
-  entries(scope: Scope, after?: Cursor): Entry[] {
+  // Newest first.
+  entries(scope: Scope): Entry[] {
     const limit = scope.limit ? `LIMIT ${scope.limit}` : '';
-    const from = after ? 'AND (published_at, id) < (?, ?)' : '';
     return this.db
       .query<Entry, SQLQueryBindings[]>(
-        `SELECT ${ROW} FROM (SELECT * FROM entries WHERE ${scope.where} ${from} ORDER BY published_at DESC, id DESC ${limit}) e
+        `SELECT ${ROW} FROM (SELECT * FROM entries WHERE ${scope.where} ORDER BY published_at DESC, id DESC ${limit}) e
          JOIN sources s ON s.id = e.source_id ORDER BY e.published_at DESC, e.id DESC`,
       )
-      .all(...(scope.args ?? []), ...(after ? [after.published_at, after.id] : []));
+      .all(...(scope.args ?? []));
   }
 
   entry(id: number): Entry | null {
@@ -292,12 +280,7 @@ export class Store {
     if (!typed.length) return [];
     const exact: Entry[] = [];
     const partial: Entry[] = [];
-    const everything = this.db
-      .query<Entry, []>(
-        `SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id ORDER BY e.published_at DESC, e.id DESC`,
-      )
-      .all();
-    for (const entry of everything) {
+    for (const entry of this.allEntries()) {
       const found = matchWords(typed, wordsOf(displayTitle(entry)));
       if (found === 'exact') exact.push(entry);
       else if (found === 'partial') partial.push(entry);
@@ -345,14 +328,7 @@ export class Store {
     const known = this.db
       .query<{ id: number }, [string]>('SELECT id FROM entries WHERE url = ? ORDER BY id LIMIT 1')
       .get(url);
-    if (known) {
-      this.db.run(
-        `UPDATE entries SET bookmarked = 1, state = CASE state WHEN 'none' THEN 'read' ELSE state END WHERE id = ?`,
-        [known.id],
-      );
-      this.onChange({ entries: [known.id] });
-      return this.entry(known.id)!;
-    }
+    if (known) return this.mark([known.id], { bookmarked: true })[0]!;
     const { id } = this.db
       .query<{ id: number }, [number, string, string, number, string]>(
         `INSERT INTO entries (source_id, guid, url, published_at, state, bookmarked, title) VALUES (?, ?, ?, ?, 'read', 1, ?) RETURNING id`,
@@ -366,11 +342,6 @@ export class Store {
   private pageSource(): number {
     this.db.run(`INSERT OR IGNORE INTO sources (kind, ref, label) VALUES ('page', 'pages', 'Pages')`);
     return this.db.query<{ id: number }, []>(`SELECT id FROM sources WHERE kind = 'page'`).get()!.id;
-  }
-
-  setTitle(id: number, title: string): void {
-    this.db.run('UPDATE entries SET title = ? WHERE id = ?', [title, id]);
-    this.onChange({ entries: [id] });
   }
 
   // Removes a feed and its entries. Bookmarks stay, as bookmarked pages.
@@ -403,14 +374,18 @@ export class Store {
   }
 
   // Everything a copy of the app shows: every entry, and every feed with its
-  // muted words. Searching stays here, with the full text.
+  // muted words.
   library(): { entries: Entry[]; sources: Source[]; mutes: Record<number, string[]> } {
-    const entries = this.db
+    return { entries: this.allEntries(), sources: this.sources(), mutes: this.mutesBySource() };
+  }
+
+  // Every entry, newest first, as rows show them.
+  private allEntries(): Entry[] {
+    return this.db
       .query<Entry, []>(
         `SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id ORDER BY e.published_at DESC, e.id DESC`,
       )
       .all();
-    return { entries, sources: this.sources(), mutes: this.mutesBySource() };
   }
 
   entriesById(ids: number[]): Entry[] {

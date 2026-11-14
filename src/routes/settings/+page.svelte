@@ -1,6 +1,5 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import { refreshAll } from '$app/navigation';
 
   let result = $state<{ message: string; failed?: boolean }>();
 
@@ -21,7 +20,6 @@
     }
     const { found, added }: { found: number; added: number } = await response.json();
     result = { message: `${found} feeds in the file, ${added} new. ${added ? 'They are being fetched now.' : ''}` };
-    await refreshAll();
   }
 </script>
 

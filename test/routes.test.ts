@@ -5,7 +5,6 @@ import { Live } from '#lib/server/live.ts';
 import { scopes, Store } from '#lib/server/store.ts';
 import { handle } from '../src/hooks.server';
 import { POST as mark } from '../src/routes/api/mark/+server';
-import { GET as timeline } from '../src/routes/api/timeline/+server';
 import { DELETE as removeFeed } from '../src/routes/api/feeds/[id]/+server';
 import { PUT as setMutes } from '../src/routes/api/feeds/[id]/mutes/+server';
 import { GET as search } from '../src/routes/api/search/+server';
@@ -93,14 +92,6 @@ test('marking answers with the entries as they now are, and refuses anything but
     null,
   ])
     await expect(post(bad)).rejects.toMatchObject({ status: 400 });
-});
-
-test('the timeline goes on after the last entry shown, and a bad cursor is refused', async () => {
-  const [newest] = store.entries(scopes.timeline);
-  const after = `${newest!.published_at}:${newest!.id}`;
-  const page = await (timeline(event({}, `http://lagan.test/api/timeline?after=${after}`)) as Response).json();
-  expect(page).toEqual({ entries: [], more: false });
-  expect(statusOf(() => timeline(event({}, 'http://lagan.test/api/timeline?after=soon')))).toBe(400);
 });
 
 test('search finds feeds and entries in any state, and an empty search finds nothing', async () => {

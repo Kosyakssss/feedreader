@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { at } from '#lib/paths.ts';
   import { fitTitle } from '#lib/fit-title.ts';
   import { depart, enter } from '#lib/leave.ts';
-  import { capTitle, dateLabel, displayTitle, feedPath } from '#lib/format.ts';
+  import { resolve } from '$app/paths';
+  import { capTitle, dateLabel, displayTitle } from '#lib/format.ts';
   import { library, type Toggle } from '#lib/library.svelte.ts';
   import type { Selection } from '#lib/selection.svelte.ts';
   import type { Entry } from '#lib/server/store.ts';
@@ -83,7 +83,7 @@
       <small>
         <span class="source">
           {#if entry.page}{source}{:else}<a
-              href={at(feedPath(entry.source_id))}
+              href={resolve('/feed/[id]', { id: String(entry.source_id) })}
               draggable={choosing ? 'false' : undefined}>{source}</a
             >{/if}
         </span>

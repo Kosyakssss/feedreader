@@ -10,7 +10,6 @@ type Fetch = typeof fetch;
 export async function fromServer<T>(fetch: Fetch, query: string): Promise<T | null> {
   if (browser && library.ready) return null;
   const response = await fetch(resolve(`/api/list?${query}`));
-  if (response.status === 404) error(404, 'Not found');
   if (!response.ok) error(response.status, 'Could not load this page');
   return (await response.json()) as T;
 }

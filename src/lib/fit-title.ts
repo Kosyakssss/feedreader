@@ -3,7 +3,7 @@ import type { Attachment } from 'svelte/attachments';
 import { shorten } from './shorten';
 
 const titles = new Map<HTMLAnchorElement, string>(); // each link on the page and its whole title
-let widths = new WeakMap<Element, number>(); // measured once per list, until the window resizes
+let widths = new WeakMap<Element, number>(); // measured once per list, until the window resizes, as is the text
 let canvas: CanvasRenderingContext2D | null = null;
 
 const measure = (text: string) => canvas!.measureText(text).width;
@@ -17,15 +17,15 @@ function fit(link: HTMLAnchorElement, title: string): void {
     // with, not whatever it has partway through their coming in.
     width = list.clientWidth - (parseFloat(getComputedStyle(list).getPropertyValue('--check-room')) || 0);
     widths.set(list, width);
-  }
-  if (!width) return; // not on screen yet
-
-  if (!canvas) {
-    canvas = document.createElement('canvas').getContext('2d')!;
+    // The text grows with the window, so it is measured again with it.
+    if (!canvas) {
+      canvas = document.createElement('canvas').getContext('2d')!;
+      addEventListener('resize', refitTitles);
+    }
     const style = getComputedStyle(link);
     canvas.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-    addEventListener('resize', refitTitles);
   }
+  if (!width) return; // not on screen yet
 
   const room = width - 1;
   const shown = measure(title) > room ? shorten(title, room, measure) : title;

@@ -1,8 +1,5 @@
 <script lang="ts">
-  import { at } from '#lib/paths.ts';
   import { resolve } from '$app/paths';
-  import { refreshAll } from '$app/navigation';
-  import { feedPath } from '#lib/format.ts';
   import type { Entry } from '#lib/server/store.ts';
 
   type Found = { url: string; title: string; followed: boolean; failed?: boolean };
@@ -13,10 +10,12 @@
   let looking = $state(true);
   let feeds = $state<Found[]>([]);
 
-  // A page from no feed: look for the feeds its site offers, once, on opening.
+  // A page from no feed: look for the feeds its site offers, once, on
+  // opening; not again each time the entry is read or unread meanwhile.
+  const page = $derived(entry.page ? entry.url : null);
   $effect(() => {
-    if (!entry.page) return;
-    fetch(at(`/api/discover?url=${encodeURIComponent(entry.url)}`))
+    if (!page) return;
+    fetch(resolve(`/api/discover?url=${encodeURIComponent(page)}`))
       .then((response) => response.json())
       .then((found: { feeds: Found[] }) => (feeds = found.feeds))
       .catch(() => (feeds = []))
@@ -34,15 +33,14 @@
       feed.failed = true;
       return;
     }
-    feed.followed = true;
-    await refreshAll(); // the new feed joins the breadcrumb menus
+    feed.followed = true; // the live library brings it to the breadcrumb menus
   }
 </script>
 
 <div class="card-body">
   <div><button onclick={onremove}>Remove bookmark</button></div>
   {#if !entry.page}
-    <p class="muted">From <a href={at(feedPath(entry.source_id))}>{entry.feed}</a></p>
+    <p class="muted">From <a href={resolve('/feed/[id]', { id: String(entry.source_id) })}>{entry.feed}</a></p>
   {:else if looking}
     <p class="muted">Looking for feeds on {site}…</p>
   {:else if feeds.length}

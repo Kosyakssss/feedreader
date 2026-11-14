@@ -228,8 +228,7 @@ main {
   padding: calc(var(--top) + var(--gap) - 0.11em) var(--edge) calc(var(--bar) + var(--gap)); /* 0.11em: the leading above a line's text */
 }
 
-main > :first-child,
-.entries > li:first-child {
+main > :first-child {
   margin-block-start: 0;
 }
 
@@ -330,7 +329,6 @@ nav {
 }
 
 button.icon {
-  position: relative;
   flex: none;
   width: 1.4em;
   height: 1.4em;
@@ -340,7 +338,6 @@ button.icon {
 
 /* Reaches past what is drawn to make the target. `--reach` is how far each
    side has to grow, worked out from the size of what it is set on. */
-.crumb,
 .crumb button,
 .action button,
 button.icon {
@@ -438,9 +435,7 @@ html:has(#search:not(.closing)) header button.icon {
   left: 0;
   width: 100%;
   height: calc(var(--visible-height, 100dvh) - var(--top)); /* above a phone's keyboard */
-  margin: 0;
   padding: 0 var(--gutter-end) calc(1rem + var(--safe-bottom)) var(--gutter-start);
-  overflow: visible;
   pointer-events: none;
 }
 
@@ -465,13 +460,10 @@ html:has(#search:not(.closing)) header button.icon {
   position-visibility: always;
   top: anchor(top);
   right: var(--gutter-end); /* the search icon's right edge, the header's last thing */
-  bottom: auto;
   left: calc(anchor(center) - 0.5px);
-  width: auto;
   max-height: calc(
     100dvh - var(--safe-top) - var(--header-height) / 2 + 0.6em
   ); /* from the slash to just past the bottom of the window */
-  margin: 0;
   padding: var(--list-top) 0 0 0.6em;
   overflow: hidden;
   pointer-events: none;
@@ -730,6 +722,8 @@ li {
    little apart, so each reads as one thing. */
 .entries > li {
   margin-block: 0 calc(1.2 * var(--gap) - 0.3em);
+  content-visibility: auto; /* off-screen rows skip rendering */
+  contain-intrinsic-block-size: auto 3.4em;
 }
 
 .row {
@@ -787,12 +781,6 @@ li {
   background-position: 0 50%;
   background-size: 6px 100%;
   background-repeat: round no-repeat;
-}
-
-/* Off-screen rows skip rendering. */
-.entries > li {
-  content-visibility: auto;
-  contain-intrinsic-block-size: auto 3.4em;
 }
 
 /* fit-title.ts shortens titles that don't fit. This handles the rest: text it
@@ -1087,6 +1075,7 @@ li {
 
 .action.end {
   right: var(--gutter-end);
+  transition: opacity var(--open-time) var(--ease); /* a pill that only appears for choosing rises into place */
 }
 
 html:has(.popup:not(.closing)) .action::before {
@@ -1138,10 +1127,6 @@ html:has(.popup:not(.closing)) .action::before {
 .stack .grown button + button,
 .stack.open > button {
   border-block-start: 0.5px solid var(--float-rim);
-}
-
-.action.end {
-  transition: opacity var(--open-time) var(--ease);
 }
 
 @starting-style {
@@ -1298,10 +1283,6 @@ button.more {
 
 .muted {
   color: var(--tx-2);
-}
-
-.saved {
-  color: var(--or);
 }
 
 .failed,

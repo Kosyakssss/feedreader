@@ -37,7 +37,7 @@ export type Layout = {
 // fit a whole number of them in (background-repeat: round): so the dots are
 // found again here exactly where CSS drew them.
 const LEADER = 6; // the tile, as in app.css
-export const RADIUS = 1.15; // a dot as app.css draws it, edge included
+const RADIUS = 1.15; // a dot as app.css draws it, edge included
 
 export function layout(item: HTMLElement): Layout | null {
   const row = item.querySelector<HTMLElement>('.row');

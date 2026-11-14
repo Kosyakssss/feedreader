@@ -4,8 +4,6 @@
   import Card from '#lib/components/Card.svelte';
   import MoreButton from '#lib/components/MoreButton.svelte';
   import EntryList from '#lib/components/EntryList.svelte';
-  import ListActions from '#lib/components/ListActions.svelte';
-  import { Selection } from '#lib/selection.svelte.ts';
   import LinkField from '#lib/components/LinkField.svelte';
   import { library } from '#lib/library.svelte.ts';
   import type { Entry } from '#lib/server/store.ts';
@@ -15,7 +13,6 @@
 
   // Taking the bookmark off takes the entry off this page.
   const entries = $derived(library.list(data.list?.entries, library.bookmarks));
-  const selection = new Selection(() => entries);
 
   async function bookmark(text: string) {
     const response = await fetch(resolve('/api/bookmarks'), {
@@ -34,7 +31,7 @@
 <svelte:head><title>Bookmarks</title></svelte:head>
 
 <LinkField placeholder="Paste links to bookmark" send={bookmark} />
-<EntryList {entries} toggles={['read']} {selection}>
+<EntryList {entries} toggles={['read']}>
   {#snippet extra(entry)}
     <MoreButton key="e{entry.id}" />
   {/snippet}
@@ -42,4 +39,3 @@
     <Card key="e{entry.id}"><BookmarkCard {entry} onremove={() => library.toggle(entry, 'bookmark')} /></Card>
   {/snippet}
 </EntryList>
-{#if entries.length}<ListActions {selection} />{/if}

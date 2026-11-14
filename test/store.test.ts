@@ -119,15 +119,6 @@ test('marking sets entries chosen together, whatever each was, and tells copies 
   expect(titles(scopes.unread)).toEqual(['Post b', 'Post a']);
 });
 
-test('the timeline comes in pages, each starting after the last one shown', () => {
-  saveItems(item('backlog'));
-  saveItems(...Array.from({ length: 5 }, (_, n) => item(`p${n}`, { published: JAN + 1000 * (n + 1) })));
-  const page = { ...scopes.timeline, limit: 2 };
-  const first = store.entries(page);
-  expect(first.map((entry) => entry.title)).toEqual(['Post p4', 'Post p3']);
-  expect(store.entries(page, first.at(-1)).map((entry) => entry.title)).toEqual(['Post p2', 'Post p1']);
-});
-
 test("a feed's muted words keep matching entries out of Unread and the timeline, not off its own page", () => {
   saveItems(item('backlog'));
   saveItems(item('a', { title: 'Sponsored: buy this', published: JAN + 1000 }), item('b', { published: JAN + 2000 }));

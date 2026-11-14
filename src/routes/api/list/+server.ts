@@ -1,6 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { scopes } from '#lib/server/store.ts';
-import { timelinePage } from '#lib/server/timeline.ts';
+import { scopes, TIMELINE_PAGE } from '#lib/server/store.ts';
 import type { RequestHandler } from './$types';
 
 // One page's list, for drawing it before the library has arrived: on the
@@ -11,7 +10,11 @@ export const GET: RequestHandler = ({ locals, url }) => {
     locals.wake(); // opening Unread is the moment to check for news
     return Response.json({ entries: locals.store.entries(scopes.unread) });
   }
-  if (list === 'timeline') return Response.json(timelinePage(locals.store));
+  if (list === 'timeline') {
+    // One more than the first step, to know whether there is more after it.
+    const entries = locals.store.entries({ ...scopes.timeline, limit: TIMELINE_PAGE + 1 });
+    return Response.json({ entries: entries.slice(0, TIMELINE_PAGE), more: entries.length > TIMELINE_PAGE });
+  }
   if (list === 'bookmarks') return Response.json({ entries: locals.store.entries(scopes.bookmarks) });
   if (list === 'feeds') return Response.json({ sources: locals.store.sources(), mutes: locals.store.mutesBySource() });
   const id = Number(url.searchParams.get('feed'));

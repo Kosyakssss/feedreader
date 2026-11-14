@@ -11,7 +11,6 @@
 // at the page, and then leaves, so that you see it go: at once for a new tab
 // opened behind this one, on coming back for a link followed in this tab.
 import { resolve } from '$app/paths';
-import { at } from '#lib/paths.ts';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import type { Library as Snapshot, Update } from '#lib/server/live.ts';
 import type { Entry, Mark, Source } from '#lib/server/store.ts';
@@ -21,9 +20,6 @@ export type Toggle = 'read' | 'bookmark';
 export const TIMELINE_STEP = 200; // how many more entries the timeline shows each time
 
 const newestFirst = (a: Entry, b: Entry) => b.published_at - a.published_at || b.id - a.id;
-
-// Why an entry left a page, for how it goes.
-export type Leaving = 'read' | 'bookmark';
 
 const HELD = 'lagan:held'; // where opened entries wait while this tab is on another site
 
@@ -82,7 +78,7 @@ class Library {
   private again = false; // the library is wanted again once this fetch is done
   private stream: EventSource | null = null;
   private held = new SvelteMap<number, Entry>(); // opened, each as it was before, still shown until seen to go
-  private why = new Map<number, Leaving>(); // entries leaving for a reason their state doesn't tell
+  private why = new Map<number, Toggle>(); // entries leaving for a reason their state doesn't tell
   private release?: () => void; // stops waiting to let the held entries go
 
   // Every entry, newest first.
@@ -109,10 +105,6 @@ class Library {
       .map((entry) => this.entries.get(entry.id) ?? entry)
       .toSorted(newestFirst)
       .filter(shows);
-  }
-
-  get(id: number): Entry | undefined {
-    return this.entries.get(id);
   }
 
   private muted(entry: Entry): boolean {
@@ -220,7 +212,7 @@ class Library {
       this.entries.set(entry.id, marked(entry, change));
       this.pending.set(entry.id, (this.pending.get(entry.id) ?? 0) + 1);
     }
-    const answer = await post(at('/api/mark'), { ids: before.map((entry) => entry.id), ...change }, keepalive);
+    const answer = await post(resolve('/api/mark'), { ids: before.map((entry) => entry.id), ...change }, keepalive);
     for (const entry of answer?.entries ?? []) this.confirm(entry, answer!.version);
     for (const entry of before) {
       if (!answer) {
@@ -266,7 +258,7 @@ class Library {
 
   // Why a row is leaving its page, given it as it was. Read off its state,
   // so changes made on another device leave the same way.
-  leaving(before: Entry): Leaving | null {
+  leaving(before: Entry): Toggle | null {
     const why = this.why.get(before.id);
     this.why.delete(before.id);
     if (why) return why;
