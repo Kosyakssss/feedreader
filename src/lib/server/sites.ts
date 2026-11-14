@@ -1,8 +1,10 @@
 // Reading the pages people bookmark: their titles, and the feeds they offer.
-import { discover, readLimited, safeFetch } from './fetch';
+import { discover, safeFetch } from './fetch';
 import { plain } from './parse';
 
-const PAGE_BYTES = 2 * 1024 * 1024;
+// What a page says about itself, its title and its feeds, is in its head: a
+// page longer than this is read only this far.
+const PAGE_BYTES = 1024 * 1024;
 const FEED_TYPES = new Set([
   'application/rss+xml',
   'application/atom+xml',
@@ -20,7 +22,15 @@ async function readPage(url: string): Promise<{ html: string; url: string }> {
     await response.body?.cancel();
     throw new Error(`HTTP ${response.status}`);
   }
-  return { html: new TextDecoder().decode(await readLimited(response, PAGE_BYTES)), url: response.url || url };
+  const reader = response.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (let part = await reader?.read(); part && !part.done && size < PAGE_BYTES; part = await reader!.read()) {
+    chunks.push(part.value);
+    size += part.value.length;
+  }
+  await reader?.cancel();
+  return { html: new TextDecoder().decode(Bun.concatArrayBuffers(chunks, Infinity, true)), url: response.url || url };
 }
 
 function attributes(tag: string): Record<string, string> {
@@ -76,3 +86,13 @@ export async function findFeeds(url: string): Promise<FoundFeed[]> {
   }
   return [];
 }
+
+// The feed at what was typed: its address, a site that has one, or a Bluesky
+// handle. Not a feed itself? Then the first feed of the site at that address,
+// or why there is none: the site out of reach, or no feed on it.
+export const findFeed = (typed: string) =>
+  discover(typed).catch(async () => {
+    const [first] = await findFeeds(typed.includes('://') ? typed : `https://${typed}`);
+    if (!first) throw new Error('no feed on that page');
+    return discover(first.url);
+  });

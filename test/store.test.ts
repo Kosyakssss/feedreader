@@ -31,14 +31,13 @@ beforeEach(() => {
   feed = store.sources()[0]!;
 });
 
-test("a feed's first fetch is backlog, later posts are unread", () => {
+test("a feed's first fetch is backlog, kept off the home page; later posts are on it", () => {
   saveItems(item('old'));
-  expect(titles(scopes.unread)).toEqual([]);
   expect(titles(scopes.latest)).toEqual([]);
   expect(titles(scopes.feed(feed.id))).toEqual(['Post old']);
 
   saveItems(item('new', { published: JAN + 1000 }));
-  expect(titles(scopes.unread)).toEqual(['Post new']);
+  expect(titles(scopes.latest)).toEqual(['Post new']);
 });
 
 test('fetching the same item twice changes nothing', () => {
@@ -86,76 +85,58 @@ test('a failed fetch keeps the old validators', () => {
   expect(feed).toMatchObject({ etag: 'one', last_modified: 'then', error: 'HTTP 500', failures: 1 });
 });
 
-test('bookmarking something never seen makes it read, and taking the bookmark off leaves it read', () => {
+test('keeping something from the backlog brings it onto the home page, to stay there', () => {
   saveItems(item('a'));
   const id = store.entries(scopes.feed(feed.id))[0]!.id;
-  expect(store.mark([id], { bookmarked: true })).toMatchObject([{ state: 'read', bookmarked: 1 }]);
-  expect(titles(scopes.bookmarks)).toEqual(['Post a']);
-  expect(store.mark([id], { bookmarked: false })).toMatchObject([{ state: 'read', bookmarked: 0 }]);
-  expect(titles(scopes.bookmarks)).toEqual([]);
+  expect(store.keep([id, 999], true)).toMatchObject([{ id, kept: 1 }]);
+  expect(titles(scopes.kept)).toEqual(['Post a']);
+  expect(store.keep([id], false)).toMatchObject([{ kept: 0 }]);
+  expect(titles(scopes.kept)).toEqual([]);
   expect(titles(scopes.latest)).toEqual(['Post a']);
 });
 
-test('a bookmarked entry leaves Unread but stays unread, and comes back when the bookmark comes off', () => {
-  saveItems(item('backlog'));
-  saveItems(item('a', { published: JAN + 1000 }));
-  const id = store.entries(scopes.unread)[0]!.id;
-  expect(store.mark([id], { bookmarked: true })).toMatchObject([{ state: 'unread', bookmarked: 1 }]);
-  expect(titles(scopes.unread)).toEqual([]);
-  store.mark([id], { bookmarked: false });
-  expect(titles(scopes.unread)).toEqual(['Post a']);
-});
-
-test('marking sets entries chosen together, whatever each was', () => {
-  saveItems(item('backlog'));
-  saveItems(item('a', { published: JAN + 1000 }), item('b', { published: JAN + 2000 }));
-  const [b, a] = store.entries(scopes.unread).map((entry) => entry.id);
-  store.mark([a!], { read: true });
-  expect(store.mark([a!, b!, 999], { read: true }).map((entry) => entry.state)).toEqual(['read', 'read']);
-  store.mark([a!, b!], { read: false });
-  expect(titles(scopes.unread)).toEqual(['Post b', 'Post a']);
-});
-
-test("a feed's muted words keep matching entries out of Unread and the timeline, not off its own page", () => {
+test("a feed's muted words keep matching entries off the home page, not off its own", () => {
   saveItems(item('backlog'));
   saveItems(item('a', { title: 'Sponsored: buy this', published: JAN + 1000 }), item('b', { published: JAN + 2000 }));
   expect(store.setMutes(feed.id, [' SPONSORED ', 'sponsored', ''])).toEqual(['sponsored']);
-  expect(titles(scopes.unread)).toEqual(['Post b']);
   expect(titles(scopes.latest)).toEqual(['Post b']);
   expect(titles(scopes.feed(feed.id))).toContain('Sponsored: buy this');
 });
 
-test('a bookmarked link is stored once: an entry a feed already has is bookmarked instead', () => {
+test('a link kept is stored once: an entry a feed already has is kept instead', () => {
   saveItems(item('a'));
-  expect(store.bookmarkPage('https://example.com/a', '')).toMatchObject({ title: 'Post a', bookmarked: 1, page: 0 });
-  expect(store.bookmarkPage('https://elsewhere.example/x', 'Elsewhere')).toMatchObject({ bookmarked: 1, page: 1 });
-  expect(titles(scopes.bookmarks).toSorted()).toEqual(['Elsewhere', 'Post a']);
+  expect(store.keepPage('https://example.com/a', '')).toMatchObject({ title: 'Post a', kept: 1, page: 0 });
+  expect(store.keepPage('https://elsewhere.example/x', 'Elsewhere')).toMatchObject({ kept: 1, page: 1 });
+  expect(titles(scopes.kept).toSorted()).toEqual(['Elsewhere', 'Post a']);
   expect(store.sources().map((source) => source.label)).toEqual(['Example']);
+  expect(store.sites().map((site) => site.label)).toEqual(['elsewhere.example']);
 });
 
-test('removing a feed keeps its bookmarks as bookmarked pages', () => {
-  saveItems(item('a'), item('b'));
-  store.mark([store.entries(scopes.feed(feed.id))[0]!.id], { bookmarked: true });
-  store.removeSource(feed.id);
-  expect(store.sources()).toEqual([]);
-  expect(store.entries(scopes.bookmarks)).toHaveLength(1);
-  expect(store.entries(scopes.bookmarks)[0]!.page).toBe(1);
-});
-
-test('a database from before bookmarks were a flag of their own keeps every entry and bookmark', () => {
+test('a database from when entries had a state, bookmarked one of them, keeps every entry, what was kept and the backlog', () => {
   const path = `${Bun.env.TMPDIR ?? '/tmp'}/lagan-migrate-${process.pid}.sqlite`;
   const old = new Database(path, { create: true });
   old.run(`CREATE TABLE sources (id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('rss', 'atproto')), ref TEXT NOT NULL UNIQUE, label TEXT NOT NULL, folder TEXT NOT NULL DEFAULT '', etag TEXT NOT NULL DEFAULT '', last_modified TEXT NOT NULL DEFAULT '', fetched_at INTEGER, next_at INTEGER, failures INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '') STRICT;
     CREATE TABLE entries (id INTEGER PRIMARY KEY, source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE, guid TEXT NOT NULL, url TEXT NOT NULL, published_at INTEGER NOT NULL, state TEXT NOT NULL CHECK (state IN ('none', 'unread', 'read', 'bookmarked')), title TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '') STRICT;
     CREATE INDEX timeline ON entries(published_at DESC, id DESC) WHERE state <> 'none';
     INSERT INTO sources (id, kind, ref, label) VALUES (1, 'rss', 'https://example.com/feed', 'Example');
-    INSERT INTO entries (source_id, guid, url, published_at, state, title) VALUES (1, 'a', 'https://example.com/a', 1, 'bookmarked', 'Kept'), (1, 'b', 'https://example.com/b', 2, 'unread', 'New');`);
+    INSERT INTO entries (source_id, guid, url, published_at, state, title) VALUES (1, 'a', 'https://example.com/a', 1, 'bookmarked', 'Kept'), (1, 'b', 'https://example.com/b', 2, 'unread', 'New'), (1, 'c', 'https://example.com/c', 3, 'none', 'Backlog');
+    CREATE TABLE mutes (source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE, word TEXT NOT NULL, PRIMARY KEY (source_id, word)) STRICT;
+    INSERT INTO mutes VALUES (1, 'sponsored');`);
   old.close();
   try {
     const migrated = new Store(path);
-    expect(migrated.entries(scopes.bookmarks)).toMatchObject([{ title: 'Kept', state: 'read', bookmarked: 1 }]);
-    expect(migrated.entries(scopes.unread)).toMatchObject([{ title: 'New', bookmarked: 0 }]);
-    expect(new Store(path).entries(scopes.latest)).toHaveLength(2); // opening it again changes nothing
+    expect(migrated.entries(scopes.kept)).toMatchObject([{ title: 'Kept', kept: 1 }]);
+    expect(migrated.entries(scopes.latest).map((entry) => entry.title)).toEqual(['New', 'Kept']);
+    expect(migrated.entries(scopes.feed(1))).toHaveLength(3);
+    migrated.keepPage('https://elsewhere.example/x', 'Elsewhere'); // a site can be added now
+    migrated.removeSource(1); // and removing a feed still reaches its mutes
+    expect(
+      migrated
+        .entries(scopes.kept)
+        .map((entry) => entry.title)
+        .toSorted(),
+    ).toEqual(['Elsewhere', 'Kept']);
+    expect(new Store(path).entries(scopes.kept)).toHaveLength(2); // opening it again changes nothing
   } finally {
     for (const suffix of ['', '-wal', '-shm'])
       Bun.file(path + suffix)
@@ -164,7 +145,7 @@ test('a database from before bookmarks were a flag of their own keeps every entr
   }
 });
 
-test('search finds titles in every state, not body text', () => {
+test('search finds titles, the backlog too, not body text', () => {
   saveItems(item('a', { title: 'Neovim tricks' }), item('b', { title: 'Other', text: 'neovim in the body' }));
   expect(store.searchEntries('neovim').map((entry) => entry.title)).toEqual(['Neovim tricks']);
 });
@@ -195,17 +176,16 @@ test('feeds match by name before address', () => {
   expect(store.searchFeeds('blog').map((source) => source.label)).toEqual(['My blog', 'Zeta']);
 });
 
-test('copies left by a moved site merge and keep the strongest state', () => {
+test('copies left by a moved site merge, kept and out of the backlog if any copy was', () => {
   saveItems(
     item('a', { title: 'Same', url: 'https://one.example.com/post' }),
     item('copy', { title: 'Same', url: 'https://two.example.com/post' }),
   );
-  store.mark([store.entries(scopes.feed(feed.id)).at(-1)!.id], { bookmarked: true });
+  store.keep([store.entries(scopes.feed(feed.id)).at(-1)!.id], true);
 
   expect(store.mergeMoved()).toBe(1);
-  expect(store.entries(scopes.feed(feed.id))).toMatchObject([
-    { state: 'read', bookmarked: 1, url: 'https://two.example.com/post' },
-  ]);
+  expect(store.entries(scopes.feed(feed.id))).toMatchObject([{ kept: 1, url: 'https://two.example.com/post' }]);
+  expect(titles(scopes.latest)).toEqual(['Same']);
 });
 
 test('copies at different paths are different posts', () => {
@@ -219,18 +199,18 @@ test('copies at different paths are different posts', () => {
 
 test('pages kept from their links belong to their sites, and so does what is kept from a feed no longer followed', () => {
   saveItems(item('a'));
-  const page = store.bookmarkPage('https://www.youtube.com/watch?v=1', 'Logical fallacies - YouTube');
+  const page = store.keepPage('https://www.youtube.com/watch?v=1', 'Logical fallacies - YouTube');
   expect(page).toMatchObject({ feed: 'youtube.com', page: 1 });
-  expect(store.bookmarkPage('https://youtube.com/watch?v=2', 'Two').source_id).toBe(page.source_id);
+  expect(store.keepPage('https://youtube.com/watch?v=2', 'Two').source_id).toBe(page.source_id);
   const a = store.entries(scopes.feed(feed.id))[0]!;
-  store.mark([a.id], { bookmarked: true });
+  store.keep([a.id], true);
   store.removeSource(feed.id);
-  expect(store.entry(a.id)).toMatchObject({ feed: 'example.com', page: 1, bookmarked: 1 });
+  expect(store.entry(a.id)).toMatchObject({ feed: 'example.com', page: 1, kept: 1 });
   expect(store.sources()).toEqual([]); // sites aren't feeds
 });
 
 test("a site's cuts tidy its titles, in any case, and never leave one empty", () => {
-  const page = store.bookmarkPage('https://youtube.com/watch?v=1', 'Logical fallacies - YouTube');
+  const page = store.keepPage('https://youtube.com/watch?v=1', 'Logical fallacies - YouTube');
   store.setCuts(page.source_id, ['- youtube', ' ']);
   expect(store.entry(page.id)!.title).toBe('Logical fallacies');
   store.setCuts(page.source_id, ['Logical fallacies - YouTube']);

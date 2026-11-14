@@ -302,21 +302,25 @@ export const restFor = (quietFor: number, earliest: number) =>
 type Loop = { wake?: () => void; earliest: number };
 
 export class Fetcher {
-  private loops: Loop[] = [];
+  private loops = new Map<number, Loop>();
   private hostNext = new Map<string, number>();
   private lastNudge = 0;
 
   constructor(private store: Store) {}
 
+  // Keeps every feed fetched, including any added since, from the command line.
   startAll(): void {
-    for (const source of this.store.sources()) this.start(source.id);
+    for (const source of this.store.sources()) if (!this.loops.has(source.id)) this.start(source.id);
   }
 
-  // Keeps one feed fetched from now on, until it is removed.
+  // Keeps one feed fetched from now on, until it is removed. A feed already
+  // kept fetched, followed again or given a new address, is fetched now.
   start(id: number): void {
+    const running = this.loops.get(id);
+    if (running) return void running.wake?.();
     const loop: Loop = { earliest: 0 };
-    this.loops.push(loop);
-    void this.run(id, loop);
+    this.loops.set(id, loop);
+    void this.run(id, loop).finally(() => this.loops.delete(id));
   }
 
   // Opening the app wakes every feed that is allowed to fetch again.
@@ -324,7 +328,8 @@ export class Fetcher {
     const now = Date.now();
     if (now - this.lastNudge < BASE) return;
     this.lastNudge = now;
-    for (const loop of this.loops) if (now >= loop.earliest) loop.wake?.();
+    this.startAll();
+    for (const loop of this.loops.values()) if (now >= loop.earliest) loop.wake?.();
   }
 
   private async turn(host: string): Promise<void> {

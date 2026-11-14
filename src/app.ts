@@ -3,13 +3,12 @@
 // it again. Sent by htmx instead, a change is answered with just the part of
 // the page it changed.
 import { linksIn } from '#lib/links.ts';
-import { discover } from '#lib/server/fetch.ts';
 import type { Lagan } from '#lib/server/lagan.ts';
 import { readOpml, sourceFor, writeOpml } from '#lib/server/opml.ts';
-import { findFeeds, pageTitle } from '#lib/server/sites.ts';
-import { scopes } from '#lib/server/store.ts';
+import { findFeed, pageTitle } from '#lib/server/sites.ts';
+import { scopes, type Source } from '#lib/server/store.ts';
 import { html, type Html } from '#lib/html.ts';
-import { pages } from './pages';
+import { pages, type Found } from './pages';
 
 type Handler = (request: Bun.BunRequest) => Response | Promise<Response>;
 
@@ -32,7 +31,7 @@ export function sameOrigin(request: Request): boolean {
 function compressed(request: Request, response: Response): Response {
   const type = response.headers.get('content-type') ?? '';
   const accepts = /\bgzip\b/.test(request.headers.get('accept-encoding') ?? '');
-  if (!/^text\/|javascript/.test(type) || !accepts || !response.body) return response;
+  if (!/^text\//.test(type) || !accepts || !response.body) return response;
   const headers = new Headers(response.headers);
   headers.set('content-encoding', 'gzip');
   headers.delete('content-length');
@@ -53,36 +52,40 @@ const sent = (page: Html, status = 200) =>
 
 // Back to a page after a change, saying how it went.
 const see = (location: string) => new Response(null, { status: 303, headers: { Location: location } });
-const saying = (path: string, said: string, more = '') => `${path}?said=${encodeURIComponent(said)}${more}`;
+const saying = (path: string, said: string) =>
+  `${path}${path.includes('?') ? '&' : '?'}said=${encodeURIComponent(said)}`;
 
 const text = (form: FormData, name: string) => String(form.get(name) ?? '').trim();
-const htmxSent = (request: Request) => request.headers.has('hx-request');
-const query = (request: Request) => new URL(request.url).searchParams;
 const reason = (thrown: unknown) => (thrown instanceof Error ? thrown.message : String(thrown));
+const fromHtmx = (request: Request) => request.headers.has('hx-request');
+const query = (request: Request) => new URL(request.url).searchParams;
 
 // The app, served under `base`: '' or a path such as '/lagan'.
 export function app({ store, wake, follow }: Lagan, base = '') {
   const at = (path: string) => base + path;
   const views = pages(base, at(htmxName));
-  const counts = () => ({ kept: store.entries(scopes.bookmarks).length, feeds: store.sources().length });
+  const counts = () => ({ kept: store.entries(scopes.kept).length, feeds: store.sources().length });
   const missing = () => sent(views.missing(counts()), 404);
-  // Follows a feed's address, a site that has one, or a Bluesky handle.
-  // Not a feed itself? Then the first feed of the site at that address.
-  async function followOne(typed: string): Promise<{ id: number; label: string }> {
-    const found = await discover(typed).catch(async (notAFeed) => {
-      const [first] = await findFeeds(typed.includes('://') ? typed : `https://${typed}`).catch(() => []);
-      if (!first) throw notAFeed;
-      return discover(first.url);
-    });
-    const id = store.addSource(found.kind, found.ref, found.label);
-    follow(id);
-    return { id, label: found.label };
-  }
+  const followed = (ref: string) => store.sources().find((source) => source.ref === ref);
 
-  const sourceOf = (request: Bun.BunRequest) => {
-    const id = Number((request.params as { id?: string }).id);
-    return Number.isInteger(id) ? store.source(id) : null;
-  };
+  // The source an address names, and what to do with it if there is one.
+  const withSource =
+    (handler: (source: Source, request: Bun.BunRequest) => Response | Promise<Response>): Handler =>
+    (request) => {
+      const id = Number((request.params as { id?: string }).id);
+      const source = Number.isInteger(id) ? store.source(id) : null;
+      return source ? handler(source, request) : missing();
+    };
+
+  // A feed's or a site's page, asking whatever the address asks.
+  function feedPage(source: Source, request: Request): Response {
+    const list = store.entries(scopes.feed(source.id));
+    if (source.kind === 'page') return sent(views.site(counts(), source, store.cuts(source.id), list));
+    const settings = { mutes: store.mutes(source.id), cuts: store.cuts(source.id) };
+    const asks = query(request);
+    const ask = { edit: asks.has('edit'), stop: asks.has('stop'), note: asks.get('said') };
+    return sent(views.feed(counts(), source, settings, list, ask));
+  }
 
   // The page a keep was pressed on, to go back to. Only its path is used,
   // so it can't send anyone anywhere else.
@@ -104,106 +107,135 @@ export function app({ store, wake, follow }: Lagan, base = '') {
       POST: async (request) => {
         const form = await request.formData();
         const id = Number(form.get('id'));
-        const [entry] = Number.isInteger(id) ? store.mark([id], { bookmarked: form.get('keep') === '1' }) : [];
+        const [entry] = Number.isInteger(id) ? store.keep([id], form.get('keep') === '1') : [];
         if (!entry) return missing();
-        if (htmxSent(request)) {
-          const here = URL.parse(request.headers.get('referer') ?? '')?.pathname === at('/kept') ? '/kept' : '';
-          return sent(html`${views.keep(entry, true)}${views.keptCount(counts(), here, true)}`);
-        }
-        return see(`${back(request)}#e${id}`);
+        if (!fromHtmx(request)) return see(`${back(request)}#e${id}`);
+        const here = URL.parse(request.headers.get('referer') ?? '')?.pathname === at('/kept') ? '/kept' : '';
+        return sent(html`${views.keep(entry, true)}${views.keptCount(counts(), here, true)}`);
       },
     },
 
     [at('/kept')]: {
-      GET: (request) => sent(views.kept(counts(), store.entries(scopes.bookmarks), query(request).get('said'))),
+      GET: (request) => sent(views.kept(counts(), store.entries(scopes.kept), query(request).get('said'))),
       // Keeps every link in what was pasted, each with its page's title.
       POST: async (request) => {
         const links = linksIn(text(await request.formData(), 'links')).slice(0, MOST_LINKS);
         if (!links.length) return see(saying(at('/kept'), 'No links in that.'));
         const titles = await Promise.all(links.map(pageTitle));
-        links.forEach((url, index) => store.bookmarkPage(url, titles[index]!));
+        links.forEach((url, index) => store.keepPage(url, titles[index]!));
         return see(saying(at('/kept'), links.length === 1 ? 'Kept.' : `Kept ${links.length}.`));
       },
     },
 
     [at('/feeds')]: {
-      GET: (request) =>
-        sent(views.feeds(counts(), store.sources(), query(request).get('said'), query(request).get('url') ?? '')),
-      // Follows whatever was pasted: links, however written, or else handles.
-      // One followed goes to its page; several say how each went.
+      GET: (request) => sent(views.feeds(counts(), store.sources(), query(request).get('said'))),
+      // Follows what was looked over: each feed as found, or at the address
+      // it was changed to, under the name it was given.
       POST: async (request) => {
-        const typed = text(await request.formData(), 'url');
-        const links = linksIn(typed);
-        const tries = (links.length ? links : typed.split(/[\s,]+/).filter(Boolean)).slice(0, MOST_FEEDS);
-        if (!tries.length) return see(at('/feeds'));
-        const results = await Promise.allSettled(tries.map(followOne));
-        const only = results.length === 1 ? results[0]! : null;
-        if (only?.status === 'fulfilled') return see(at(`/feed/${only.value.id}`));
-        if (only?.status === 'rejected')
-          return see(
-            saying(at('/feeds'), `No feed there: ${reason(only.reason)}`, `&url=${encodeURIComponent(typed)}`),
-          );
-        const followed = results.flatMap((result) => (result.status === 'fulfilled' ? [result.value.label] : []));
-        const missed = tries.filter((_, index) => results[index]!.status === 'rejected');
-        const told = [
-          followed.length && `Following ${followed.join(', ')}.`,
-          missed.length && `No feed at ${missed.join(', ')}.`,
-        ].filter(Boolean);
-        return see(saying(at('/feeds'), told.join(' ')));
+        const form = await request.formData();
+        const [kinds, founds, labels, refs] = ['kind', 'found', 'label', 'ref'].map((name) =>
+          form.getAll(name).map(String),
+        ) as [Source['kind'][], string[], string[], string[]];
+        const results = await Promise.allSettled(
+          refs.slice(0, MOST_FEEDS).map(async (typed, index) => {
+            const ref = typed.trim();
+            const found = ref === founds[index] ? { kind: kinds[index]!, ref } : await findFeed(ref);
+            const id = store.addSource(found.kind, found.ref, labels[index]?.trim() || found.ref);
+            follow(id);
+            return id;
+          }),
+        );
+        const ids = results.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
+        const missed = results.length - ids.length;
+        if (ids.length === 1 && !missed) return see(at(`/feed/${ids[0]}`));
+        const told = [ids.length && `Following ${ids.length}.`, missed && `${missed} could not be followed.`];
+        return see(saying(at('/feeds'), told.filter(Boolean).join(' ')));
       },
     },
 
-    [at('/feed/:id')]: {
-      GET: (request) => {
-        const source = sourceOf(request);
-        if (!source) return missing();
-        const list = store.entries(scopes.feed(source.id));
-        const stopping = query(request).has('stop');
-        return sent(views.feed(counts(), source, store.mutes(source.id), store.cuts(source.id), list, stopping));
+    // What was pasted into Feeds, looked for: links, however written, or
+    // else handles.
+    [at('/feeds/new')]: {
+      GET: async (request) => {
+        const typed = query(request).get('links')?.trim() ?? '';
+        const links = linksIn(typed);
+        const tries = (links.length ? links : typed.split(/[\s,]+/).filter(Boolean)).slice(0, MOST_FEEDS);
+        if (!tries.length) return see(at('/feeds'));
+        const found = await Promise.all(
+          tries.map((each): Promise<Found> =>
+            findFeed(each).then(
+              (feed) => {
+                const known = followed(feed.ref);
+                return known ? { typed: each, followed: known } : { typed: each, ...feed };
+              },
+              (thrown) => ({ typed: each, missed: reason(thrown) }),
+            ),
+          ),
+        );
+        return sent(views.review(counts(), found));
       },
+    },
+
+    [at('/feed/:id')]: { GET: withSource((source, request) => feedPage(source, request)) },
+
+    // A feed's name, or editing it in its place.
+    [at('/feed/:id/name')]: { GET: withSource((source) => sent(views.name(source))) },
+    [at('/feed/:id/edit')]: {
+      GET: withSource((source) => sent(views.edit(source))),
+      // A new name, and maybe a new address: a feed there, of whatever kind.
+      POST: withSource(async (source, request) => {
+        const form = await request.formData();
+        const ref = text(form, 'ref');
+        const again = (note: string) => see(saying(at(`/feed/${source.id}?edit`), note));
+        if (ref && ref !== source.ref) {
+          let found;
+          try {
+            found = await findFeed(ref);
+          } catch (thrown) {
+            return again(`No feed there: ${reason(thrown)}`);
+          }
+          const other = followed(found.ref);
+          if (other && other.id !== source.id) return again(`That is ${other.label}, followed already.`);
+          store.readdress(source.id, found.kind, found.ref);
+          follow(source.id);
+        }
+        store.rename(source.id, text(form, 'label') || source.label);
+        return see(at(`/feed/${source.id}`));
+      }),
     },
 
     // Asking whether to stop following, or no longer asking.
     [at('/feed/:id/stop')]: {
-      GET: (request) => {
-        const source = sourceOf(request);
-        return source ? sent(views.stop(source, query(request).has('sure'))) : missing();
-      },
+      GET: withSource((source, request) => sent(views.stop(source, query(request).has('sure')))),
     },
 
     [at('/feed/:id/mutes')]: {
-      POST: async (request) => {
-        const source = sourceOf(request);
-        if (!source) return missing();
+      POST: withSource(async (source, request) => {
         store.setMutes(source.id, text(await request.formData(), 'mutes').split(','));
         return see(at(`/feed/${source.id}`));
-      },
+      }),
     },
 
     [at('/feed/:id/cuts')]: {
-      POST: async (request) => {
-        const source = sourceOf(request);
-        if (!source) return missing();
+      POST: withSource(async (source, request) => {
         store.setCuts(source.id, text(await request.formData(), 'cuts').split(','));
         return see(at(`/feed/${source.id}`));
-      },
+      }),
     },
 
     // What was kept from it stays, as pages of its site.
     [at('/feed/:id/remove')]: {
-      POST: (request) => {
-        const source = sourceOf(request);
-        if (!source) return missing();
+      POST: withSource((source) => {
         store.removeSource(source.id);
         return see(saying(at('/feeds'), `Stopped following ${source.label}.`));
-      },
+      }),
     },
 
     [at('/search')]: {
       GET: (request) => {
         const typed = query(request).get('q')?.trim() ?? '';
         const [feeds, list] = [store.searchFeeds(typed), store.searchEntries(typed)];
-        if (htmxSent(request)) return sent(html`${views.found(typed, feeds, list)}`);
+        if (fromHtmx(request)) return sent(html`${views.results(typed, feeds, list)}`);
         return sent(views.search(counts(), typed, feeds, list));
       },
     },
@@ -225,7 +257,7 @@ export function app({ store, wake, follow }: Lagan, base = '') {
       POST: async (request) => {
         const file = (await request.formData()).get('file');
         const told = (said: string) =>
-          htmxSent(request) ? sent(views.said(said)) : see(saying(at('/settings'), said));
+          fromHtmx(request) ? sent(views.said(said)) : see(saying(at('/settings'), said));
         let listed;
         try {
           listed = readOpml(file instanceof Blob ? await file.text() : '');

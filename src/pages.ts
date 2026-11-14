@@ -1,21 +1,38 @@
 // Every page, as HTML. Each one is whole by itself, its CSS inside it. htmx,
 // cached after the first page, saves a few things from reloading the page:
-// keep, stopping following, search as it is typed, and importing a file.
-// Each still works as a plain link or form without it.
+// keep, editing a feed's name, stopping following, search as it is typed,
+// and importing a file. Each still works as a plain link or form without it.
 import { displayTitle } from '#lib/format.ts';
 import { html, raw, type Html, type Part } from '#lib/html.ts';
 import type { Entry, Source } from '#lib/server/store.ts';
 
 export type Counts = { kept: number; feeds: number };
 
+// A feed found at what was typed, to look over before following it, or why
+// nothing was, or the feed already followed there.
+export type Found =
+  | { typed: string; kind: Source['kind']; ref: string; label: string }
+  | { typed: string; missed: string }
+  | { typed: string; followed: Source };
+
 const css = await Bun.file(new URL('./style.css', import.meta.url)).text();
 
 // Where a change says how it went. Always there, empty or not, for htmx to fill.
 const said = (text: string | null) => html`<p id="said" class="note">${text}</p>`;
 
+// Where a feed lives on the web: its site, or a Bluesky account's profile.
+function home(source: Source): string {
+  if (source.kind === 'atproto') return `https://bsky.app/profile/${source.ref}`;
+  if (source.kind === 'page') return `https://${source.ref}/`;
+  return `${URL.parse(source.ref)?.origin ?? source.ref}/`;
+}
+
 // The pages of an app served under `base`, with htmx at `htmx`.
 export function pages(base: string, htmx: string) {
   const at = (path: string) => base + path;
+  const feedAt = (source: Source, rest = '') => at(`/feed/${source.id}${rest}`);
+  // An htmx request for part of a page, swapped in for the element `target`.
+  const swap = (path: string, target: string) => html`hx-get="${at(path)}" hx-target="#${target}" hx-swap="outerHTML"`;
 
   // Links within the app are fetched ahead, those in the header as soon as
   // the page is up, the rest as they are about to be pressed. (Chrome only;
@@ -63,8 +80,8 @@ export function pages(base: string, htmx: string) {
           <header>
             <p class="name">${link('/', 'Lagan.')}</p>
             <p class="intro">
-              ${keptCount(counts, here)} for later, from ${link('/feeds', `${counts.feeds} feeds`)}.
-              ${link('/search', 'Search')} or ${link('/settings', 'settings')}.
+              ${keptCount(counts, here)}, ${link('/feeds', `${counts.feeds} feeds`)}, ${link('/search', 'search')},
+              ${link('/settings', 'settings')}.
             </p>
           </header>
           <main>${body}</main>
@@ -76,7 +93,7 @@ export function pages(base: string, htmx: string) {
   // leaving the page, swapping in the answer, the same form turned over.
   // Turned over just now, it says so.
   function keep(entry: Entry, fresh = false): Html {
-    const kept = entry.bookmarked === 1;
+    const kept = entry.kept === 1;
     return html`<form
       class="keep ${fresh && 'fresh'}"
       method="post"
@@ -105,11 +122,10 @@ export function pages(base: string, htmx: string) {
       : html`<p>${empty}</p>`;
 
   // One line to type or paste into, sent with Enter or its button.
-  const field = (action: string, name: string, placeholder: string, button: string, value = '') =>
-    html`<form class="field" method="post" action="${at(action)}">
+  const field = (action: string, method: 'get' | 'post', name: string, placeholder: string, button: string) =>
+    html`<form class="field" method="${method}" action="${at(action)}">
       <input
         name="${name}"
-        value="${value}"
         placeholder="${placeholder}"
         aria-label="${placeholder}"
         required
@@ -123,14 +139,14 @@ export function pages(base: string, htmx: string) {
     </form>`;
 
   // A feed's own setting: what it is, and a line to change it.
-  const setting = (source: Source, name: string, label: string, placeholder: string, words: string[]) =>
+  const setting = (source: Source, name: string, label: string, words: string[]) =>
     html`<label class="label" for="${name}">${label}</label>
-      <form class="field" method="post" action="${at(`/feed/${source.id}/${name}`)}">
+      <form class="field" method="post" action="${feedAt(source, `/${name}`)}">
         <input
           id="${name}"
           name="${name}"
           value="${words.join(', ')}"
-          placeholder="${placeholder}"
+          placeholder="With commas between"
           autocomplete="off"
           autocapitalize="off"
           spellcheck="false"
@@ -138,39 +154,68 @@ export function pages(base: string, htmx: string) {
         <button>Save</button>
       </form>`;
 
+  // A feed's name, a link to its site, with Edit at its end.
+  const name = (source: Source) =>
+    html`<div id="name" class="title">
+      <h1><a href="${home(source)}">${source.label}</a></h1>
+      <a class="button" href="${feedAt(source, '?edit')}" ${swap(`/feed/${source.id}/edit`, 'name')}>Edit</a>
+    </div>`;
+
+  // Editing a feed's name and address, in place of the name.
+  const edit = (source: Source, note: string | null = null) =>
+    html`<form id="name" class="edit" method="post" action="${feedAt(source, '/edit')}">
+      <label class="label" for="label">Name</label>
+      <input id="label" name="label" value="${source.label}" required autocomplete="off" />
+      <label class="label" for="ref">Feed address</label>
+      <input
+        id="ref"
+        name="ref"
+        value="${source.ref}"
+        required
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+      />
+      ${said(note)}
+      <div class="buttons">
+        <button class="filled">Save</button>
+        <a class="button" href="${feedAt(source)}" ${swap(`/feed/${source.id}/name`, 'name')}>Cancel</a>
+      </div>
+    </form>`;
+
   // Stopping following asks once more. htmx swaps the question in place;
   // without it, the question is the page again.
-  function stop(source: Source, sure: boolean): Html {
-    const swap = (query: string) =>
-      html`hx-get="${at(`/feed/${source.id}/stop${query}`)}" hx-target="#stop" hx-swap="outerHTML"`;
-    if (!sure)
-      return html`<div id="stop" class="stop">
-        <a class="button" href="${at(`/feed/${source.id}`)}?stop" ${swap('?sure')}>Stop following</a>
-      </div>`;
-    return html`<div id="stop" class="stop sure">
-      <span>Sure?</span>
-      <form method="post" action="${at(`/feed/${source.id}/remove`)}">
-        <button class="filled">Stop following</button>
-      </form>
-      <a href="${at(`/feed/${source.id}`)}" ${swap('')}>Cancel</a>
-    </div>`;
-  }
+  const stop = (source: Source, sure: boolean) =>
+    sure
+      ? html`<div id="stop" class="buttons stop sure">
+          <form method="post" action="${feedAt(source, '/remove')}">
+            <button class="filled">Stop following</button>
+          </form>
+          <a class="button" href="${feedAt(source)}" ${swap(`/feed/${source.id}/stop`, 'stop')}>Cancel</a>
+        </div>`
+      : html`<div id="stop" class="buttons stop">
+          <a class="button" href="${feedAt(source, '?stop')}" ${swap(`/feed/${source.id}/stop?sure`, 'stop')}
+            >Stop following</a
+          >
+        </div>`;
 
   // What search found: feeds by name, then entries by title.
-  const found = (query: string, feeds: Source[], list: Entry[]) =>
+  const results = (query: string, feeds: Source[], list: Entry[]) =>
     query &&
     html`${
       feeds.length > 0 &&
       html`<ul class="feeds">
-        ${feeds.map((feed) => html`<li><a href="${at(`/feed/${feed.id}`)}">${feed.label}</a></li>`)}
+        ${feeds.map((feed) => html`<li><a href="${feedAt(feed)}">${feed.label}</a></li>`)}
       </ul>`
     }${entries(list, 'Nothing found.')}`;
 
   return {
     keep,
     keptCount,
+    name,
+    edit,
     stop,
-    found,
+    results,
     said,
 
     home: (counts: Counts, list: Entry[]) => page('Lagan', counts, entries(list, 'Nothing yet.'), '/'),
@@ -179,42 +224,106 @@ export function pages(base: string, htmx: string) {
       page(
         'Kept',
         counts,
-        html`${field('/kept', 'links', 'Paste links to keep', 'Keep')}${said(note)}${entries(list, 'Nothing kept.')}`,
+        html`${field('/kept', 'post', 'links', 'Paste links to keep', 'Keep')}${said(note)}${entries(
+          list,
+          'Nothing kept.',
+        )}`,
         '/kept',
       ),
 
-    feeds: (counts: Counts, sources: Source[], note: string | null, typed: string) =>
+    feeds: (counts: Counts, sources: Source[], note: string | null) =>
       page(
         'Feeds',
         counts,
-        html`${field('/feeds', 'url', 'Feeds, sites or @handles', 'Follow', typed)}${said(note)}
+        html`${field('/feeds/new', 'get', 'links', 'Feeds, sites or @handles', 'Follow')}${said(note)}
           <ul class="feeds">
             ${sources.map(
               (source) =>
                 html`<li>
-                  <a href="${at(`/feed/${source.id}`)}">${source.label}</a
-                  >${source.folder && html` <span>${source.folder}</span>`}${source.error && html` <span>failing</span>`}
+                  <a href="${feedAt(source)}">${source.label}</a>${source.error && html` <span>failing</span>`}
                 </li>`,
             )}
           </ul>`,
         '/feeds',
       ),
 
-    // A feed, or a site whose pages were kept.
-    feed: (counts: Counts, source: Source, mutes: string[], cuts: string[], list: Entry[], stopping: boolean) =>
+    // What was found at what was pasted, to look over, rename and follow.
+    review: (counts: Counts, found: Found[]) => {
+      const followable = found.filter((each) => 'ref' in each);
+      return page(
+        'Follow',
+        counts,
+        html`<h1>
+            ${followable.length === 1 ? 'Follow this feed?' : followable.length ? 'Follow these feeds?' : 'No feeds there'}
+          </h1>
+          <form method="post" action="${at('/feeds')}">
+            ${found.map((each) =>
+              'ref' in each
+                ? html`<fieldset class="found">
+                    <input type="hidden" name="kind" value="${each.kind}" />
+                    <input type="hidden" name="found" value="${each.ref}" />
+                    <label class="label"
+                      >Name<input name="label" value="${each.label}" required autocomplete="off"
+                    /></label>
+                    <label class="label"
+                      >Feed address<input
+                        name="ref"
+                        value="${each.ref}"
+                        required
+                        autocomplete="off"
+                        autocapitalize="off"
+                        spellcheck="false"
+                    /></label>
+                  </fieldset>`
+                : 'missed' in each
+                  ? html`<p class="note">Nothing to follow at ${each.typed}: ${each.missed}</p>`
+                  : html`<p class="note">
+                      Already following <a href="${feedAt(each.followed)}">${each.followed.label}</a>.
+                    </p>`,
+            )}
+            ${
+              followable.length > 0 &&
+              html`<div class="buttons">
+                <button class="filled">
+                  ${followable.length === 1 ? 'Follow' : `Follow all ${followable.length}`}
+                </button>
+              </div>`
+            }
+          </form>
+          <p><a href="${at('/feeds')}">Back to feeds</a></p>`,
+      );
+    },
+
+    // A feed: its name and settings, then what it has posted.
+    feed: (
+      counts: Counts,
+      source: Source,
+      settings: { mutes: string[]; cuts: string[] },
+      list: Entry[],
+      ask: { edit: boolean; stop: boolean; note: string | null },
+    ) =>
       page(
         source.label,
         counts,
-        html`<h1>${source.label}</h1>
-          ${
-            source.kind === 'page'
-              ? html`<p class="address"><a href="https://${source.ref}/">Open the site</a></p>`
-              : html`<p class="address">${source.ref}</p>`
-          }
-          ${source.error && html`<p class="note">Failing: ${source.error}</p>`}
-          ${setting(source, 'mutes', 'Hide entries whose titles have', 'Words, with commas', mutes)}
-          ${setting(source, 'cuts', 'Take out of every title', 'Such as - YouTube', cuts)}
-          ${source.kind !== 'page' && stop(source, stopping)} ${entries(list, 'Nothing here yet.')}`,
+        html`${ask.edit ? edit(source, ask.note) : name(source)}
+        ${source.error && html`<p class="note">Failing: ${source.error}</p>`}
+        ${setting(source, 'mutes', 'Hide entries whose titles have any of', settings.mutes)}
+        ${setting(source, 'cuts', 'Take out of every title, wherever they appear', settings.cuts)}
+        ${stop(source, ask.stop)} ${entries(list, 'Nothing here yet.')}`,
+      ),
+
+    // A site whose pages were kept from their links. It isn't followed, so
+    // all there is to change is how its titles read.
+    site: (counts: Counts, source: Source, cuts: string[], list: Entry[]) =>
+      page(
+        source.label,
+        counts,
+        html`<div class="title">
+            <h1><a href="${home(source)}">${source.label}</a></h1>
+          </div>
+          <p>Pages kept from this site. It isn’t a feed: to follow someone on it, paste their page into Feeds.</p>
+          ${setting(source, 'cuts', 'Take out of every title, wherever they appear', cuts)}
+          ${entries(list, 'Nothing kept from here.')}`,
       ),
 
     search: (counts: Counts, query: string, feeds: Source[], list: Entry[]) =>
@@ -242,7 +351,7 @@ export function pages(base: string, htmx: string) {
             />
             <button>Search</button>
           </form>
-          <div id="results">${found(query, feeds, list)}</div>`,
+          <div id="results">${results(query, feeds, list)}</div>`,
         '/search',
       ),
 

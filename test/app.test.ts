@@ -43,8 +43,7 @@ beforeEach(() => {
 
 afterEach(() => server.stop(true));
 
-test('the home page lists new posts, read or not, but not the backlog, and opening it wakes the feeds', async () => {
-  store.mark([fresh().id], { read: true });
+test('the home page lists new posts but not the backlog, and opening it wakes the feeds', async () => {
   const page = await (await get('/')).text();
   expect(page).toContain('Post fresh');
   expect(page).not.toContain('Post backlog');
@@ -75,10 +74,10 @@ test('keep, as a plain form, goes back to the entry on the page it was pressed o
   const response = await post('/keep', { id: String(id), keep: '1' }, { Referer: at('/search?q=fresh') });
   expect(response.status).toBe(303);
   expect(response.headers.get('location')).toBe(`/lagan/search?q=fresh#e${id}`);
-  expect(fresh().bookmarked).toBe(1);
+  expect(fresh().kept).toBe(1);
   const elsewhere = await post('/keep', { id: String(id), keep: '0' }, { Referer: 'https://elsewhere.example/x' });
   expect(elsewhere.headers.get('location')).toBe(`/lagan/#e${id}`);
-  expect(fresh().bookmarked).toBe(0);
+  expect(fresh().kept).toBe(0);
 });
 
 test('keep sent by htmx answers with the form turned over and the count in the header, and an unknown entry is not found', async () => {
@@ -93,7 +92,7 @@ test('keep sent by htmx answers with the form turned over and the count in the h
 test('a change posted from another site is refused', async () => {
   const response = await post('/keep', { id: String(fresh().id), keep: '1' }, { 'Sec-Fetch-Site': 'cross-site' });
   expect(response.status).toBe(403);
-  expect(fresh().bookmarked).toBe(0);
+  expect(fresh().kept).toBe(0);
 });
 
 test("a feed's page has its backlog too, and its muted words are saved cleaned up", async () => {
@@ -107,10 +106,10 @@ test("a feed's page has its backlog too, and its muted words are saved cleaned u
 });
 
 test('stopping following a feed takes it and its entries away, but keeps what was kept', async () => {
-  store.mark([fresh().id], { bookmarked: true });
+  store.keep([fresh().id], true);
   expect((await post('/feed/1/remove', {})).status).toBe(303);
   expect(store.sources()).toEqual([]);
-  expect(store.entries(scopes.bookmarks).map((entry) => entry.title)).toEqual(['Post fresh']);
+  expect(store.entries(scopes.kept).map((entry) => entry.title)).toEqual(['Post fresh']);
   expect((await post('/feed/1/remove', {})).status).toBe(404);
 });
 
@@ -146,4 +145,40 @@ test('search sent by htmx answers with just what it found', async () => {
   const found = await (await get('/search?q=backlog', { 'HX-Request': 'true' })).text();
   expect(found).toContain('Post backlog');
   expect(found).not.toContain('<header');
+});
+
+test('following what was looked over adds each feed under the name it was given', async () => {
+  const many = await post('/feeds', {}, {});
+  expect(many.status).toBe(303);
+  const form = new URLSearchParams();
+  for (const [kind, ref, label] of [
+    ['rss', 'https://a.example/feed', 'Alpha'],
+    ['rss', 'https://b.example/feed', ''],
+  ]) {
+    form.append('kind', kind!);
+    form.append('found', ref!);
+    form.append('ref', ref!);
+    form.append('label', label!);
+  }
+  const response = await fetch(at('/feeds'), {
+    method: 'POST',
+    body: form,
+    headers: { 'Sec-Fetch-Site': 'same-origin' },
+    redirect: 'manual',
+  });
+  expect(response.headers.get('location')).toContain('/lagan/feeds?said=Following%202.');
+  expect(store.sources().map((source) => source.label)).toEqual(['Alpha', 'Example', 'https://b.example/feed']);
+});
+
+test("a feed's name can be changed in place, and its page has edit and stop but a site's has neither", async () => {
+  expect(await (await get('/feed/1/edit')).text()).toContain('name="label" value="Example"');
+  const renamed = await post('/feed/1/edit', { label: 'Renamed', ref: 'https://example.com/feed' });
+  expect(renamed.headers.get('location')).toBe('/lagan/feed/1');
+  expect(store.source(1)!.label).toBe('Renamed');
+  const site = store.keepPage('https://youtube.com/watch?v=1', 'A video - YouTube');
+  const page = await (await get(`/feed/${site.source_id}`)).text();
+  expect(page).toContain('href="https://youtube.com/"');
+  expect(page).toContain('/cuts"');
+  expect(page).not.toContain('/edit"');
+  expect(page).not.toContain('/stop');
 });

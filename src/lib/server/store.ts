@@ -3,9 +3,6 @@ import { Database, type SQLQueryBindings } from 'bun:sqlite';
 import { displayTitle } from '../format';
 import type { FetchResult } from './fetch';
 
-// none: from before the feed was followed, shown only on its own page.
-export type State = 'none' | 'unread' | 'read';
-
 export type Source = {
   id: number;
   kind: 'rss' | 'atproto' | 'page'; // 'page' is a site whose pages were kept from their links, not from a feed
@@ -26,14 +23,11 @@ export type Entry = {
   feed: string;
   url: string;
   published_at: number;
-  state: State;
-  bookmarked: 0 | 1;
-  page: 0 | 1; // bookmarked from a link, not from a feed
+  kept: 0 | 1;
+  page: 0 | 1; // kept from its link, not from a feed
   title: string;
   text: string; // only filled in for untitled entries, the only rows that show it
 };
-
-export type Mark = { read?: boolean; bookmarked?: boolean };
 
 export type Scope = { where: string; args?: SQLQueryBindings[]; limit?: number };
 
@@ -41,10 +35,9 @@ export type Scope = { where: string; args?: SQLQueryBindings[]; limit?: number }
 const NOT_MUTED = `NOT EXISTS (SELECT 1 FROM mutes m WHERE m.source_id = entries.source_id AND instr(lower(entries.title), m.word) > 0)`;
 
 export const scopes = {
-  unread: { where: `state = 'unread' AND bookmarked = 0 AND ${NOT_MUTED}` },
-  // The newest hundred, read or not: everything older is the archive.
-  latest: { where: `state <> 'none' AND ${NOT_MUTED}`, limit: 100 },
-  bookmarks: { where: 'bookmarked = 1' },
+  // The newest hundred: everything older is the archive.
+  latest: { where: `backlog = 0 AND ${NOT_MUTED}`, limit: 100 },
+  kept: { where: 'kept = 1' },
   feed: (id: number): Scope => ({ where: 'source_id = ?', args: [id], limit: 100 }),
 } satisfies Record<string, Scope | ((id: number) => Scope)>;
 
@@ -68,8 +61,8 @@ CREATE TABLE IF NOT EXISTS entries (
   guid TEXT NOT NULL,
   url TEXT NOT NULL,
   published_at INTEGER NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('none', 'unread', 'read')),
-  bookmarked INTEGER NOT NULL DEFAULT 0 CHECK (bookmarked IN (0, 1)),
+  backlog INTEGER NOT NULL DEFAULT 0 CHECK (backlog IN (0, 1)), -- from before the feed was followed: only on its own page
+  kept INTEGER NOT NULL DEFAULT 0 CHECK (kept IN (0, 1)),
   title TEXT NOT NULL DEFAULT '',
   text TEXT NOT NULL DEFAULT ''
 ) STRICT;
@@ -85,33 +78,12 @@ CREATE TABLE IF NOT EXISTS cuts (
 ) STRICT;
 CREATE UNIQUE INDEX IF NOT EXISTS source_guid ON entries(source_id, guid) WHERE guid <> '';
 CREATE UNIQUE INDEX IF NOT EXISTS source_url ON entries(source_id, url) WHERE url <> '';
-CREATE INDEX IF NOT EXISTS timeline ON entries(published_at DESC, id DESC) WHERE state <> 'none';
-CREATE INDEX IF NOT EXISTS bookmarks ON entries(published_at DESC, id DESC) WHERE bookmarked = 1;
+CREATE INDEX IF NOT EXISTS latest ON entries(published_at DESC, id DESC) WHERE backlog = 0;
+CREATE INDEX IF NOT EXISTS kept ON entries(published_at DESC, id DESC) WHERE kept = 1;
 CREATE INDEX IF NOT EXISTS by_source ON entries(source_id, published_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS by_state ON entries(state, published_at DESC, id DESC);
 `;
 
-// Databases from before read and bookmarked were two things kept "bookmarked"
-// as a fourth state. It becomes read and bookmarked. SQLite can't change a
-// table's checks in place, so the tables are copied into the new shape.
-const FLAGS_MIGRATION = `
-ALTER TABLE sources RENAME TO sources_old;
-ALTER TABLE entries RENAME TO entries_old;
-DROP INDEX IF EXISTS source_guid;
-DROP INDEX IF EXISTS source_url;
-DROP INDEX IF EXISTS timeline;
-DROP INDEX IF EXISTS by_source;
-DROP INDEX IF EXISTS by_state;
-${SCHEMA}
-INSERT INTO sources SELECT * FROM sources_old;
-INSERT INTO entries (id, source_id, guid, url, published_at, state, bookmarked, title, text)
-  SELECT id, source_id, guid, url, published_at, CASE state WHEN 'bookmarked' THEN 'read' ELSE state END, state = 'bookmarked', title, text
-  FROM entries_old;
-DROP TABLE entries_old;
-DROP TABLE sources_old;
-`;
-
-const ROW = `e.id, e.source_id, s.label AS feed, e.url, e.published_at, e.state, e.bookmarked, s.kind = 'page' AS page, e.title, CASE WHEN e.title = '' THEN e.text ELSE '' END AS text`;
+const ROW = `e.id, e.source_id, s.label AS feed, e.url, e.published_at, e.kept, s.kind = 'page' AS page, e.title, CASE WHEN e.title = '' THEN e.text ELSE '' END AS text`;
 const SEARCH_LIMIT = 200;
 const EARLIEST_DATE = 631_152_000_000; // 1990: anything earlier is a broken date
 const DAY = 86_400_000;
@@ -153,14 +125,46 @@ export class Store {
     this.db.run('PRAGMA journal_mode = WAL');
     this.db.run('PRAGMA busy_timeout = 5000');
     this.db.run('PRAGMA synchronous = NORMAL');
-    const columns = this.db.query<{ name: string }, []>(`SELECT name FROM pragma_table_info('entries')`).all();
-    if (columns.length && !columns.some((column) => column.name === 'bookmarked')) {
-      this.db.transaction(() => this.db.run(FLAGS_MIGRATION))();
-    } else {
-      this.db.run(SCHEMA);
-    }
+    this.migrate();
     this.db.run('PRAGMA foreign_keys = ON');
     this.splitPages();
+  }
+
+  // Entries once had a state, read, unread or never seen ("none"), and before
+  // that "bookmarked" as a fourth one. Only never seen still matters, as the
+  // backlog; bookmarked is kept. SQLite can't change a table's checks in
+  // place, so older tables are copied into the new shape.
+  private migrate(): void {
+    const columns = new Set(
+      this.db
+        .query<{ name: string }, []>(`SELECT name FROM pragma_table_info('entries')`)
+        .all()
+        .map((column) => column.name),
+    );
+    if (!columns.size || columns.has('backlog')) return void this.db.run(SCHEMA);
+    const kept = columns.has('bookmarked') ? 'bookmarked' : `state = 'bookmarked'`;
+    const sources = this.db.query<{ sql: string }, []>(`SELECT sql FROM sqlite_master WHERE name = 'sources'`).get();
+    const oldSources = !sources?.sql.includes("'page'"); // from before pages could be kept
+    const indexes = this.db
+      .query<{ name: string }, []>(
+        `SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'entries' AND sql IS NOT NULL`,
+      )
+      .all();
+    this.db.run('PRAGMA legacy_alter_table = ON'); // other tables keep pointing at "sources", not at its old copy
+    this.db.transaction(() => {
+      for (const { name } of indexes) this.db.run(`DROP INDEX ${name}`);
+      this.db.run('ALTER TABLE entries RENAME TO entries_old');
+      if (oldSources) this.db.run('ALTER TABLE sources RENAME TO sources_old');
+      this.db.run(SCHEMA);
+      if (oldSources) this.db.run('INSERT INTO sources SELECT * FROM sources_old');
+      this.db.run(
+        `INSERT INTO entries (id, source_id, guid, url, published_at, backlog, kept, title, text)
+         SELECT id, source_id, guid, url, published_at, state = 'none', ${kept}, title, text FROM entries_old`,
+      );
+      this.db.run('DROP TABLE entries_old');
+      if (oldSources) this.db.run('DROP TABLE sources_old');
+    })();
+    this.db.run('PRAGMA legacy_alter_table = OFF');
   }
 
   // Pages kept from their links once all belonged to one source, "Pages".
@@ -178,10 +182,16 @@ export class Store {
     })();
   }
 
+  // The feeds followed.
   sources(): Source[] {
     return this.db
       .query<Source, []>(`SELECT * FROM sources WHERE kind <> 'page' ORDER BY folder, label COLLATE NOCASE`)
       .all();
+  }
+
+  // The sites pages were kept from.
+  sites(): Source[] {
+    return this.db.query<Source, []>(`SELECT * FROM sources WHERE kind = 'page' ORDER BY label COLLATE NOCASE`).all();
   }
 
   source(id: number): Source | null {
@@ -206,15 +216,6 @@ export class Store {
     return ids;
   }
 
-  mutesBySource(): Record<number, string[]> {
-    const rows = this.db
-      .query<{ source_id: number; word: string }, []>('SELECT source_id, word FROM mutes ORDER BY word')
-      .all();
-    const all: Record<number, string[]> = {};
-    for (const row of rows) (all[row.source_id] ??= []).push(row.word);
-    return all;
-  }
-
   lastPost(id: number): number {
     return (
       this.db
@@ -226,7 +227,7 @@ export class Store {
   // Stores a fetch and returns how many entries it added or changed.
   save(source: Source, result: FetchResult, failures: number, nextAt: number): number {
     const now = Date.now();
-    const state: State = source.fetched_at === null ? 'none' : 'unread'; // a feed's first fetch is its backlog
+    const backlog = source.fetched_at === null ? 1 : 0; // a feed's first fetch is its backlog
     const dates = new Set(result.items.map((item) => item.published));
     const allSameDate = result.items.length > 3 && dates.size === 1;
     const current = new Set(result.items.map((item) => item.guid));
@@ -236,7 +237,7 @@ export class Store {
     );
     const repoint = this.db.query('UPDATE OR IGNORE entries SET guid = ?, url = ? WHERE id = ?');
     const insert = this.db.query(
-      `INSERT OR IGNORE INTO entries (source_id, guid, url, published_at, state, title, text) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO entries (source_id, guid, url, published_at, backlog, title, text) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
 
     const saved = this.db.transaction(() => {
@@ -253,7 +254,7 @@ export class Store {
           item.published !== null && item.published > EARLIEST_DATE && item.published <= now + DAY && !allSameDate;
         const done = old
           ? repoint.run(item.guid, item.url, old.id)
-          : insert.run(source.id, item.guid, item.url, usable ? item.published : now, state, item.title, item.text);
+          : insert.run(source.id, item.guid, item.url, usable ? item.published : now, backlog, item.title, item.text);
         if (done.changes) touched.push(old ? old.id : Number(done.lastInsertRowid));
       }
       const failed = !!result.error;
@@ -300,7 +301,7 @@ export class Store {
     return row && this.cut([row])[0]!;
   }
 
-  // Finds entries in any state by what their row shows as a title.
+  // Finds entries, the backlog too, by what their row shows as a title.
   searchEntries(query: string): Entry[] {
     const typed = wordsOf(query);
     if (!typed.length) return [];
@@ -327,35 +328,29 @@ export class Store {
     return [...byName, ...byOther];
   }
 
-  // Marks entries read or unread, bookmarked or not: one pressed, or several
-  // chosen together. Bookmarking something never seen counts as seeing it, so
-  // it joins the timeline as read; otherwise read and bookmarked are separate.
-  // Answers with the entries as they now are.
-  mark(ids: number[], change: Mark): Entry[] {
+  // Keeps entries, or stops keeping them. Keeping something from the backlog
+  // brings it out, onto the home page. Answers with the entries as they now are.
+  keep(ids: number[], kept: boolean): Entry[] {
     this.db.transaction(() => {
-      for (const id of ids) {
-        if (change.read !== undefined)
-          this.db.run('UPDATE entries SET state = ? WHERE id = ?', [change.read ? 'read' : 'unread', id]);
-        if (change.bookmarked !== undefined)
-          this.db.run(
-            `UPDATE entries SET bookmarked = ?1, state = CASE WHEN ?1 AND state = 'none' THEN 'read' ELSE state END WHERE id = ?2`,
-            [change.bookmarked ? 1 : 0, id],
-          );
-      }
+      for (const id of ids)
+        this.db.run('UPDATE entries SET kept = ?1, backlog = CASE WHEN ?1 THEN 0 ELSE backlog END WHERE id = ?2', [
+          kept ? 1 : 0,
+          id,
+        ]);
     })();
     return ids.map((id) => this.entry(id)).filter((entry) => entry !== null);
   }
 
-  // A page bookmarked from its link. If some feed already has it, that entry
-  // is bookmarked instead of keeping a second copy.
-  bookmarkPage(url: string, title: string): Entry {
+  // A page kept from its link. If some feed already has it, that entry is
+  // kept instead of a second copy.
+  keepPage(url: string, title: string): Entry {
     const known = this.db
       .query<{ id: number }, [string]>('SELECT id FROM entries WHERE url = ? ORDER BY id LIMIT 1')
       .get(url);
-    if (known) return this.mark([known.id], { bookmarked: true })[0]!;
+    if (known) return this.keep([known.id], true)[0]!;
     const { id } = this.db
       .query<{ id: number }, [number, string, string, number, string]>(
-        `INSERT INTO entries (source_id, guid, url, published_at, state, bookmarked, title) VALUES (?, ?, ?, ?, 'read', 1, ?) RETURNING id`,
+        `INSERT INTO entries (source_id, guid, url, published_at, kept, title) VALUES (?, ?, ?, ?, 1, ?) RETURNING id`,
       )
       .get(this.siteSource(url), url, url, Date.now(), title)!;
     return this.entry(id)!;
@@ -372,13 +367,26 @@ export class Store {
   // Removes a feed and its entries. What was kept stays, as pages of its site.
   removeSource(id: number): void {
     const kept = this.db.query<{ id: number; url: string }, [number]>(
-      'SELECT id, url FROM entries WHERE source_id = ? AND bookmarked = 1',
+      'SELECT id, url FROM entries WHERE source_id = ? AND kept = 1',
     );
     this.db.transaction(() => {
       for (const entry of kept.all(id))
         this.db.run('UPDATE OR IGNORE entries SET source_id = ? WHERE id = ?', [this.siteSource(entry.url), entry.id]);
       this.db.run(`DELETE FROM sources WHERE id = ? AND kind <> 'page'`, [id]);
     })();
+  }
+
+  rename(id: number, label: string): void {
+    this.db.run('UPDATE sources SET label = ? WHERE id = ?', [label, id]);
+  }
+
+  // Points a feed at another address, maybe of another kind. What it fetches
+  // from there first is its backlog, as when it was followed.
+  readdress(id: number, kind: Source['kind'], ref: string): void {
+    this.db.run(
+      `UPDATE sources SET kind = ?, ref = ?, etag = '', last_modified = '', fetched_at = NULL, next_at = NULL, failures = 0, error = '' WHERE id = ?`,
+      [kind, ref, id],
+    );
   }
 
   cuts(sourceId: number): string[] {
@@ -440,62 +448,60 @@ export class Store {
     return this.cut(rows);
   }
 
-  export(only?: 'unread' | 'bookmarked') {
-    const where =
-      only === 'unread' ? `WHERE e.state = 'unread'` : only === 'bookmarked' ? 'WHERE e.bookmarked = 1' : '';
+  // Entries for the command line, newest first.
+  export(onlyKept = false) {
     const rows = this.db
       .query<Entry, []>(
-        `SELECT e.id, e.source_id, s.label AS feed, e.url, e.published_at, e.state, e.bookmarked, e.title, e.text FROM entries e JOIN sources s ON s.id = e.source_id ${where} ORDER BY e.published_at DESC, e.id DESC`,
+        `SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id ${onlyKept ? 'WHERE e.kept = 1' : ''} ORDER BY e.published_at DESC, e.id DESC`,
       )
       .all();
-    return rows.map((row) => ({
+    return this.cut(rows).map((row) => ({
       id: row.id,
       feed: row.feed,
       title: displayTitle(row),
       url: row.url,
       published: new Date(row.published_at).toISOString(),
-      state: row.state,
-      bookmarked: row.bookmarked === 1,
-      text: row.text,
+      kept: row.kept === 1,
     }));
   }
 
   // Folds together copies of one post left behind by a site that changed its
-  // address: same feed, title, date and URL path. The newest copy stays and keeps
-  // the strongest state any copy had, and a bookmark if any copy had one.
+  // address: same feed, title, date and URL path. The newest copy stays, out of
+  // the backlog if any copy was, and kept if any copy was.
   mergeMoved(): number {
-    type Copy = Pick<Entry, 'id' | 'url' | 'state' | 'bookmarked' | 'source_id' | 'title' | 'published_at'>;
+    type Copy = {
+      id: number;
+      url: string;
+      backlog: 0 | 1;
+      kept: 0 | 1;
+      source_id: number;
+      title: string;
+      published_at: number;
+    };
     const copies = this.db
       .query<Copy, []>(
-        `SELECT e.id, e.url, e.state, e.bookmarked, e.source_id, e.title, e.published_at FROM entries e
+        `SELECT e.id, e.url, e.backlog, e.kept, e.source_id, e.title, e.published_at FROM entries e
          JOIN (SELECT source_id s, title t, published_at p FROM entries WHERE title <> '' GROUP BY 1, 2, 3 HAVING count(*) > 1) d
          ON e.source_id = d.s AND e.title = d.t AND e.published_at = d.p ORDER BY e.id DESC`,
       )
       .all();
     const groups = new Map<string, Copy[]>();
     for (const copy of copies) {
-      let path = copy.url;
-      try {
-        path = new URL(copy.url).pathname;
-      } catch {}
+      const path = URL.parse(copy.url)?.pathname ?? copy.url;
       const key = JSON.stringify([copy.source_id, copy.title, copy.published_at, path]);
       groups.set(key, [...(groups.get(key) ?? []), copy]);
     }
-    const strength: Record<State, number> = { none: 0, read: 1, unread: 2 };
     return this.db.transaction(() => {
       let removed = 0;
       for (const group of groups.values()) {
         if (group.length < 2) continue;
-        const state = group.reduce(
-          (best, copy) => (strength[copy.state] > strength[best] ? copy.state : best),
-          group[0]!.state,
-        );
         for (const extra of group.slice(1)) {
           this.db.run('DELETE FROM entries WHERE id = ?', [extra.id]);
           removed++;
         }
-        const bookmarked = group.some((copy) => copy.bookmarked) ? 1 : 0;
-        this.db.run('UPDATE entries SET state = ?, bookmarked = ? WHERE id = ?', [state, bookmarked, group[0]!.id]);
+        const backlog = group.every((copy) => copy.backlog) ? 1 : 0;
+        const kept = group.some((copy) => copy.kept) ? 1 : 0;
+        this.db.run('UPDATE entries SET backlog = ?, kept = ? WHERE id = ?', [backlog, kept, group[0]!.id]);
       }
       return removed;
     })();

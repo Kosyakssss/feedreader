@@ -74,7 +74,7 @@ header {
 }
 
 .name a {
-  text-decoration: none;
+  text-decoration-thickness: 2px;
 }
 
 .intro {
@@ -156,20 +156,23 @@ p {
   text-decoration: underline;
 }
 
-/* Keep and kept are the same pill, empty or filled, the size of the line
-   they sit on. The finger gets more room around it than the eye sees. */
+/* Keep is a word; kept is the word filled in, as a pill the size of the
+   line it sits on. The finger gets more room around it than the eye sees. */
 .keep button {
   position: relative;
   min-width: 3.75em;
   padding: 0 0.75em;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 1em;
   background: none;
   color: var(--link);
   font: inherit;
   font-size: 0.8125rem;
   font-weight: 600;
-  line-height: 1.45;
+  line-height: 1.5;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
   cursor: pointer;
   transition:
     scale 0.1s,
@@ -183,9 +186,9 @@ p {
 }
 
 .keep button[aria-pressed='true'] {
-  border-color: var(--link);
   background: var(--link);
   color: var(--bg);
+  text-decoration: none;
 }
 
 .keep.htmx-request button {
@@ -208,7 +211,7 @@ p {
 
 @keyframes empty {
   from {
-    background: var(--press);
+    scale: 0.85;
   }
 }
 
@@ -230,6 +233,9 @@ p {
 }
 
 input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
   flex: 1;
   min-width: 0;
   padding: 0.45em 0.65em;
@@ -283,23 +289,68 @@ button.filled {
   margin-block-end: 1.25rem;
 }
 
-/* Stop following, and the question it asks first. */
-.stop {
+/* A feed's name, a link to its site, with Edit at its end; and in its
+   place while editing, the name and the address. */
+.title {
   display: flex;
   gap: 1rem;
   align-items: center;
-  margin-block: 0.5rem 2rem;
+  justify-content: space-between;
+  margin-block-end: 1.25rem;
 }
 
-.stop.sure {
-  animation: ask 0.2s ease-out;
+.title h1 {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
-@keyframes ask {
+.edit {
+  margin-block-end: 1.25rem;
+}
+
+.edit input {
+  margin-block-end: 0.75rem;
+}
+
+/* Stop following fills the width, and so does the question it asks first:
+   the same row, split in two, so nothing moves. */
+.stop {
+  margin-block: 0.25rem 2rem;
+}
+
+.stop > * {
+  flex: 1;
+  text-align: center;
+}
+
+.stop form button {
+  width: 100%;
+}
+
+.stop.sure > .button {
+  flex: 0 0 auto;
+}
+
+.stop.sure .filled {
+  animation: fade 0.15s ease-out;
+}
+
+@keyframes fade {
   from {
     opacity: 0;
-    translate: 0 -0.25rem;
   }
+}
+
+/* Feeds found, to look over before following them. */
+.found {
+  margin: 0 0 1.5rem;
+  padding: 0;
+  border: 0;
+}
+
+.found input {
+  margin-block: 0.375rem 0.75rem;
+  font-size: 1rem;
 }
 
 .feeds {
@@ -318,7 +369,7 @@ button.filled {
   }
 
   .keep.fresh button,
-  .stop.sure {
+  .stop.sure .filled {
     animation: none;
   }
 }
