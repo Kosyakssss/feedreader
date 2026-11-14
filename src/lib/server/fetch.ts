@@ -363,6 +363,7 @@ export class Fetcher {
       if (!source) return;
       await this.turn(source.kind === 'atproto' ? 'atproto' : new URL(source.ref).hostname);
       const result = await fetchSource(source);
+      if (this.store.source(id)?.ref !== source.ref) continue; // given a new address meanwhile: fetch that now
       const failures = result.error ? source.failures + 1 : 0;
       const earliest = earliestAfter(result, failures);
       loop.earliest = Date.now() + earliest;

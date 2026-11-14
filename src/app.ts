@@ -8,7 +8,7 @@ import { readOpml, sourceFor, writeOpml } from '#lib/server/opml.ts';
 import { findFeed, pageTitle } from '#lib/server/sites.ts';
 import { scopes, type Source } from '#lib/server/store.ts';
 import { html, type Html } from '#lib/html.ts';
-import { pages, type Found } from './pages';
+import { address, pages, type Found } from './pages';
 
 type Handler = (request: Bun.BunRequest) => Response | Promise<Response>;
 
@@ -70,8 +70,8 @@ function plainly(thrown: unknown): string {
   return 'no feed there';
 }
 
-// Chrome keeps pages it fetched ahead for a while. A change made without
-// leaving the page makes them stale.
+// Chrome keeps pages it fetched ahead for a while. Keeping without leaving
+// the page makes them stale.
 const fresh = (response: Response) => {
   response.headers.set('Clear-Site-Data', '"prefetchCache"');
   return response;
@@ -229,7 +229,8 @@ export function app({ store, wake, follow }: Lagan, base = '') {
               note,
             ),
           );
-        if (ref && ref !== source.ref) {
+        // The address as the form showed it is no change, however it is written.
+        if (ref && ref !== source.ref && ref !== address(source)) {
           let found;
           try {
             found = await findFeed(ref);
@@ -296,17 +297,15 @@ export function app({ store, wake, follow }: Lagan, base = '') {
       // Follows every feed in an OPML file that isn't followed already.
       POST: async (request) => {
         const file = (await request.formData()).get('file');
-        const told = (said: string) =>
-          fromHtmx(request) ? fresh(sent(views.said(said))) : see(saying(at('/feeds'), said));
         let listed;
         try {
           listed = readOpml(file instanceof Blob ? await file.text() : '');
         } catch {
-          return told('That file could not be read as OPML.');
+          return see(saying(at('/feeds'), 'That file could not be read as OPML.'));
         }
         const added = store.addSources(listed.flatMap((feed) => (URL.canParse(feed.url) ? [sourceFor(feed)] : [])));
         for (const id of added) follow(id);
-        return told(`${listed.length} feeds in the file, ${added.length} new.`);
+        return see(saying(at('/feeds'), `${listed.length} feeds in the file, ${added.length} new.`));
       },
     },
   };

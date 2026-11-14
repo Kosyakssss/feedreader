@@ -95,10 +95,6 @@ p {
   margin: 0 0 1rem;
 }
 
-.note:empty {
-  display: none;
-}
-
 .note {
   overflow-wrap: anywhere;
 }

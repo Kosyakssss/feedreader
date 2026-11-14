@@ -1,7 +1,6 @@
 // Every page, as HTML. Each one is whole by itself, its CSS inside it. htmx,
 // cached after the first page, saves a few things from reloading the page:
-// keep, editing a feed's name, stopping following, search as it is typed,
-// and importing a feeds file. Each still works as a plain link or form without it.
+// keep, editing a feed's name, stopping following, and search as it is typed. Each still works as a plain link or form without it.
 import { displayTitle } from '#lib/format.ts';
 import { html, raw, type Html, type Part } from '#lib/html.ts';
 import type { Entry, Source } from '#lib/server/store.ts';
@@ -17,8 +16,8 @@ export type Found =
 
 const css = await Bun.file(new URL('./style.css', import.meta.url)).text();
 
-// Where a change says how it went. Always there, empty or not, for htmx to fill.
-const said = (text: string | null) => html`<p id="said" class="note">${text}</p>`;
+// Where a change says how it went.
+const said = (text: string | null) => text && html`<p class="note">${text}</p>`;
 
 // An address as people write it.
 const shown = (url: string) => url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
@@ -32,7 +31,8 @@ function home(source: Source): string {
 
 // A feed's address as people know it: a Bluesky account's profile rather
 // than its DID.
-const address = (source: Source) => (source.kind === 'atproto' ? `https://bsky.app/profile/${source.ref}` : source.ref);
+export const address = (source: Source) =>
+  source.kind === 'atproto' ? `https://bsky.app/profile/${source.ref}` : source.ref;
 
 // The pages of an app served under `base`, with htmx at `htmx`.
 export function pages(base: string, htmx: string) {
@@ -237,7 +237,6 @@ export function pages(base: string, htmx: string) {
     edit,
     stop,
     results,
-    said,
 
     home: (counts: Counts, list: Entry[]) => page('Lagan', counts, entries(list, 'Nothing yet.'), '/'),
 
@@ -265,20 +264,15 @@ export function pages(base: string, htmx: string) {
                 </li>`,
             )}
           </ul>
-          <form
-            class="buttons"
-            method="post"
-            action="${at('/opml')}"
-            enctype="multipart/form-data"
-            hx-post="${at('/opml')}"
-            hx-encoding="multipart/form-data"
-            hx-trigger="change"
-            hx-target="#said"
-            hx-swap="outerHTML"
-          >
+          <form class="buttons" method="post" action="${at('/opml')}" enctype="multipart/form-data">
             <a class="button" href="${at('/opml')}" download="lagan.opml">Export as OPML</a>
             <label class="button"
-              >Import OPML<input type="file" name="file" accept=".opml,.xml,text/xml,text/x-opml" hidden
+              >Import OPML<input
+                type="file"
+                name="file"
+                accept=".opml,.xml,text/xml,text/x-opml"
+                hidden
+                onchange="this.form.submit()"
             /></label>
             <noscript><button>Send the file</button></noscript>
           </form>`,

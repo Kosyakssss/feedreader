@@ -229,8 +229,6 @@ export class Store {
 
   // Stores a fetch and returns how many entries it added or changed.
   save(source: Source, result: FetchResult, failures: number, nextAt: number): number {
-    // Given a new address while this fetch was under way: the fetch is of the old one.
-    if (this.source(source.id)?.ref !== source.ref) return 0;
     const now = Date.now();
     const backlog = source.fetched_at === null ? 1 : 0; // a feed's first fetch is its backlog
     const dates = new Set(result.items.map((item) => item.published));

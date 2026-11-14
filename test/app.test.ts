@@ -193,3 +193,11 @@ test('keep sent by htmx clears what Chrome fetched ahead, which it has made stal
   const answer = await post('/keep', { id: String(fresh().id), keep: '1' }, { 'HX-Request': 'true' });
   expect(answer.headers.get('clear-site-data')).toBe('"prefetchCache"');
 });
+
+test("renaming a feed alone doesn't look up its address again, written however the form showed it", async () => {
+  store.addSource('atproto', 'did:plc:abc', '@someone.example');
+  const id = store.sources().find((source) => source.kind === 'atproto')!.id;
+  const saved = await post(`/feed/${id}/edit`, { label: 'Someone', ref: 'https://bsky.app/profile/did:plc:abc' });
+  expect(saved.headers.get('location')).toBe(`/lagan/feed/${id}`);
+  expect(store.source(id)).toMatchObject({ label: 'Someone', ref: 'did:plc:abc' });
+});
