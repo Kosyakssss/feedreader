@@ -148,8 +148,6 @@ test('search sent by htmx answers with just what it found', async () => {
 });
 
 test('following what was looked over adds each feed under the name it was given', async () => {
-  const many = await post('/feeds', {}, {});
-  expect(many.status).toBe(303);
   const form = new URLSearchParams();
   for (const [kind, ref, label] of [
     ['rss', 'https://a.example/feed', 'Alpha'],
@@ -181,4 +179,17 @@ test("a feed's name can be changed in place, and its page has edit and stop but 
   expect(page).toContain('/cuts"');
   expect(page).not.toContain('/edit"');
   expect(page).not.toContain('/stop');
+});
+
+test("a site's page is not a feed's: the feed-only addresses don't answer for it", async () => {
+  const site = store.keepPage('https://youtube.com/watch?v=1', 'A video').source_id;
+  for (const path of ['/edit', '/name', '/stop']) expect((await get(`/feed/${site}${path}`)).status).toBe(404);
+  expect((await post(`/feed/${site}/remove`, {})).status).toBe(404);
+  expect((await post(`/feed/${site}/edit`, { label: 'x', ref: 'https://example.com/feed' })).status).toBe(404);
+  expect((await post(`/feed/${site}/cuts`, { cuts: '- YouTube' })).status).toBe(303);
+});
+
+test('keep sent by htmx clears what Chrome fetched ahead, which it has made stale', async () => {
+  const answer = await post('/keep', { id: String(fresh().id), keep: '1' }, { 'HX-Request': 'true' });
+  expect(answer.headers.get('clear-site-data')).toBe('"prefetchCache"');
 });

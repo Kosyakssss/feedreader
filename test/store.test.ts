@@ -105,8 +105,11 @@ test("a feed's muted words keep matching entries off the home page, not off its 
 
 test('a link kept is stored once: an entry a feed already has is kept instead', () => {
   saveItems(item('a'));
-  expect(store.keepPage('https://example.com/a', '')).toMatchObject({ title: 'Post a', kept: 1, page: 0 });
-  expect(store.keepPage('https://elsewhere.example/x', 'Elsewhere')).toMatchObject({ kept: 1, page: 1 });
+  expect(store.keepPage('https://example.com/a', '')).toMatchObject({ title: 'Post a', kept: 1, feed: 'Example' });
+  expect(store.keepPage('https://elsewhere.example/x', 'Elsewhere')).toMatchObject({
+    kept: 1,
+    feed: 'elsewhere.example',
+  });
   expect(titles(scopes.kept).toSorted()).toEqual(['Elsewhere', 'Post a']);
   expect(store.sources().map((source) => source.label)).toEqual(['Example']);
   expect(store.sites().map((site) => site.label)).toEqual(['elsewhere.example']);
@@ -200,12 +203,12 @@ test('copies at different paths are different posts', () => {
 test('pages kept from their links belong to their sites, and so does what is kept from a feed no longer followed', () => {
   saveItems(item('a'));
   const page = store.keepPage('https://www.youtube.com/watch?v=1', 'Logical fallacies - YouTube');
-  expect(page).toMatchObject({ feed: 'youtube.com', page: 1 });
+  expect(page).toMatchObject({ feed: 'youtube.com' });
   expect(store.keepPage('https://youtube.com/watch?v=2', 'Two').source_id).toBe(page.source_id);
   const a = store.entries(scopes.feed(feed.id))[0]!;
   store.keep([a.id], true);
   store.removeSource(feed.id);
-  expect(store.entry(a.id)).toMatchObject({ feed: 'example.com', page: 1, kept: 1 });
+  expect(store.entry(a.id)).toMatchObject({ feed: 'example.com', kept: 1 });
   expect(store.sources()).toEqual([]); // sites aren't feeds
 });
 
@@ -215,4 +218,31 @@ test("a site's cuts tidy its titles, in any case, and never leave one empty", ()
   expect(store.entry(page.id)!.title).toBe('Logical fallacies');
   store.setCuts(page.source_id, ['Logical fallacies - YouTube']);
   expect(store.entry(page.id)!.title).toBe('Logical fallacies - YouTube');
+});
+
+test('a database from when entries had a read state and bookmarked was a column, with all kept pages in one source, moves over', () => {
+  const path = `${Bun.env.TMPDIR ?? '/tmp'}/lagan-migrate-flags-${process.pid}.sqlite`;
+  const old = new Database(path, { create: true });
+  old.run(`CREATE TABLE sources (id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('rss', 'atproto', 'page')), ref TEXT NOT NULL UNIQUE, label TEXT NOT NULL, folder TEXT NOT NULL DEFAULT '', etag TEXT NOT NULL DEFAULT '', last_modified TEXT NOT NULL DEFAULT '', fetched_at INTEGER, next_at INTEGER, failures INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '') STRICT;
+    CREATE TABLE entries (id INTEGER PRIMARY KEY, source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE, guid TEXT NOT NULL, url TEXT NOT NULL, published_at INTEGER NOT NULL, state TEXT NOT NULL CHECK (state IN ('none', 'unread', 'read')), bookmarked INTEGER NOT NULL DEFAULT 0 CHECK (bookmarked IN (0, 1)), title TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '') STRICT;
+    CREATE INDEX by_state ON entries(state, published_at DESC, id DESC);
+    INSERT INTO sources (id, kind, ref, label) VALUES (1, 'rss', 'https://example.com/feed', 'Example'), (2, 'page', 'pages', 'Pages');
+    INSERT INTO entries (source_id, guid, url, published_at, state, bookmarked, title) VALUES
+      (1, 'a', 'https://example.com/a', 1, 'read', 1, 'Kept post'), (1, 'b', 'https://example.com/b', 2, 'none', 0, 'Backlog'),
+      (2, 'https://youtube.com/watch?v=1', 'https://youtube.com/watch?v=1', 3, 'read', 1, 'Video');`);
+  old.close();
+  try {
+    const migrated = new Store(path);
+    expect(migrated.entries(scopes.kept).map((entry) => [entry.title, entry.feed])).toEqual([
+      ['Video', 'youtube.com'],
+      ['Kept post', 'Example'],
+    ]);
+    expect(migrated.entries(scopes.latest).map((entry) => entry.title)).toEqual(['Video', 'Kept post']);
+    expect(migrated.sites().map((site) => site.ref)).toEqual(['youtube.com']);
+  } finally {
+    for (const suffix of ['', '-wal', '-shm'])
+      Bun.file(path + suffix)
+        .delete()
+        .catch(() => {});
+  }
 });

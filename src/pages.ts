@@ -1,7 +1,7 @@
 // Every page, as HTML. Each one is whole by itself, its CSS inside it. htmx,
 // cached after the first page, saves a few things from reloading the page:
 // keep, editing a feed's name, stopping following, search as it is typed,
-// and importing a file. Each still works as a plain link or form without it.
+// and importing a feeds file. Each still works as a plain link or form without it.
 import { displayTitle } from '#lib/format.ts';
 import { html, raw, type Html, type Part } from '#lib/html.ts';
 import type { Entry, Source } from '#lib/server/store.ts';
@@ -20,12 +20,19 @@ const css = await Bun.file(new URL('./style.css', import.meta.url)).text();
 // Where a change says how it went. Always there, empty or not, for htmx to fill.
 const said = (text: string | null) => html`<p id="said" class="note">${text}</p>`;
 
+// An address as people write it.
+const shown = (url: string) => url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
+
 // Where a feed lives on the web: its site, or a Bluesky account's profile.
 function home(source: Source): string {
   if (source.kind === 'atproto') return `https://bsky.app/profile/${source.ref}`;
   if (source.kind === 'page') return `https://${source.ref}/`;
   return `${URL.parse(source.ref)?.origin ?? source.ref}/`;
 }
+
+// A feed's address as people know it: a Bluesky account's profile rather
+// than its DID.
+const address = (source: Source) => (source.kind === 'atproto' ? `https://bsky.app/profile/${source.ref}` : source.ref);
 
 // The pages of an app served under `base`, with htmx at `htmx`.
 export function pages(base: string, htmx: string) {
@@ -80,8 +87,7 @@ export function pages(base: string, htmx: string) {
           <header>
             <p class="name">${link('/', 'Lagan.')}</p>
             <p class="intro">
-              ${keptCount(counts, here)}, ${link('/feeds', `${counts.feeds} feeds`)}, ${link('/search', 'search')},
-              ${link('/settings', 'settings')}.
+              ${link('/search', 'Search')} ${keptCount(counts, here)} and ${link('/feeds', `${counts.feeds} feeds`)}.
             </p>
           </header>
           <main>${body}</main>
@@ -106,7 +112,8 @@ export function pages(base: string, htmx: string) {
     </form>`;
   }
 
-  const entries = (list: Entry[], empty: string) =>
+  // Entries, each with where it is from, unless they are all from one place.
+  const entries = (list: Entry[], empty: string, from = true) =>
     list.length
       ? html`<ol class="entries">
           ${list.map(
@@ -114,16 +121,29 @@ export function pages(base: string, htmx: string) {
               html`<li id="e${entry.id}">
                 <a href="${entry.url}">${displayTitle(entry)}</a>
                 <div class="meta">
-                  <a class="from" href="${at(`/feed/${entry.source_id}`)}">${entry.feed}</a>${keep(entry)}
+                  ${from && html`<a class="from" href="${at(`/feed/${entry.source_id}`)}">${entry.feed}</a>`}${keep(entry)}
                 </div>
               </li>`,
           )}
         </ol>`
       : html`<p>${empty}</p>`;
 
-  // One line to type or paste into, sent with Enter or its button.
-  const field = (action: string, method: 'get' | 'post', name: string, placeholder: string, button: string) =>
-    html`<form class="field" method="${method}" action="${at(action)}">
+  // One line to type or paste into, sent with Enter or its button, which
+  // says it is at work while the page it asked for comes.
+  const field = (
+    action: string,
+    method: 'get' | 'post',
+    name: string,
+    placeholder: string,
+    button: string,
+    busy: string,
+  ) =>
+    html`<form
+      class="field"
+      method="${method}"
+      action="${at(action)}"
+      onsubmit="this.querySelector('button').textContent = '${busy}'"
+    >
       <input
         name="${name}"
         placeholder="${placeholder}"
@@ -161,16 +181,17 @@ export function pages(base: string, htmx: string) {
       <a class="button" href="${feedAt(source, '?edit')}" ${swap(`/feed/${source.id}/edit`, 'name')}>Edit</a>
     </div>`;
 
-  // Editing a feed's name and address, in place of the name.
-  const edit = (source: Source, note: string | null = null) =>
+  // Editing a feed's name and address, in place of the name; after a try
+  // that failed, with what was typed and why.
+  const edit = (source: Source, note: string | null = null, typed: { label?: string; ref?: string } = {}) =>
     html`<form id="name" class="edit" method="post" action="${feedAt(source, '/edit')}">
       <label class="label" for="label">Name</label>
-      <input id="label" name="label" value="${source.label}" required autocomplete="off" />
+      <input id="label" name="label" value="${typed.label ?? source.label}" required autocomplete="off" />
       <label class="label" for="ref">Feed address</label>
       <input
         id="ref"
         name="ref"
-        value="${source.ref}"
+        value="${typed.ref ?? address(source)}"
         required
         autocomplete="off"
         autocapitalize="off"
@@ -224,7 +245,7 @@ export function pages(base: string, htmx: string) {
       page(
         'Kept',
         counts,
-        html`${field('/kept', 'post', 'links', 'Paste links to keep', 'Keep')}${said(note)}${entries(
+        html`${field('/kept', 'post', 'links', 'Paste links to keep', 'Keep', 'Keeping…')}${said(note)}${entries(
           list,
           'Nothing kept.',
         )}`,
@@ -235,7 +256,7 @@ export function pages(base: string, htmx: string) {
       page(
         'Feeds',
         counts,
-        html`${field('/feeds/new', 'get', 'links', 'Feeds, sites or @handles', 'Follow')}${said(note)}
+        html`${field('/feeds/new', 'get', 'links', 'Feeds, sites or @handles', 'Follow', 'Looking…')}${said(note)}
           <ul class="feeds">
             ${sources.map(
               (source) =>
@@ -243,7 +264,24 @@ export function pages(base: string, htmx: string) {
                   <a href="${feedAt(source)}">${source.label}</a>${source.error && html` <span>failing</span>`}
                 </li>`,
             )}
-          </ul>`,
+          </ul>
+          <form
+            class="buttons"
+            method="post"
+            action="${at('/opml')}"
+            enctype="multipart/form-data"
+            hx-post="${at('/opml')}"
+            hx-encoding="multipart/form-data"
+            hx-trigger="change"
+            hx-target="#said"
+            hx-swap="outerHTML"
+          >
+            <a class="button" href="${at('/opml')}" download="lagan.opml">Export as OPML</a>
+            <label class="button"
+              >Import OPML<input type="file" name="file" accept=".opml,.xml,text/xml,text/x-opml" hidden
+            /></label>
+            <noscript><button>Send the file</button></noscript>
+          </form>`,
         '/feeds',
       ),
 
@@ -254,7 +292,15 @@ export function pages(base: string, htmx: string) {
         'Follow',
         counts,
         html`<h1>
-            ${followable.length === 1 ? 'Follow this feed?' : followable.length ? 'Follow these feeds?' : 'No feeds there'}
+            ${
+              followable.length === 1
+                ? 'Follow this feed?'
+                : followable.length
+                  ? 'Follow these feeds?'
+                  : found.some((each) => 'followed' in each)
+                    ? 'Nothing new to follow'
+                    : 'No feeds there'
+            }
           </h1>
           <form method="post" action="${at('/feeds')}">
             ${found.map((each) =>
@@ -276,7 +322,7 @@ export function pages(base: string, htmx: string) {
                     /></label>
                   </fieldset>`
                 : 'missed' in each
-                  ? html`<p class="note">Nothing to follow at ${each.typed}: ${each.missed}</p>`
+                  ? html`<p class="note">Nothing to follow at ${shown(each.typed)}: ${each.missed}.</p>`
                   : html`<p class="note">
                       Already following <a href="${feedAt(each.followed)}">${each.followed.label}</a>.
                     </p>`,
@@ -300,16 +346,16 @@ export function pages(base: string, htmx: string) {
       source: Source,
       settings: { mutes: string[]; cuts: string[] },
       list: Entry[],
-      ask: { edit: boolean; stop: boolean; note: string | null },
+      ask: { edit: boolean; stop: boolean; note: string | null; typed: { label?: string; ref?: string } },
     ) =>
       page(
         source.label,
         counts,
-        html`${ask.edit ? edit(source, ask.note) : name(source)}
+        html`${ask.edit ? edit(source, ask.note, ask.typed) : name(source)}
         ${source.error && html`<p class="note">Failing: ${source.error}</p>`}
         ${setting(source, 'mutes', 'Hide entries whose titles have any of', settings.mutes)}
         ${setting(source, 'cuts', 'Take out of every title, wherever they appear', settings.cuts)}
-        ${stop(source, ask.stop)} ${entries(list, 'Nothing here yet.')}`,
+        ${stop(source, ask.stop)} ${entries(list, 'Nothing here yet.', false)}`,
       ),
 
     // A site whose pages were kept from their links. It isn't followed, so
@@ -321,9 +367,12 @@ export function pages(base: string, htmx: string) {
         html`<div class="title">
             <h1><a href="${home(source)}">${source.label}</a></h1>
           </div>
-          <p>Pages kept from this site. It isn’t a feed: to follow someone on it, paste their page into Feeds.</p>
+          <p>
+            Pages saved from this site by pasting their links. It isn’t a feed: to follow someone on it, paste their
+            page into Feeds.
+          </p>
           ${setting(source, 'cuts', 'Take out of every title, wherever they appear', cuts)}
-          ${entries(list, 'Nothing kept from here.')}`,
+          ${entries(list, 'Nothing saved from here.', false)}`,
       ),
 
     search: (counts: Counts, query: string, feeds: Source[], list: Entry[]) =>
@@ -355,35 +404,6 @@ export function pages(base: string, htmx: string) {
         '/search',
       ),
 
-    settings: (counts: Counts, note: string | null) =>
-      page(
-        'Settings',
-        counts,
-        html`<h1>Feeds file</h1>
-          <p>OPML, the list of feeds other readers import and export.</p>
-          <form
-            class="buttons"
-            method="post"
-            action="${at('/opml')}"
-            enctype="multipart/form-data"
-            hx-post="${at('/opml')}"
-            hx-encoding="multipart/form-data"
-            hx-trigger="change"
-            hx-target="#said"
-            hx-swap="outerHTML"
-          >
-            <a class="button" href="${at('/opml')}" download="lagan.opml">Export</a>
-            <label class="button"
-              >Import<input type="file" name="file" accept=".opml,.xml,text/xml,text/x-opml" required hidden
-            /></label>
-            <noscript><button>Send the file</button></noscript>
-          </form>
-          ${said(note)}`,
-        '/settings',
-      ),
-
     missing: (counts: Counts) => page('Not found', counts, html`<p>Nothing here.</p>`),
   };
 }
-
-export type Pages = ReturnType<typeof pages>;

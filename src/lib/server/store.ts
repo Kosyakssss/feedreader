@@ -24,7 +24,6 @@ export type Entry = {
   url: string;
   published_at: number;
   kept: 0 | 1;
-  page: 0 | 1; // kept from its link, not from a feed
   title: string;
   text: string; // only filled in for untitled entries, the only rows that show it
 };
@@ -83,7 +82,7 @@ CREATE INDEX IF NOT EXISTS kept ON entries(published_at DESC, id DESC) WHERE kep
 CREATE INDEX IF NOT EXISTS by_source ON entries(source_id, published_at DESC, id DESC);
 `;
 
-const ROW = `e.id, e.source_id, s.label AS feed, e.url, e.published_at, e.kept, s.kind = 'page' AS page, e.title, CASE WHEN e.title = '' THEN e.text ELSE '' END AS text`;
+const ROW = `e.id, e.source_id, s.label AS feed, e.url, e.published_at, e.kept, e.title, CASE WHEN e.title = '' THEN e.text ELSE '' END AS text`;
 const SEARCH_LIMIT = 200;
 const EARLIEST_DATE = 631_152_000_000; // 1990: anything earlier is a broken date
 const DAY = 86_400_000;
@@ -189,6 +188,10 @@ export class Store {
       .all();
   }
 
+  keptCount(): number {
+    return this.db.query<{ count: number }, []>('SELECT count(*) AS count FROM entries WHERE kept = 1').get()!.count;
+  }
+
   // The sites pages were kept from.
   sites(): Source[] {
     return this.db.query<Source, []>(`SELECT * FROM sources WHERE kind = 'page' ORDER BY label COLLATE NOCASE`).all();
@@ -226,6 +229,8 @@ export class Store {
 
   // Stores a fetch and returns how many entries it added or changed.
   save(source: Source, result: FetchResult, failures: number, nextAt: number): number {
+    // Given a new address while this fetch was under way: the fetch is of the old one.
+    if (this.source(source.id)?.ref !== source.ref) return 0;
     const now = Date.now();
     const backlog = source.fetched_at === null ? 1 : 0; // a feed's first fetch is its backlog
     const dates = new Set(result.items.map((item) => item.published));

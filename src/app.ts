@@ -57,25 +57,48 @@ const saying = (path: string, said: string) =>
 
 const text = (form: FormData, name: string) => String(form.get(name) ?? '').trim();
 const reason = (thrown: unknown) => (thrown instanceof Error ? thrown.message : String(thrown));
-const fromHtmx = (request: Request) => request.headers.has('hx-request');
+// htmx asking for part of a page; not when it restores a whole page from history.
+const fromHtmx = (request: Request) =>
+  request.headers.has('hx-request') && !request.headers.has('hx-history-restore-request');
+
+// Why no feed was found, in plain words.
+function plainly(thrown: unknown): string {
+  const said = reason(thrown);
+  if (/ENOTFOUND|EAI_AGAIN|ECONN|timed? ?out|abort|certificate|TLS|reach/i.test(said)) return 'couldn’t reach it';
+  const status = /^HTTP (\d+)/.exec(said)?.[1];
+  if (status) return status === '404' ? 'nothing at that address' : `the site answered ${status}`;
+  return 'no feed there';
+}
+
+// Chrome keeps pages it fetched ahead for a while. A change made without
+// leaving the page makes them stale.
+const fresh = (response: Response) => {
+  response.headers.set('Clear-Site-Data', '"prefetchCache"');
+  return response;
+};
 const query = (request: Request) => new URL(request.url).searchParams;
 
 // The app, served under `base`: '' or a path such as '/lagan'.
 export function app({ store, wake, follow }: Lagan, base = '') {
   const at = (path: string) => base + path;
   const views = pages(base, at(htmxName));
-  const counts = () => ({ kept: store.entries(scopes.kept).length, feeds: store.sources().length });
+  const counts = () => ({ kept: store.keptCount(), feeds: store.sources().length });
   const missing = () => sent(views.missing(counts()), 404);
   const followed = (ref: string) => store.sources().find((source) => source.ref === ref);
 
-  // The source an address names, and what to do with it if there is one.
+  // The feed an address names, and what to do with it if there is one. A
+  // site pages were kept from is no feed, unless the address says it may be.
   const withSource =
-    (handler: (source: Source, request: Bun.BunRequest) => Response | Promise<Response>): Handler =>
+    (
+      handler: (source: Source, request: Bun.BunRequest) => Response | Promise<Response>,
+      kinds: Source['kind'][] = ['rss', 'atproto'],
+    ): Handler =>
     (request) => {
       const id = Number((request.params as { id?: string }).id);
       const source = Number.isInteger(id) ? store.source(id) : null;
-      return source ? handler(source, request) : missing();
+      return source && kinds.includes(source.kind) ? handler(source, request) : missing();
     };
+  const anySource = ['rss', 'atproto', 'page'] satisfies Source['kind'][];
 
   // A feed's or a site's page, asking whatever the address asks.
   function feedPage(source: Source, request: Request): Response {
@@ -83,7 +106,9 @@ export function app({ store, wake, follow }: Lagan, base = '') {
     if (source.kind === 'page') return sent(views.site(counts(), source, store.cuts(source.id), list));
     const settings = { mutes: store.mutes(source.id), cuts: store.cuts(source.id) };
     const asks = query(request);
-    const ask = { edit: asks.has('edit'), stop: asks.has('stop'), note: asks.get('said') };
+    // Back from an edit that failed, with what was typed.
+    const typed = { label: asks.get('label') ?? source.label, ref: asks.get('ref') ?? undefined };
+    const ask = { edit: asks.has('edit'), stop: asks.has('stop'), note: asks.get('said'), typed };
     return sent(views.feed(counts(), source, settings, list, ask));
   }
 
@@ -109,9 +134,10 @@ export function app({ store, wake, follow }: Lagan, base = '') {
         const id = Number(form.get('id'));
         const [entry] = Number.isInteger(id) ? store.keep([id], form.get('keep') === '1') : [];
         if (!entry) return missing();
-        if (!fromHtmx(request)) return see(`${back(request)}#e${id}`);
-        const here = URL.parse(request.headers.get('referer') ?? '')?.pathname === at('/kept') ? '/kept' : '';
-        return sent(html`${views.keep(entry, true)}${views.keptCount(counts(), here, true)}`);
+        const from = back(request);
+        if (!fromHtmx(request)) return see(`${from}#e${id}`);
+        const here = from.split('?')[0] === at('/kept') ? '/kept' : '';
+        return fresh(sent(html`${views.keep(entry, true)}${views.keptCount(counts(), here, true)}`));
       },
     },
 
@@ -168,15 +194,24 @@ export function app({ store, wake, follow }: Lagan, base = '') {
                 const known = followed(feed.ref);
                 return known ? { typed: each, followed: known } : { typed: each, ...feed };
               },
-              (thrown) => ({ typed: each, missed: reason(thrown) }),
+              (thrown) => ({ typed: each, missed: plainly(thrown) }),
             ),
           ),
         );
-        return sent(views.review(counts(), found));
+        // Two things pasted that lead to one feed show it once.
+        const seen = new Set<string>();
+        const once = found.filter((each) => {
+          const ref = 'ref' in each ? each.ref : 'followed' in each ? each.followed.ref : null;
+          if (ref === null) return true;
+          if (seen.has(ref)) return false;
+          seen.add(ref);
+          return true;
+        });
+        return sent(views.review(counts(), once));
       },
     },
 
-    [at('/feed/:id')]: { GET: withSource((source, request) => feedPage(source, request)) },
+    [at('/feed/:id')]: { GET: withSource((source, request) => feedPage(source, request), anySource) },
 
     // A feed's name, or editing it in its place.
     [at('/feed/:id/name')]: { GET: withSource((source) => sent(views.name(source))) },
@@ -185,21 +220,30 @@ export function app({ store, wake, follow }: Lagan, base = '') {
       // A new name, and maybe a new address: a feed there, of whatever kind.
       POST: withSource(async (source, request) => {
         const form = await request.formData();
-        const ref = text(form, 'ref');
-        const again = (note: string) => see(saying(at(`/feed/${source.id}?edit`), note));
+        const [label, ref] = [text(form, 'label'), text(form, 'ref')];
+        // Back to the form, with what was typed and what went wrong.
+        const again = (note: string) =>
+          see(
+            saying(
+              at(`/feed/${source.id}?edit&label=${encodeURIComponent(label)}&ref=${encodeURIComponent(ref)}`),
+              note,
+            ),
+          );
         if (ref && ref !== source.ref) {
           let found;
           try {
             found = await findFeed(ref);
           } catch (thrown) {
-            return again(`No feed there: ${reason(thrown)}`);
+            return again(`No feed there: ${plainly(thrown)}.`);
           }
           const other = followed(found.ref);
           if (other && other.id !== source.id) return again(`That is ${other.label}, followed already.`);
-          store.readdress(source.id, found.kind, found.ref);
-          follow(source.id);
+          if (found.ref !== source.ref) {
+            store.readdress(source.id, found.kind, found.ref);
+            follow(source.id);
+          }
         }
-        store.rename(source.id, text(form, 'label') || source.label);
+        store.rename(source.id, label || source.label);
         return see(at(`/feed/${source.id}`));
       }),
     },
@@ -220,7 +264,7 @@ export function app({ store, wake, follow }: Lagan, base = '') {
       POST: withSource(async (source, request) => {
         store.setCuts(source.id, text(await request.formData(), 'cuts').split(','));
         return see(at(`/feed/${source.id}`));
-      }),
+      }, anySource),
     },
 
     // What was kept from it stays, as pages of its site.
@@ -240,10 +284,6 @@ export function app({ store, wake, follow }: Lagan, base = '') {
       },
     },
 
-    [at('/settings')]: {
-      GET: (request) => sent(views.settings(counts(), query(request).get('said'))),
-    },
-
     [at('/opml')]: {
       // Every feed followed, as a file other readers can import.
       GET: () =>
@@ -257,7 +297,7 @@ export function app({ store, wake, follow }: Lagan, base = '') {
       POST: async (request) => {
         const file = (await request.formData()).get('file');
         const told = (said: string) =>
-          fromHtmx(request) ? sent(views.said(said)) : see(saying(at('/settings'), said));
+          fromHtmx(request) ? fresh(sent(views.said(said))) : see(saying(at('/feeds'), said));
         let listed;
         try {
           listed = readOpml(file instanceof Blob ? await file.text() : '');

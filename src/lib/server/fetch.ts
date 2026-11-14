@@ -320,15 +320,17 @@ export class Fetcher {
     if (running) return void running.wake?.();
     const loop: Loop = { earliest: 0 };
     this.loops.set(id, loop);
-    void this.run(id, loop).finally(() => this.loops.delete(id));
+    void this.run(id, loop)
+      .catch((error) => console.error(`Feed ${id}: ${errorText(error)}`)) // one bad feed never stops the app
+      .finally(() => this.loops.delete(id));
   }
 
   // Opening the app wakes every feed that is allowed to fetch again.
   nudge(): void {
+    this.startAll();
     const now = Date.now();
     if (now - this.lastNudge < BASE) return;
     this.lastNudge = now;
-    this.startAll();
     for (const loop of this.loops.values()) if (now >= loop.earliest) loop.wake?.();
   }
 

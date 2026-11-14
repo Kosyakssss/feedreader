@@ -99,8 +99,7 @@ p {
   display: none;
 }
 
-.note,
-.address {
+.note {
   overflow-wrap: anywhere;
 }
 
@@ -177,6 +176,10 @@ p {
   transition:
     scale 0.1s,
     opacity 0.1s;
+}
+
+.keep {
+  margin-inline-start: auto; /* at the line's end, with or without where the entry is from */
 }
 
 .keep button::after {
@@ -310,6 +313,10 @@ button.filled {
 
 .edit input {
   margin-block-end: 0.75rem;
+}
+
+.edit .buttons button {
+  flex: 1;
 }
 
 /* Stop following fills the width, and so does the question it asks first:

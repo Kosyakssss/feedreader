@@ -2,6 +2,7 @@
 // the same database while the app runs; the app picks up feeds added here the
 // next time it is opened. Lists print as JSON.
 import { parseArgs } from 'node:util';
+import { displayTitle } from './lib/format';
 import { fetchSource } from './lib/server/fetch';
 import { readOpml, sourceFor, writeOpml } from './lib/server/opml';
 import { findFeed } from './lib/server/sites';
@@ -35,6 +36,8 @@ const { values, positionals } = parseArgs({
 const [command, ...rest] = positionals;
 const store = new Store(values.db!);
 const print = (value: unknown) => console.log(JSON.stringify(value, null, 2));
+// Words or texts, given apart or with commas between, as the web takes them.
+const words = () => rest.slice(1).flatMap((word) => word.split(','));
 
 function usage(): never {
   console.error(USAGE);
@@ -64,7 +67,7 @@ function keeping(kept: boolean) {
   return () => {
     const ids = rest.map(Number);
     if (!ids.length || !ids.every(Number.isInteger)) usage();
-    print(store.keep(ids, kept).map((entry) => ({ id: entry.id, title: entry.title, kept: entry.kept === 1 })));
+    print(store.keep(ids, kept).map((entry) => ({ id: entry.id, title: displayTitle(entry), kept: entry.kept === 1 })));
   };
 }
 
@@ -86,6 +89,7 @@ async function move(): Promise<void> {
   const source = sourceOf(rest[0], ['rss', 'atproto']);
   if (!rest[1]) usage();
   const { kind, ref } = await findFeed(rest[1]);
+  if (ref === source.ref) return void console.log(`${source.label} already fetches ${ref}`);
   const other = store.sources().find((each) => each.ref === ref);
   if (other && other.id !== source.id) throw new Error(`That is ${other.label} (${other.id}), followed already`);
   store.readdress(source.id, kind, ref);
@@ -97,7 +101,7 @@ async function opml(): Promise<void> {
   if (what === 'export') return void process.stdout.write(writeOpml(store.sources()));
   if (what !== 'import' || !file) usage();
   const listed = readOpml(await Bun.file(file).text());
-  const added = store.addSources(listed.map(sourceFor));
+  const added = store.addSources(listed.flatMap((feed) => (URL.canParse(feed.url) ? [sourceFor(feed)] : [])));
   console.log(`${listed.length} feeds in the file, ${added.length} new`);
 }
 
@@ -152,11 +156,11 @@ const commands: Record<string, () => void | Promise<void>> = {
   },
   mutes: () => {
     const source = sourceOf(rest[0], ['rss', 'atproto']);
-    print(rest.length > 1 ? store.setMutes(source.id, rest.slice(1)) : store.mutes(source.id));
+    print(rest.length > 1 ? store.setMutes(source.id, words()) : store.mutes(source.id));
   },
   cuts: () => {
     const source = sourceOf(rest[0]);
-    print(rest.length > 1 ? store.setCuts(source.id, rest.slice(1)) : store.cuts(source.id));
+    print(rest.length > 1 ? store.setCuts(source.id, words()) : store.cuts(source.id));
   },
   opml,
   check,
