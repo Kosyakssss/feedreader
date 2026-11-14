@@ -64,6 +64,10 @@
   :root {
     --open-time: 0s;
   }
+
+  .check input:checked {
+    animation: none;
+  }
 }
 
 /* Registered so it is one fixed length everywhere, even inside larger text. */
@@ -729,6 +733,7 @@ li {
   flex-wrap: wrap;
   align-items: baseline;
   padding-block-end: 0.3em; /* room for the buttons' shadows: an off-screen row clips to its box */
+  isolation: isolate; /* its wash, when chosen, sits behind it */
   padding-inline-start: var(--check-room);
   transition: padding-inline-start var(--open-time) var(--ease);
 }
@@ -907,6 +912,12 @@ li {
   cursor: pointer;
 }
 
+/* Every row drawn whole while choosing, so a chosen row's wash isn't clipped
+   to the row, as rows skipped off screen are. */
+.entries.choosing > li {
+  content-visibility: visible;
+}
+
 .entries.choosing .row-buttons {
   max-width: 0;
   margin-inline-start: -0.6em; /* and the gap before them, so the dots run to the end */
@@ -938,14 +949,16 @@ li {
   grid-area: 1 / 1;
 }
 
-/* A box as a Mac draws one: a softly rounded square, lit from above, and
-   filled with the accent once chosen, a tick drawn into it. */
+/* A round box, softly lit from above. Pressed, it gives a little; chosen,
+   it fills with the accent and springs, a ring bursting out of it and the
+   tick drawn in after. A chosen row is washed with the accent too, so the
+   choice reads across the whole row. */
 .check input {
-  width: 1.1em;
-  height: 1.1em;
+  width: 1.25em;
+  height: 1.25em;
   margin: 0;
-  border: 0.5px solid light-dark(rgb(16 15 15 / 0.25), rgb(255 255 255 / 0.18));
-  border-radius: 0.3em;
+  border: 1px solid light-dark(rgb(16 15 15 / 0.28), rgb(255 255 255 / 0.22));
+  border-radius: 50%;
   appearance: none;
   background: light-dark(linear-gradient(#fff, #fbfaf6), linear-gradient(var(--ui-2), var(--ui)));
   box-shadow:
@@ -954,35 +967,79 @@ li {
   cursor: pointer;
   transition:
     background-color 0.12s,
-    scale 0.12s var(--ease);
+    border-color 0.12s,
+    scale 0.18s cubic-bezier(0.3, 1.6, 0.5, 1);
 }
 
 .check input:checked {
-  border-color: color-mix(in srgb, var(--cy) 70%, black);
-  background: linear-gradient(color-mix(in srgb, var(--cy) 88%, white), var(--cy));
+  border-color: color-mix(in srgb, var(--cy) 75%, black);
+  background: linear-gradient(color-mix(in srgb, var(--cy) 85%, white), var(--cy));
+  animation:
+    pop 0.38s cubic-bezier(0.3, 1.6, 0.5, 1),
+    burst 0.45s var(--ease);
 }
 
 .check:active input {
-  scale: 0.9;
+  scale: 0.82;
+  transition-duration: 0.08s;
+}
+
+@keyframes pop {
+  0% {
+    scale: 0.8;
+  }
+  45% {
+    scale: 1.18;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+@keyframes burst {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--cy) 55%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 0.55em color-mix(in srgb, var(--cy) 0%, transparent);
+  }
 }
 
 .check svg {
-  width: 0.8em;
-  height: 0.8em;
-  margin-inline-start: 0.15em; /* centred on the box */
+  position: relative; /* above the box, which paints over it while it springs */
+  width: 0.9em;
+  height: 0.9em;
+  margin-inline-start: 0.175em; /* centred on the box */
   fill: none;
   stroke: #fff;
-  stroke-width: 2.2;
+  stroke-width: 2.4;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
   pointer-events: none;
-  transition: stroke-dashoffset 0.16s var(--ease);
+  transition: stroke-dashoffset 0.1s;
 }
 
-.check:has(:checked) svg {
+.check input:checked + svg {
   stroke-dashoffset: 0;
+  transition: stroke-dashoffset 0.22s var(--ease) 0.07s;
+}
+
+.row::before {
+  position: absolute;
+  inset: -0.4em -0.6em calc(0.3em - 0.4em);
+  border-radius: 0.7em;
+  background: color-mix(in srgb, var(--cy) 9%, transparent);
+  content: '';
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+  transition: opacity 0.18s;
+}
+
+.row.chosen::before {
+  opacity: 1;
 }
 
 /* A page's own buttons: pills of the header's glass with a hairline round
