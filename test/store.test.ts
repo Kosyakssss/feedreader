@@ -19,9 +19,8 @@ const item = (guid: string, overrides: Partial<Item> = {}): Item => ({
 const result = (...items: Item[]): FetchResult => ({ items });
 const refresh = () => (feed = store.source(feed.id)!);
 const saveItems = (...items: Item[]) => {
-  const changed = store.save(feed, result(...items), 0, 0);
+  store.save(feed, result(...items), 0, 0);
   refresh();
-  return changed;
 };
 const titles = (scope: Parameters<Store['entries']>[0]) => store.entries(scope).map((entry) => entry.title);
 
@@ -42,7 +41,7 @@ test("a feed's first fetch is backlog, kept off the home page; later posts are o
 
 test('fetching the same item twice changes nothing', () => {
   saveItems(item('a'));
-  expect(saveItems(item('a'))).toBe(0);
+  saveItems(item('a'));
   expect(store.entries(scopes.feed(feed.id))).toHaveLength(1);
 });
 

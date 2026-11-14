@@ -4,6 +4,7 @@
 // the page it changed.
 import { linksIn } from '#lib/links.ts';
 import type { Lagan } from '#lib/server/lagan.ts';
+import { errorText } from '#lib/server/fetch.ts';
 import { readOpml, sourceFor, writeOpml } from '#lib/server/opml.ts';
 import { findFeed, pageTitle } from '#lib/server/sites.ts';
 import { scopes, type Source } from '#lib/server/store.ts';
@@ -55,14 +56,13 @@ const see = (location: string) => new Response(null, { status: 303, headers: { L
 const saying = (path: string, said: string) => `${path}?said=${encodeURIComponent(said)}`;
 
 const text = (form: FormData, name: string) => String(form.get(name) ?? '').trim();
-const reason = (thrown: unknown) => (thrown instanceof Error ? thrown.message : String(thrown));
 // htmx asking for part of a page; not when it restores a whole page from history.
 const fromHtmx = (request: Request) =>
   request.headers.has('hx-request') && !request.headers.has('hx-history-restore-request');
 
 // Why no feed was found, in plain words.
 function plainly(thrown: unknown): string {
-  const said = reason(thrown);
+  const said = errorText(thrown);
   if (/ENOTFOUND|EAI_AGAIN|ECONN|connect|timed? ?out|abort|certificate|TLS|reach/i.test(said))
     return 'couldn’t reach it';
   if (/not a public address/i.test(said)) return 'it isn’t on the public web';

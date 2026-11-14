@@ -157,19 +157,14 @@ p {
   position: relative;
   min-width: 3.75em;
   min-height: 0;
-  padding: 0 0.75em;
   border: 0;
   border-radius: 1em;
-  background: none;
-  color: var(--link);
-  font: inherit;
   font-size: 0.8125rem;
   font-weight: 600;
   line-height: 1.5;
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 0.2em;
-  cursor: pointer;
   transition:
     scale 0.1s,
     opacity 0.1s;

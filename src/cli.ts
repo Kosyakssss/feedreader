@@ -3,7 +3,7 @@
 // next time it is opened. Lists print as JSON.
 import { parseArgs } from 'node:util';
 import { displayTitle } from './lib/format';
-import { fetchSource } from './lib/server/fetch';
+import { errorText, fetchSource } from './lib/server/fetch';
 import { readOpml, sourceFor, writeOpml } from './lib/server/opml';
 import { findFeed } from './lib/server/sites';
 import { Store, type Source } from './lib/server/store';
@@ -77,7 +77,7 @@ async function follow(): Promise<void> {
       const id = store.addSource(kind, ref, label);
       console.log(`Following ${label} (${id}, ${ref})`);
     } catch (thrown) {
-      console.error(`No feed at ${typed}: ${thrown instanceof Error ? thrown.message : thrown}`);
+      console.error(`No feed at ${typed}: ${errorText(thrown)}`);
       process.exitCode = 1;
     }
   }
@@ -168,7 +168,7 @@ if (!run) usage();
 try {
   await run();
 } catch (thrown) {
-  console.error(thrown instanceof Error ? thrown.message : thrown);
+  console.error(errorText(thrown));
   process.exit(1);
 }
 process.exit(process.exitCode ?? 0);

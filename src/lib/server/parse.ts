@@ -75,7 +75,6 @@ const asList = <T>(value: T | T[] | undefined): T[] =>
 
 function rawText(value: unknown): string {
   if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (isNode(value) && value['#text'] !== undefined) return rawText(value['#text']);
   return '';
 }
@@ -106,44 +105,14 @@ function link(value: unknown): string {
   return chosen ? String(chosen['@href'] ?? '').trim() : '';
 }
 
-const ZONES: Record<string, number> = {
-  UT: 0,
-  UTC: 0,
-  GMT: 0,
-  Z: 0,
-  EST: -5,
-  EDT: -4,
-  CST: -6,
-  CDT: -5,
-  MST: -7,
-  MDT: -6,
-  PST: -8,
-  PDT: -7,
-};
-const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-const RFC822 =
-  /^(?:[a-z]{3},?\s+)?(\d{1,2})\s+([a-z]{3})\s+(\d{2,4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s+([a-z]{1,5}|[+-]\d{2}:?\d{2}))?$/i;
-
+// Date.parse reads RFC 822 too; only a zone name it doesn't know (CEST, IST)
+// stops it, and then the time is taken as UTC.
 export function parseDate(value: unknown): number | null {
   const raw = rawText(value).trim();
   if (!raw) return null;
-  const direct = Date.parse(raw);
-  if (!Number.isNaN(direct)) return direct;
-  const match = RFC822.exec(raw);
-  if (!match) return null;
-  const [, day, monthName, yearText, hour, minute, second, zone] = match;
-  const month = MONTHS.indexOf(monthName!.toLowerCase());
-  if (month < 0) return null;
-  const year = yearText!.length === 2 ? Number(yearText) + (Number(yearText) >= 70 ? 1900 : 2000) : Number(yearText);
-  const clock = Date.UTC(year, month, Number(day), Number(hour), Number(minute), Number(second ?? 0));
-  return clock - zoneMinutes(zone) * 60_000;
-}
-
-function zoneMinutes(zone: string | undefined): number {
-  if (!zone) return 0;
-  const numeric = /^([+-])(\d{2}):?(\d{2})$/.exec(zone);
-  if (numeric) return (numeric[1] === '-' ? -1 : 1) * (Number(numeric[2]) * 60 + Number(numeric[3]));
-  return (ZONES[zone.toUpperCase()] ?? 0) * 60;
+  const date = Date.parse(raw);
+  const utc = Number.isNaN(date) ? Date.parse(raw.replace(/[a-z]+$/i, 'GMT')) : date;
+  return Number.isNaN(utc) ? null : utc;
 }
 
 const firstDate = (...values: unknown[]) => values.map(parseDate).find((date) => date !== null) ?? null;

@@ -35,7 +35,7 @@ export type Scope = { where: string; args?: SQLQueryBindings[]; limit?: number }
 const NOT_MUTED = `NOT EXISTS (SELECT 1 FROM mutes m WHERE m.source_id = entries.source_id AND instr(lower(entries.title), m.word) > 0)`;
 
 export const scopes = {
-  // The newest hundred: everything older is the archive.
+  // The newest hundred, leaving out the backlog and what is muted.
   latest: { where: `backlog = 0 AND ${NOT_MUTED}`, limit: 100 },
   kept: { where: 'kept = 1' },
   feed: (id: number): Scope => ({ where: 'source_id = ?', args: [id], limit: 100 }),
@@ -223,8 +223,8 @@ export class Store {
     );
   }
 
-  // Stores a fetch and returns how many entries it added or changed.
-  save(source: Source, result: FetchResult, failures: number, nextAt: number): number {
+  // Stores a fetch: its entries, and when to fetch next.
+  save(source: Source, result: FetchResult, failures: number, nextAt: number): void {
     const now = Date.now();
     const backlog = source.fetched_at === null ? 1 : 0; // a feed's first fetch is its backlog
     const dates = new Set(result.items.map((item) => item.published));
@@ -239,8 +239,7 @@ export class Store {
       `INSERT OR IGNORE INTO entries (source_id, guid, url, published_at, backlog, title, text) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
 
-    const saved = this.db.transaction(() => {
-      const touched: number[] = [];
+    this.db.transaction(() => {
       for (const item of result.items) {
         // Some sites change every item's id when they redeploy. The same title at
         // the same moment in the same feed is the same post, unless the other one
@@ -251,10 +250,8 @@ export class Store {
             : undefined;
         const usable =
           item.published !== null && item.published > EARLIEST_DATE && item.published <= now + DAY && !allSameDate;
-        const done = old
-          ? repoint.run(item.guid, item.url, old.id)
-          : insert.run(source.id, item.guid, item.url, usable ? item.published : now, backlog, item.title, item.text);
-        if (done.changes) touched.push(old ? old.id : Number(done.lastInsertRowid));
+        if (old) repoint.run(item.guid, item.url, old.id);
+        else insert.run(source.id, item.guid, item.url, usable ? item.published : now, backlog, item.title, item.text);
       }
       const failed = !!result.error;
       this.db.run(
@@ -269,9 +266,7 @@ export class Store {
           source.id,
         ],
       );
-      return touched;
     })();
-    return saved.length;
   }
 
   knownCount(sourceId: number, items: FetchResult['items']): number {
@@ -294,10 +289,7 @@ export class Store {
   }
 
   entry(id: number): Entry | null {
-    const row = this.db
-      .query<Entry, [number]>(`SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id WHERE e.id = ?`)
-      .get(id);
-    return row && this.cut([row])[0]!;
+    return this.entries({ where: 'id = ?', args: [id] })[0] ?? null;
   }
 
   // Finds entries, the backlog too, by what their row shows as a title.
@@ -306,7 +298,7 @@ export class Store {
     if (!typed.length) return [];
     const exact: Entry[] = [];
     const partial: Entry[] = [];
-    for (const entry of this.allEntries()) {
+    for (const entry of this.entries({ where: '1' })) {
       const found = matchWords(typed, wordsOf(displayTitle(entry)));
       if (found === 'exact') exact.push(entry);
       else if (found === 'partial') partial.push(entry);
@@ -388,20 +380,34 @@ export class Store {
     );
   }
 
-  cuts(sourceId: number): string[] {
+  // A feed's cuts, taken out of its titles, and its muted words, which hide
+  // entries: two lists of words, kept alike.
+  cuts = (sourceId: number) => this.words('cuts', 'text', sourceId);
+  setCuts = (sourceId: number, texts: string[]) => this.setWords('cuts', 'text', sourceId, texts);
+  mutes = (sourceId: number) => this.words('mutes', 'word', sourceId);
+  setMutes = (sourceId: number, words: string[]) =>
+    this.setWords(
+      'mutes',
+      'word',
+      sourceId,
+      words.map((word) => word.toLowerCase()),
+    );
+
+  private words(table: 'cuts' | 'mutes', column: 'text' | 'word', sourceId: number): string[] {
     return this.db
-      .query<{ text: string }, [number]>('SELECT text FROM cuts WHERE source_id = ? ORDER BY text')
+      .query<{ value: string }, [number]>(`SELECT ${column} AS value FROM ${table} WHERE source_id = ? ORDER BY value`)
       .all(sourceId)
-      .map((row) => row.text);
+      .map((row) => row.value);
   }
 
-  setCuts(sourceId: number, texts: string[]): string[] {
-    const clean = [...new Set(texts.map((text) => text.trim()).filter(Boolean))];
+  private setWords(table: 'cuts' | 'mutes', column: 'text' | 'word', sourceId: number, values: string[]): string[] {
+    const clean = [...new Set(values.map((value) => value.trim()).filter(Boolean))];
     this.db.transaction(() => {
-      this.db.run('DELETE FROM cuts WHERE source_id = ?', [sourceId]);
-      for (const text of clean) this.db.run('INSERT INTO cuts (source_id, text) VALUES (?, ?)', [sourceId, text]);
+      this.db.run(`DELETE FROM ${table} WHERE source_id = ?`, [sourceId]);
+      for (const value of clean)
+        this.db.run(`INSERT INTO ${table} (source_id, ${column}) VALUES (?, ?)`, [sourceId, value]);
     })();
-    return this.cuts(sourceId);
+    return this.words(table, column, sourceId);
   }
 
   // Titles with their source's cuts taken out.
@@ -421,40 +427,9 @@ export class Store {
     return entries;
   }
 
-  mutes(sourceId: number): string[] {
-    return this.db
-      .query<{ word: string }, [number]>('SELECT word FROM mutes WHERE source_id = ? ORDER BY word')
-      .all(sourceId)
-      .map((row) => row.word);
-  }
-
-  setMutes(sourceId: number, words: string[]): string[] {
-    const clean = [...new Set(words.map((word) => word.trim().toLowerCase()).filter(Boolean))];
-    this.db.transaction(() => {
-      this.db.run('DELETE FROM mutes WHERE source_id = ?', [sourceId]);
-      for (const word of clean) this.db.run('INSERT INTO mutes (source_id, word) VALUES (?, ?)', [sourceId, word]);
-    })();
-    return this.mutes(sourceId);
-  }
-
-  // Every entry, newest first, as rows show them.
-  private allEntries(): Entry[] {
-    const rows = this.db
-      .query<Entry, []>(
-        `SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id ORDER BY e.published_at DESC, e.id DESC`,
-      )
-      .all();
-    return this.cut(rows);
-  }
-
   // Entries for the command line, newest first.
   export(onlyKept = false) {
-    const rows = this.db
-      .query<Entry, []>(
-        `SELECT ${ROW} FROM entries e JOIN sources s ON s.id = e.source_id ${onlyKept ? 'WHERE e.kept = 1' : ''} ORDER BY e.published_at DESC, e.id DESC`,
-      )
-      .all();
-    return this.cut(rows).map((row) => ({
+    return this.entries(onlyKept ? scopes.kept : { where: '1' }).map((row) => ({
       id: row.id,
       feed: row.feed,
       title: displayTitle(row),

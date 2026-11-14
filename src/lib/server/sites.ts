@@ -1,5 +1,5 @@
 // Reading the pages people bookmark: their titles, and the feeds they offer.
-import { discover, safeFetch } from './fetch';
+import { discover, ok, readLimited, safeFetch } from './fetch';
 import { plain } from './parse';
 
 // What a page says about itself, its title and its feeds, is in its head: a
@@ -14,23 +14,9 @@ const FEED_TYPES = new Set([
 // Where sites without a <link> to their feed usually keep it.
 const USUAL_PLACES = ['/feed', '/rss.xml', '/atom.xml', '/feed.xml', '/index.xml', '/rss'];
 
-export type FoundFeed = { url: string; title: string };
-
 async function readPage(url: string): Promise<{ html: string; url: string }> {
-  const response = await safeFetch(url, { Accept: 'text/html, application/xhtml+xml' });
-  if (response.status !== 200) {
-    await response.body?.cancel();
-    throw new Error(`HTTP ${response.status}`);
-  }
-  const reader = response.body?.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (let part = await reader?.read(); part && !part.done && size < PAGE_BYTES; part = await reader!.read()) {
-    chunks.push(part.value);
-    size += part.value.length;
-  }
-  await reader?.cancel();
-  return { html: new TextDecoder().decode(Bun.concatArrayBuffers(chunks, Infinity, true)), url: response.url || url };
+  const response = await ok(await safeFetch(url, { Accept: 'text/html, application/xhtml+xml' }));
+  return { html: new TextDecoder().decode(await readLimited(response, PAGE_BYTES, true)), url: response.url || url };
 }
 
 function attributes(tag: string): Record<string, string> {
@@ -49,21 +35,15 @@ export function titleOf(html: string): string {
   return '';
 }
 
-// Feeds the page links to in its <head>, the way browsers find them.
-export function linkedFeeds(html: string, base: string): FoundFeed[] {
-  const found = new Map<string, FoundFeed>();
+// The first feed the page links to in its <head>, the way browsers find them.
+export function linkedFeed(html: string, base: string): string | undefined {
   for (const [tag] of html.matchAll(/<link\b[^>]*>/gi)) {
     const link = attributes(tag);
     const rels = (link.rel ?? '').toLowerCase().split(/\s+/);
     if (!rels.includes('alternate') || !FEED_TYPES.has((link.type ?? '').toLowerCase()) || !link.href) continue;
-    try {
-      const url = new URL(link.href, base).href;
-      if (!found.has(url)) found.set(url, { url, title: plain(link.title ?? '') });
-    } catch {
-      // an address that isn't one
-    }
+    const url = URL.parse(link.href, base)?.href;
+    if (url) return url;
   }
-  return [...found.values()];
 }
 
 export async function pageTitle(url: string): Promise<string> {
@@ -74,25 +54,17 @@ export async function pageTitle(url: string): Promise<string> {
   }
 }
 
-// The feeds a site offers: the ones its page links to, or else the first of
-// the usual places that turns out to be a feed.
-export async function findFeeds(url: string): Promise<FoundFeed[]> {
-  const page = await readPage(url);
-  const linked = linkedFeeds(page.html, page.url);
-  if (linked.length) return linked;
-  const tries = USUAL_PLACES.map((path) => discover(new URL(path, page.url).href));
-  for (const tried of await Promise.allSettled(tries)) {
-    if (tried.status === 'fulfilled') return [{ url: tried.value.ref, title: tried.value.label }];
-  }
-  return [];
-}
-
 // The feed at what was typed: its address, a site that has one, or a Bluesky
-// handle. Not a feed itself? Then the first feed of the site at that address,
-// or why there is none: the site out of reach, or no feed on it.
+// handle. Not a feed itself? Then the feed the site at that address links to,
+// or else the first of the usual places that is one; or why there is none:
+// the site out of reach, or no feed on it.
 export const findFeed = (typed: string) =>
   discover(typed).catch(async () => {
-    const [first] = await findFeeds(typed.includes('://') ? typed : `https://${typed}`);
-    if (!first) throw new Error('no feed on that page');
-    return discover(first.url);
+    const page = await readPage(typed.includes('://') ? typed : `https://${typed}`);
+    const linked = linkedFeed(page.html, page.url);
+    if (linked) return discover(linked);
+    const tries = await Promise.allSettled(USUAL_PLACES.map((path) => discover(new URL(path, page.url).href)));
+    const found = tries.find((tried) => tried.status === 'fulfilled');
+    if (!found) throw new Error('no feed on that page');
+    return found.value;
   });

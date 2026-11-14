@@ -86,13 +86,12 @@ export async function safeFetch(start: string, headers: Record<string, string>):
   throw new Error('Too many redirects');
 }
 
-const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+export const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 // Stops reading as soon as a response passes the limit, so an endless or huge
-// answer never fills memory.
-export async function readLimited(response: Response, limit = MAX_FEED_BYTES): Promise<Uint8Array> {
-  const declared = Number(response.headers.get('content-length'));
-  if (declared > limit) {
+// answer never fills memory: past it, a feed is refused, a page cut short.
+export async function readLimited(response: Response, limit = MAX_FEED_BYTES, cut = false): Promise<Uint8Array> {
+  if (!cut && Number(response.headers.get('content-length')) > limit) {
     await response.body?.cancel();
     throw new Error('Feed too large');
   }
@@ -100,14 +99,21 @@ export async function readLimited(response: Response, limit = MAX_FEED_BYTES): P
   const chunks: Uint8Array[] = [];
   let size = 0;
   for (let part = await reader?.read(); part && !part.done; part = await reader!.read()) {
-    size += part.value.length;
-    if (size > limit) {
-      await reader!.cancel();
-      throw new Error('Feed too large');
-    }
     chunks.push(part.value);
+    size += part.value.length;
+    if (size <= limit) continue;
+    await reader!.cancel();
+    if (cut) break;
+    throw new Error('Feed too large');
   }
   return Bun.concatArrayBuffers(chunks, Infinity, true);
+}
+
+// Only a 200 is read; anything else is said as its status.
+export async function ok(response: Response): Promise<Response> {
+  if (response.status === 200) return response;
+  await response.body?.cancel();
+  throw new Error(`HTTP ${response.status}`);
 }
 
 function retryAfter(value: string | null): number | undefined {
@@ -160,12 +166,7 @@ type Json = Record<string, any>;
 const identities = new Map<string, { pds: string; handle: string }>();
 
 async function getJson(url: string): Promise<Json> {
-  const response = await safeFetch(url, { Accept: 'application/json' });
-  if (response.status !== 200) {
-    await response.body?.cancel();
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.json() as Promise<Json>;
+  return (await ok(await safeFetch(url, { Accept: 'application/json' }))).json() as Promise<Json>;
 }
 
 async function identity(did: string) {
