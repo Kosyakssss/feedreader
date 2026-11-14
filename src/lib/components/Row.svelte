@@ -44,13 +44,13 @@
 
   // While choosing, the whole row is the box.
   function pressed(event: MouseEvent): void {
-    if (!choosing || (event.target as Element).closest('.check')) return;
+    if (!choosing || (event.target as Element).closest('.check, .card')) return;
     event.preventDefault(); // its links go nowhere
     selection!.press(event, entry.id);
   }
 </script>
 
-<li data-id={entry.id} in:enter out:depart={entry}>
+<li data-id={entry.id} in:enter out:depart={() => entry}>
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions: the box is the row's control, this only widens it -->
   <div
     class="row"

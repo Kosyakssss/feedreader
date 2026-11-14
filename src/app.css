@@ -716,6 +716,11 @@ ol {
   padding: 0;
 }
 
+/* A list with no rows left takes no room above what says so. */
+.entries:empty {
+  display: none;
+}
+
 li {
   margin-block: 0.5rem;
 }
@@ -1038,7 +1043,7 @@ li {
   transition: opacity 0.18s;
 }
 
-.row.chosen::before {
+.entries.choosing .row.chosen::before {
   opacity: 1;
 }
 

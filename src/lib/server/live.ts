@@ -12,7 +12,9 @@ export type Update =
   | { version: number; everything: true };
 
 export class Live {
-  version = 0;
+  // Numbered on from when the server started, so that a copy can't take a
+  // restarted server's count for the one it had.
+  version = Date.now();
   private listeners = new Set<{ send: (update: Update) => void; end: () => void }>();
 
   constructor(private store: Store) {
@@ -38,11 +40,21 @@ export class Live {
 
   // Ends every open stream, so that a server stopping needn't wait on them.
   close(): void {
-    for (const listener of this.listeners) listener.end();
+    for (const listener of this.listeners) this.safely(listener.end);
     this.listeners.clear();
   }
 
   private send(update: Update): void {
-    for (const listener of this.listeners) listener.send(update);
+    for (const listener of this.listeners) this.safely(() => listener.send(update));
+  }
+
+  // One stream going wrong mustn't stop the others, or fail the change that
+  // was being told: that is saved already.
+  private safely(call: () => void): void {
+    try {
+      call();
+    } catch (error) {
+      console.error('live:', error);
+    }
   }
 }

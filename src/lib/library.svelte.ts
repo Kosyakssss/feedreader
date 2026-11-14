@@ -38,18 +38,24 @@ function marked(entry: Entry, change: Mark): Entry {
   return { ...entry, state, bookmarked };
 }
 
-// A change the server is told of. Kept alive, so that one made as this tab
-// goes to another site still arrives.
-const post = (path: string, body: unknown) =>
-  fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    keepalive: true,
-  }).then(
-    (response) => response.ok,
-    () => false,
-  );
+type Answer = { version: number; entries: Entry[] };
+
+// A change the server is told of, and its answer, or null if it didn't save.
+// `keepalive` for one made as this tab goes to another site, so it still
+// arrives; browsers limit how much can be sent that way.
+async function post(path: string, body: unknown, keepalive = false): Promise<Answer | null> {
+  try {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      keepalive,
+    });
+    return response.ok ? ((await response.json()) as Answer) : null;
+  } catch {
+    return null;
+  }
+}
 
 // This tab is being looked at.
 const seen = () => document.visibilityState === 'visible' && document.hasFocus();
@@ -70,7 +76,10 @@ class Library {
 
   private entries = new SvelteMap<number, Entry>();
   private pending = new Map<number, number>(); // entries with presses the server hasn't answered yet
+  private confirmed = new Map<number, { entry: Entry; version: number }>(); // the server's latest copy of those
   private version = 0;
+  private fetching = false;
+  private again = false; // the library is wanted again once this fetch is done
   private stream: EventSource | null = null;
   private held = new SvelteMap<number, Entry>(); // opened, each as it was before, still shown until seen to go
   private why = new Map<number, Leaving>(); // entries leaving for a reason their state doesn't tell
@@ -118,7 +127,6 @@ class Library {
     if (this.stream) return;
     for (const entry of storedHeld()) this.held.set(entry.id, entry);
     this.listen();
-    void this.fetchAll().then(() => this.letGo());
     // Back from a link followed in this tab, on a page the browser kept.
     addEventListener('pageshow', (event: PageTransitionEvent) => {
       if (!event.persisted) return;
@@ -127,29 +135,49 @@ class Library {
     });
   }
 
-  // The stream first, so that no change made while the library is on its way
-  // is lost: the library comes with the number of the last change in it, and
-  // any change up to that number is already in it.
+  // The stream first, and the library once the stream says which change it
+  // is at: any change after that comes down the stream, and the library has
+  // every one up to it. It says so on every connection, after a sleep or a
+  // dropped network too, and a copy that is behind, or never got the library,
+  // takes it then.
   private listen(): void {
     this.stream = new EventSource(resolve('/api/live'));
     this.stream.addEventListener('at', (event) => {
-      // On every connection, after a sleep or a dropped network too: a copy
-      // that is behind takes the whole library again.
-      if (this.ready && Number(event.data) !== this.version) void this.fetchAll();
+      if (!this.ready || Number(event.data) !== this.version) void this.fetchAll();
     });
     this.stream.addEventListener('message', (event) => this.apply(JSON.parse(event.data) as Update));
   }
 
   private async fetchAll(): Promise<void> {
-    const response = await fetch(resolve('/api/library')).catch(() => null);
-    if (!response?.ok) return; // the stream's next connection tries again
-    const library = (await response.json()) as Snapshot;
-    this.entries.clear();
-    for (const entry of library.entries) this.entries.set(entry.id, entry);
-    this.sources = library.sources;
-    this.mutes = library.mutes;
-    this.version = library.version;
-    this.ready = true;
+    if (this.fetching) {
+      this.again = true;
+      return;
+    }
+    this.fetching = true;
+    try {
+      const response = await fetch(resolve('/api/library')).catch(() => null);
+      const library = response?.ok ? ((await response.json().catch(() => null)) as Snapshot | null) : null;
+      if (!library) return; // the stream's next connection tries again
+      // Entries being pressed keep what the presses made them.
+      const pressed = new Map([...this.pending.keys()].map((id) => [id, this.entries.get(id)]));
+      this.entries.clear();
+      for (const entry of library.entries) {
+        const mine = pressed.get(entry.id);
+        if (mine) this.confirm(entry, library.version);
+        this.entries.set(entry.id, mine ?? entry);
+      }
+      this.sources = library.sources;
+      this.mutes = library.mutes;
+      this.version = library.version;
+      this.ready = true;
+      this.letGo();
+    } finally {
+      this.fetching = false;
+      if (this.again) {
+        this.again = false;
+        void this.fetchAll();
+      }
+    }
   }
 
   private apply(update: Update): void {
@@ -159,7 +187,7 @@ class Library {
       return;
     }
     this.version = update.version;
-    if ('entries' in update) this.put(update.entries);
+    if ('entries' in update) this.put(update.entries, update.version);
     else if ('sources' in update) {
       this.sources = update.sources;
       this.mutes = update.mutes;
@@ -168,13 +196,23 @@ class Library {
 
   // From the server. An entry still being pressed keeps what the presses
   // made it, rather than flickering back through each step as the server
-  // catches up with them.
-  put(entries: Entry[]): void {
-    for (const entry of entries) if (!this.pending.has(entry.id)) this.entries.set(entry.id, entry);
+  // catches up with them; the server's latest copy is taken once they're done.
+  put(entries: Entry[], version = this.version): void {
+    for (const entry of entries)
+      if (this.pending.has(entry.id)) this.confirm(entry, version);
+      else this.entries.set(entry.id, entry);
+  }
+
+  private confirm(entry: Entry, version: number): void {
+    const known = this.confirmed.get(entry.id);
+    if (!known || version >= known.version) this.confirmed.set(entry.id, { entry, version });
   }
 
   // Sets entries read or bookmarked, here at once and then on the server.
-  async mark(entries: Entry[], change: Mark): Promise<void> {
+  // When an entry's last press is answered it takes the server's latest copy;
+  // a press that didn't save is undone, and only that press: another on the
+  // same entry may have saved.
+  async mark(entries: Entry[], change: Mark, keepalive = false): Promise<void> {
     const toggle: Toggle = change.read === undefined ? 'bookmark' : 'read';
     const before = entries.map((entry) => this.entries.get(entry.id) ?? entry);
     for (const entry of before) {
@@ -182,14 +220,26 @@ class Library {
       this.entries.set(entry.id, marked(entry, change));
       this.pending.set(entry.id, (this.pending.get(entry.id) ?? 0) + 1);
     }
-    const saved = await post(at('/api/mark'), { ids: before.map((entry) => entry.id), ...change });
+    const answer = await post(at('/api/mark'), { ids: before.map((entry) => entry.id), ...change }, keepalive);
+    for (const entry of answer?.entries ?? []) this.confirm(entry, answer!.version);
     for (const entry of before) {
+      if (!answer) {
+        this.failed.add(`${entry.id} ${toggle}`);
+        const now = this.entries.get(entry.id) ?? entry;
+        this.entries.set(
+          entry.id,
+          change.read === undefined ? { ...now, bookmarked: entry.bookmarked } : { ...now, state: entry.state },
+        );
+      }
       const left = this.pending.get(entry.id)! - 1;
-      if (left) this.pending.set(entry.id, left);
-      else this.pending.delete(entry.id);
-      if (saved) continue;
-      this.entries.set(entry.id, entry);
-      this.failed.add(`${entry.id} ${toggle}`);
+      if (left) {
+        this.pending.set(entry.id, left);
+        continue;
+      }
+      this.pending.delete(entry.id);
+      const server = this.confirmed.get(entry.id);
+      this.confirmed.delete(entry.id);
+      if (server) this.entries.set(entry.id, server.entry);
     }
   }
 
@@ -207,7 +257,7 @@ class Library {
       if (!this.held.has(entry.id)) this.held.set(entry.id, now);
     }
     this.keepHeld();
-    void this.mark(entries, { read: true });
+    void this.mark(entries, { read: true }, true);
     if (!away) return this.letGo();
     // Should the link not take the tab anywhere after all, they go anyway.
     const stay = setTimeout(() => this.letGo(), 10_000);

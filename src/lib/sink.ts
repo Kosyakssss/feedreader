@@ -60,5 +60,5 @@ export function sink(item: HTMLElement): Motion | null {
     }
   }
 
-  return { play, closeAt: SINK, end: canvas.remove };
+  return { play, closeAt: SINK };
 }

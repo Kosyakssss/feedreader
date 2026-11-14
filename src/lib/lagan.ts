@@ -127,5 +127,5 @@ export function lagan(item: HTMLElement): Motion | null {
         canvas.dot(cx + way * 8 * thrown, surface - 10 * thrown + 13 * thrown * thrown, radius, 1 - thrown);
   }
 
-  return { play, closeAt: EAT + REEL + HOP, end: canvas.remove };
+  return { play, closeAt: EAT + REEL + HOP };
 }

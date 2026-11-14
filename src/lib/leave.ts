@@ -37,33 +37,54 @@ export function enter(row: HTMLElement): TransitionConfig {
   return { duration: sizeOf(row).time, easing: quintOut, css: closing(row) };
 }
 
-export function depart(row: HTMLElement, before: Entry): TransitionConfig {
-  const { time } = sizeOf(row);
-  const close = closing(row);
-  const why = library.leaving(before);
-  const rect = row.getBoundingClientRect();
-  const seen = rect.bottom > 0 && rect.top < innerHeight; // rows off screen just go
-  const motion = time && seen ? (why === 'bookmark' ? lagan(row) : why === 'read' ? sink(row) : null) : null;
-  if (!motion) return { duration: time, easing: quintOut, css: close };
+// A row's inline styles and anything drawn over it, to put back as they were.
+function restorer(row: HTMLElement): () => void {
+  const elements = [row, ...row.querySelectorAll<HTMLElement>('*')];
+  const styles = elements.map((element) => element.getAttribute('style'));
+  return () => {
+    elements.forEach((element, n) =>
+      styles[n] === null ? element.removeAttribute('style') : element.setAttribute('style', styles[n]!),
+    );
+    for (const canvas of row.querySelectorAll(':scope > canvas')) canvas.remove();
+  };
+}
 
-  // The row's own content has gone by the time it closes, so what is left of
-  // it can't spill over the rows sliding up.
-  const content = row.querySelector<HTMLElement>('.row')!;
-  const draw = closing(row, false);
-  const duration = motion.closeAt + time;
-  const shown = (ms: number) => 1 - quintOut(clamp((ms - motion.closeAt) / time));
-  let ended = false;
-  return {
-    duration,
-    css: (left) => draw(shown((1 - left) * duration)),
-    tick: (left) => {
-      const ms = (1 - left) * duration;
-      if (ms >= motion.closeAt) content.style.visibility = 'hidden';
-      motion.play(ms, shown(ms));
-      if (left === 0 && !ended) {
-        ended = true;
-        motion.end?.();
-      }
-    },
+// Worked out afresh each time the row leaves: Svelte would otherwise keep
+// the first time's, motion and all, for every time after. `entry` gives the
+// row's entry as it was when it was sent.
+export function depart(row: HTMLElement, entry: () => Entry): () => TransitionConfig {
+  return () => {
+    const { time } = sizeOf(row);
+    const close = closing(row);
+    const why = library.leaving(entry());
+    const rect = row.getBoundingClientRect();
+    const seen = rect.bottom > 0 && rect.top < innerHeight; // rows off screen just go
+    const restore = restorer(row);
+    const motion = time && seen ? (why === 'bookmark' ? lagan(row) : why === 'read' ? sink(row) : null) : null;
+    if (!motion) return { duration: time, easing: quintOut, css: close };
+
+    // The row's own content has gone by the time it closes, so what is left
+    // of it can't spill over the rows sliding up.
+    const content = row.querySelector<HTMLElement>('.row')!;
+    const draw = closing(row, false);
+    const duration = motion.closeAt + time;
+    const shown = (ms: number) => 1 - quintOut(clamp((ms - motion.closeAt) / time));
+    let played = false;
+    return {
+      duration,
+      css: (left) => draw(shown((1 - left) * duration)),
+      tick: (left) => {
+        const ms = (1 - left) * duration;
+        // Back to the start once it has played: the row came back before it
+        // had gone, as when its press failed, and is put back as it was.
+        if (left === 1 && played) {
+          played = false;
+          return restore();
+        }
+        played ||= ms > 0;
+        if (ms >= motion.closeAt) content.style.visibility = 'hidden';
+        motion.play(ms, shown(ms));
+      },
+    };
   };
 }

@@ -1,6 +1,7 @@
 import { beforeEach, expect, test } from 'bun:test';
 import { isHttpError } from '@sveltejs/kit';
 import type { Item } from '#lib/server/parse.ts';
+import { Live } from '#lib/server/live.ts';
 import { scopes, Store } from '#lib/server/store.ts';
 import { handle } from '../src/hooks.server';
 import { POST as mark } from '../src/routes/api/mark/+server';
@@ -70,14 +71,20 @@ test('a feed page includes the backlog, and an unknown feed is not found', async
 
 test('marking answers with the entries as they now are, and refuses anything but ids and flags', async () => {
   const id = store.entries(scopes.unread)[0]!.id;
+  const live = new Live(store);
   const post = (body: unknown) =>
     mark({
-      locals: { store },
+      locals: { store, live },
       request: new Request('http://lagan.test/api/mark', { method: 'POST', body: JSON.stringify(body) }),
     } as never);
-  expect(await (await post({ ids: [id], read: true })).json()).toMatchObject([{ state: 'read', bookmarked: 0 }]);
+  expect(await (await post({ ids: [id], read: true })).json()).toEqual({
+    version: live.version, // the number the live stream gave the change
+    entries: [expect.objectContaining({ state: 'read', bookmarked: 0 })],
+  });
   expect(store.entries(scopes.unread)).toEqual([]);
-  expect(await (await post({ ids: [id, 999], bookmarked: true })).json()).toMatchObject([{ id, bookmarked: 1 }]);
+  expect(await (await post({ ids: [id, 999], bookmarked: true })).json()).toMatchObject({
+    entries: [{ id, bookmarked: 1 }],
+  });
   for (const bad of [
     { ids: [id] },
     { ids: 'all', read: true },

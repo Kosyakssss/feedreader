@@ -20,7 +20,7 @@ export class Selection {
 
   private anchor: number | null = null; // the last row pressed, where Shift ranges from
   private pending: { id: number; pointer: number; type: string; x: number; y: number } | null = null;
-  private drag: { pointer: number; choose: boolean; id: number } | null = null;
+  private drag: { pointer: number; type: string; choose: boolean; id: number } | null = null;
   private dragged = false; // the press that ends a drag isn't one more press
 
   constructor(private shown: () => Entry[]) {}
@@ -74,8 +74,10 @@ export class Selection {
   }
 
   down(event: PointerEvent, id: number): void {
-    if (event.button || event.shiftKey) return;
-    if (event.pointerType === 'touch' && !(event.target as Element).closest('.check')) return;
+    if (!this.choosing || event.button || event.shiftKey) return;
+    const target = event.target as Element;
+    if (target.closest('.card')) return; // what opens below a row is its own
+    if (event.pointerType === 'touch' && !target.closest('.check')) return;
     this.pending = { id, pointer: event.pointerId, type: event.pointerType, x: event.clientX, y: event.clientY };
   }
 
@@ -88,13 +90,14 @@ export class Selection {
       }
       if (Math.hypot(event.clientX - pending.x, event.clientY - pending.y) < (DRAG[pending.type] ?? 6)) return;
       this.pending = null;
-      this.drag = { pointer: event.pointerId, choose: !this.ids.has(pending.id), id: pending.id };
+      this.drag = { pointer: event.pointerId, type: pending.type, choose: !this.ids.has(pending.id), id: pending.id };
       this.dragged = true;
       this.set(pending.id, this.drag.choose);
       this.anchor = pending.id;
     }
     const drag = this.drag;
     if (drag?.pointer !== event.pointerId) return;
+    if (drag.type === 'mouse' && !(event.buttons & 1)) return this.up(event); // let go outside the window
     event.preventDefault();
     const row = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-id]');
     const id = Number(row?.dataset.id);

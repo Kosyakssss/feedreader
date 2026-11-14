@@ -7,7 +7,8 @@ const MOST = 5000; // more than any page shows
 const flag = (value: unknown) => value === undefined || typeof value === 'boolean';
 
 // Marks entries read or unread, bookmarked or not: { ids, read?, bookmarked? }.
-// Answers with the entries as they now are.
+// Answers with the entries as they now are, and the number of the change, as
+// the live stream counts them.
 export const POST: RequestHandler = async ({ locals, request }) => {
   const body = (await request.json().catch(() => null)) as ({ ids?: unknown } & Mark) | null;
   const ids = body?.ids;
@@ -20,5 +21,6 @@ export const POST: RequestHandler = async ({ locals, request }) => {
     (body!.read === undefined && body!.bookmarked === undefined)
   )
     error(400, 'Bad request');
-  return Response.json(locals.store.mark(ids as number[], { read: body!.read, bookmarked: body!.bookmarked }));
+  const entries = locals.store.mark(ids as number[], { read: body!.read, bookmarked: body!.bookmarked });
+  return Response.json({ version: locals.live.version, entries });
 };

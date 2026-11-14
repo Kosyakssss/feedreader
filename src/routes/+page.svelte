@@ -34,8 +34,8 @@
 
 <svelte:head><title>Lagan</title></svelte:head>
 
+<EntryList {entries} {selection} empty="Nothing unread." />
 {#if entries.length}
-  <EntryList {entries} {selection} />
   <ListActions {selection} words={['Open next', 'Open all']}>
     {#snippet end()}
       {#if touch.current}
@@ -45,6 +45,4 @@
       {/if}
     {/snippet}
   </ListActions>
-{:else}
-  <p>Nothing unread.</p>
 {/if}

@@ -55,12 +55,10 @@
   onpointercancel={(event) => selection?.up(event)}
 />
 
-{#if entries.length}
-  <ol class="entries" class:choosing={selection?.choosing}>
-    {#each entries as entry (entry.id)}
-      <Row {entry} {toggles} {extra} {card} {selection} />
-    {/each}
-  </ol>
-{:else}
-  <p>{empty}</p>
-{/if}
+<!-- Always there, even empty, so the last row to leave still plays its going. -->
+<ol class="entries" class:choosing={selection?.choosing}>
+  {#each entries as entry (entry.id)}
+    <Row {entry} {toggles} {extra} {card} {selection} />
+  {/each}
+</ol>
+{#if !entries.length}<p>{empty}</p>{/if}

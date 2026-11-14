@@ -8,8 +8,9 @@ export const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t +
 
 // A motion that plays before the row closes up, and on as it closes: `play`
 // draws it at a time in milliseconds, given how much of the row's height is
-// left (1 until the closing starts at `closeAt`).
-export type Motion = { play: (ms: number, shown: number) => void; closeAt: number; end?: () => void };
+// left (1 until the closing starts at `closeAt`). Whatever it draws or
+// changes goes with the row.
+export type Motion = { play: (ms: number, shown: number) => void; closeAt: number };
 
 // A part of the row, in the row's own coordinates.
 export type Box = { left: number; top: number; right: number; bottom: number; x: number; y: number };
@@ -114,7 +115,6 @@ export function overlay(item: HTMLElement, width: number, height: number, pad: n
       ctx.ellipse(x, y, radius / Math.sqrt(stretch), radius * Math.sqrt(stretch), 0, 0, Math.PI * 2);
       ctx.fill();
     },
-    remove: () => canvas.remove(),
   };
 }
 

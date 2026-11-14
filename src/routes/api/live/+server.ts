@@ -6,11 +6,11 @@ import type { RequestHandler } from './$types';
 export const GET: RequestHandler = ({ locals, request }) => {
   const encoder = new TextEncoder();
   let stop: (() => void) | undefined;
+  let ended = false;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const send = (text: string) => controller.enqueue(encoder.encode(text));
       send(`event: at\ndata: ${locals.live.version}\n\n`);
-      let ended = false;
       const end = () => {
         if (ended) return;
         ended = true;
@@ -25,7 +25,10 @@ export const GET: RequestHandler = ({ locals, request }) => {
       };
       request.signal.addEventListener('abort', end);
     },
-    cancel: () => stop?.(),
+    cancel: () => {
+      ended = true;
+      stop?.();
+    },
   });
   return new Response(stream, {
     headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' },
