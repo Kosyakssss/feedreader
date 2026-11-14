@@ -6,9 +6,10 @@ export const easeIn = (t: number) => t * t * t;
 export const easeOut = (t: number) => 1 - (1 - t) ** 3;
 export const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
-// A motion that plays before the row closes up: `play` draws it at a time in
-// milliseconds; the closing starts at `closeAt`.
-export type Motion = { play: (ms: number) => void; closeAt: number; end?: () => void };
+// A motion that plays before the row closes up, and on as it closes: `play`
+// draws it at a time in milliseconds, given how much of the row's height is
+// left (1 until the closing starts at `closeAt`).
+export type Motion = { play: (ms: number, shown: number) => void; closeAt: number; end?: () => void };
 
 // A part of the row, in the row's own coordinates.
 export type Box = { left: number; top: number; right: number; bottom: number; x: number; y: number };
@@ -19,11 +20,11 @@ export type Layout = {
   row: HTMLElement; // the .row inside the list item
   title: HTMLElement;
   small: HTMLElement;
-  buttons: HTMLElement;
+  buttons: HTMLElement[];
   leaders: Box;
   titleBox: Box;
   smallBox: Box;
-  buttonsBox: Box;
+  buttonBoxes: Box[];
   spacing: number; // from one leader dot to the next
   dots: number[]; // where each leader dot is across the row
   radius: number;
@@ -41,9 +42,9 @@ export function layout(item: HTMLElement): Layout | null {
   const row = item.querySelector<HTMLElement>('.row');
   const title = item.querySelector<HTMLElement>('.title');
   const small = item.querySelector<HTMLElement>('.meta small');
-  const buttons = item.querySelector<HTMLElement>('.row-buttons');
+  const buttons = [...item.querySelectorAll<HTMLElement>('.row-buttons > *')];
   const leadersEl = item.querySelector<HTMLElement>('.leaders');
-  if (!row || !title || !small || !buttons || !leadersEl) return null;
+  if (!row || !title || !small || !leadersEl) return null;
   const origin = item.getBoundingClientRect();
   const box = (element: Element): Box => {
     const rect = element.getBoundingClientRect();
@@ -72,7 +73,7 @@ export function layout(item: HTMLElement): Layout | null {
     leaders,
     titleBox: box(title),
     smallBox: box(small),
-    buttonsBox: box(buttons),
+    buttonBoxes: buttons.map(box),
     spacing,
     dots: width >= LEADER ? Array.from({ length: count }, (_, n) => leaders.left + spacing * (n + 0.5)) : [],
     radius: RADIUS,
@@ -117,12 +118,21 @@ export function overlay(item: HTMLElement, width: number, height: number, pad: n
   };
 }
 
-// Hides what's outside [from, to] across an element, in row coordinates.
+// Shows only what's between `from` and `to` across an element, in row
+// coordinates, fading out over a few pixels at each end rather than cut.
+const SOFT = 6;
 export function keep(element: HTMLElement, box: Box, from: number, to: number): void {
-  const left = Math.max(0, from - box.left);
-  const right = Math.max(0, box.right - to);
-  element.style.clipPath =
-    left + right >= box.right - box.left ? 'inset(0 100% 0 0)' : `inset(-4px ${right}px -4px ${left}px)`;
+  const width = box.right - box.left;
+  const left = Math.max(from - box.left, -SOFT);
+  const right = Math.min(to - box.left, width + SOFT);
+  const mask =
+    right <= left
+      ? 'linear-gradient(transparent, transparent)'
+      : left <= -SOFT && right >= width + SOFT
+        ? ''
+        : `linear-gradient(to right, transparent ${left}px, black ${left + SOFT}px, black ${right - SOFT}px, transparent ${right}px)`;
+  element.style.maskImage = mask;
+  element.style.webkitMaskImage = mask;
 }
 
 // A path of straight lines, and where along it a distance lands.

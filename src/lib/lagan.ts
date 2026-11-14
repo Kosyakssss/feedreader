@@ -9,15 +9,15 @@
 // with a ring or two and a splash, and the row closes over it.
 import { between, easeIn, easeInOut, easeOut, keep, layout, overlay, path, type Motion } from './dots.ts';
 
-const EAT = 480; // the dots eating both lines
-const REEL = 300; // drawn in, into one
-const HOP = 340; // up, and down into the water
-const SPLASH = 520;
+const EAT = 240; // the dots eating both lines
+const REEL = 150; // drawn in, into one
+const HOP = 200; // up, and down into the water
+const SPLASH = 380; // the rings, spreading as the row closes over them
 
 export function lagan(item: HTMLElement): Motion | null {
   const row = layout(item);
   if (!row || !row.dots.length) return null;
-  const { leaders, titleBox, smallBox, buttonsBox, spacing, radius } = row;
+  const { leaders, titleBox, smallBox, buttonBoxes, spacing, radius } = row;
 
   const my = leaders.y;
   const mx = (leaders.left + leaders.right) / 2;
@@ -29,115 +29,103 @@ export function lagan(item: HTMLElement): Motion | null {
   const water = ty + (my - ty) * 0.55;
 
   // Two halves, from the middle of the leaders round to the middle of the
-  // title, each with its own dots. An odd dot in the middle goes left.
-  const halves = [
-    {
-      path: path([
-        [mx, my],
-        [xl, my],
-        [xl, ty],
-        [cx, ty],
-      ]),
-      start: mx - leaders.left,
-      first: 0,
-    },
-    {
-      path: path([
-        [mx, my],
-        [xr, my],
-        [xr, ty],
-        [cx, ty],
-      ]),
-      start: leaders.right - mx,
-      first: 0,
-    },
-  ];
+  // title, each with its own dots, spaced as the leaders are. An odd dot in
+  // the middle goes left.
   const odd = row.dots.length % 2 === 1;
-  halves[0]!.first = odd ? 0 : spacing / 2;
-  halves[1]!.first = odd ? spacing : spacing / 2;
-  const dots = halves.map((half) => {
-    const along: number[] = [];
-    for (let s = half.first; s <= half.path.length; s += spacing) along.push(s);
-    return along;
+  const halves = [
+    { corners: [xl, my, xl, ty], start: mx - leaders.left, first: odd ? 0 : spacing / 2 },
+    { corners: [xr, my, xr, ty], start: leaders.right - mx, first: odd ? spacing : spacing / 2 },
+  ].map(({ corners: [x1, y1, x2, y2], start, first }) => {
+    const line = path([
+      [mx, my],
+      [x1!, y1!],
+      [x2!, y2!],
+      [cx, ty],
+    ]);
+    const dots: number[] = [];
+    for (let s = first; s <= line.length; s += spacing) dots.push(s);
+    return { line, start, dots, bottom: Math.abs(x1! - mx), title: Math.abs(x1! - mx) + (my - ty) };
   });
-  const metaEnd = [mx - xl, xr - mx]; // where each half leaves the bottom line
-  const titleStart = [metaEnd[0]! + (my - ty), metaEnd[1]! + (my - ty)];
 
   const canvas = overlay(item, row.width, row.height, 40);
-  const leadersEl = item.querySelector<HTMLElement>('.leaders')!;
-  leadersEl.style.visibility = 'hidden';
+  item.querySelector<HTMLElement>('.leaders')!.style.visibility = 'hidden';
 
-  function play(ms: number): void {
+  function play(ms: number, shown: number): void {
     canvas.clear();
-    canvas.ctx.fillStyle = row!.color;
-    canvas.ctx.strokeStyle = row!.color;
-
-    if (ms >= EAT + REEL) {
-      canvas.ctx.fillStyle = row!.ink; // the buoy, gathered from them, is darker than the dots
-      canvas.ctx.strokeStyle = row!.ink;
-    }
+    const { ctx } = canvas;
 
     if (ms < EAT + REEL) {
+      ctx.fillStyle = row!.color;
       const eaten = easeInOut(between(0, EAT, ms));
       const reel = easeIn(between(EAT, EAT + REEL, ms));
-      const fronts = halves.map((half) => half.start + (half.path.length - half.start) * eaten);
+      const fronts = halves.map((half) => half.start + (half.line.length - half.start) * eaten);
 
       halves.forEach((half, n) => {
-        for (const s of dots[n]!) {
+        for (const s of half.dots) {
           if (s > fronts[n]!) break;
-          const grown = between(0, spacing * 1.5, fronts[n]! - s); // a dot pops up as the front reaches it
-          const at = s + (half.path.length - s) * reel;
-          const [x, y] = half.path.at(at);
-          canvas.dot(x, y, radius * easeOut(grown) * (1 + 0.6 * reel));
+          const grown = easeOut(between(0, spacing * 1.5, fronts[n]! - s)); // a dot swells in as the front reaches it
+          const [x, y] = half.line.at(s + (half.line.length - s) * reel);
+          canvas.dot(x, y, radius * grown * (1 + reel), 1 - 0.5 * reel * (1 - s / half.line.length));
         }
       });
+      if (reel) canvas.dot(cx, ty, radius * 2.4 * reel, reel); // the buoy, gathering
 
-      // What the fronts have passed is gone.
+      // What the fronts have passed is gone: the feed and date one way, each
+      // button the other, shrinking away as the front reaches it, and the
+      // title in from both ends.
       const [left, right] = fronts as [number, number];
-      keep(row!.small, smallBox, smallBox.left, left < metaEnd[0]! ? mx - left : -Infinity);
-      keep(row!.buttons, buttonsBox, right < metaEnd[1]! ? mx + right : Infinity, buttonsBox.right);
-      const titleLeft = left > titleStart[0]! ? halves[0]!.path.at(left)[0] : -Infinity;
-      const titleRight = right > titleStart[1]! ? halves[1]!.path.at(right)[0] : Infinity;
-      keep(row!.title, titleBox, titleLeft, titleRight);
+      const [l, r] = halves;
+      keep(row!.small, smallBox, smallBox.left, left < l!.bottom ? mx - left : -Infinity);
+      row!.buttons.forEach((button, n) => {
+        const box = buttonBoxes[n]!;
+        const gone = right < r!.bottom ? between(box.left - mx, box.right - mx, right) : 1;
+        button.style.scale = String(1 - easeIn(gone));
+        button.style.opacity = String(1 - gone);
+      });
+      keep(
+        row!.title,
+        titleBox,
+        left > l!.title ? l!.line.at(left)[0] : -Infinity,
+        right > r!.title ? r!.line.at(right)[0] : Infinity,
+      );
       return;
     }
 
+    ctx.fillStyle = ctx.strokeStyle = row!.ink; // the buoy is darker than the dots it gathered
     const hop = ms - EAT - REEL;
     if (hop < HOP) {
       // Up a little, slowing; then down, quickening, a drop stretched by its fall.
-      const up = 0.38;
+      const up = 0.35;
       const t = hop / HOP;
-      const y = t < up ? ty - 9 * easeOut(t / up) : ty - 9 + (water - ty + 9) * easeIn((t - up) / (1 - up));
       const fall = t < up ? 0 : (t - up) / (1 - up);
-      canvas.dot(cx, y, radius * 2.1, 1, 1 + 0.6 * fall * fall);
+      const y = t < up ? ty - 8 * easeOut(t / up) : ty - 8 + (water - ty + 8) * easeIn(fall);
+      canvas.dot(cx, y, radius * 2.4, 1, 1 + 0.7 * fall * fall);
       return;
     }
 
     // Into the water: rings spreading flat across it, and two drops thrown up.
+    // The water closes up with the row.
     const splash = hop - HOP;
     if (splash > SPLASH) return;
-    const { ctx } = canvas;
+    const surface = water * shown;
     ctx.lineWidth = 1;
     for (const [delay, reach, strength] of [
-      [0, 28, 0.9],
-      [110, 16, 0.6],
+      [0, 30, 0.9],
+      [70, 18, 0.6],
     ] as const) {
-      const t = between(delay, delay + SPLASH - 110, splash);
+      const t = between(delay, SPLASH, splash);
       if (t <= 0 || t >= 1) continue;
-      const rx = 2.5 + reach * easeOut(t);
+      const rx = 3 + reach * easeOut(t);
       ctx.globalAlpha = strength * (1 - t) ** 1.5;
       ctx.beginPath();
-      ctx.ellipse(cx, water, rx, rx * 0.3, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx, surface, rx, rx * 0.3, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
-    const thrown = between(0, 300, splash);
+    const thrown = between(0, 220, splash);
     if (thrown < 1)
-      for (const way of [-1, 1]) {
-        const x = cx + way * 8 * thrown;
-        const y = water - 11 * thrown + 14 * thrown * thrown;
-        canvas.dot(x, y, radius, 1 - thrown);
-      }
+      for (const way of [-1, 1])
+        canvas.dot(cx + way * 8 * thrown, surface - 10 * thrown + 13 * thrown * thrown, radius, 1 - thrown);
   }
 
-  return { play, closeAt: EAT + REEL + HOP + 240, end: canvas.remove };
+  return { play, closeAt: EAT + REEL + HOP, end: canvas.remove };
 }

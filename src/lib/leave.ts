@@ -3,10 +3,8 @@
 // read, it sinks (sink.ts); anything else, it fades and closes up. However it
 // goes, it ends closing up, so the rows after it slide into its place.
 //
-// The gap after the row closes from one gap to none, so the row after it ends
-// exactly a gap below the row before, where it lands once this one goes: rows
-// keep their own gaps, and the gaps either side of an empty row would
-// otherwise add up to two.
+// A row's gap is below it, and closes with it, so the row after ends exactly
+// where it lands once this one is gone: a gap below the row before.
 import { quintOut } from 'svelte/easing'; // the curve of --ease
 import type { TransitionConfig } from 'svelte/transition';
 import { library } from './library.svelte.ts';
@@ -22,14 +20,16 @@ export function sizeOf(row: HTMLElement) {
   return { time: size('--open-time') * 1000, height: size('height'), gap: size('margin-block-end') };
 }
 
-// The closing up, as CSS for how much of it is left to show.
-export function closing(row: HTMLElement) {
+// The closing up, as CSS for how much of it is left to show. A row closing
+// on its own fades and clips. One a motion is drawn over isn't faded or
+// clipped: what it drew carries on as it closes, past its edges, and Svelte
+// would clip the whole motion, not just its end.
+export function closing(row: HTMLElement, plain = true) {
   const { height, gap } = sizeOf(row);
   return (shown: number) => `
-    overflow: ${shown < 1 ? 'hidden' : 'visible'};
-    opacity: ${shown * shown};
+    ${plain ? `overflow: hidden; opacity: ${shown * shown};` : ''}
     height: ${shown * height}px;
-    margin-block-end: ${(2 * shown - 1) * gap}px;
+    margin-block-end: ${shown * gap}px;
   `;
 }
 
@@ -46,16 +46,20 @@ export function depart(row: HTMLElement, before: Entry): TransitionConfig {
   const motion = time && seen ? (why === 'bookmark' ? lagan(row) : why === 'read' ? sink(row) : null) : null;
   if (!motion) return { duration: time, easing: quintOut, css: close };
 
+  // The row's own content has gone by the time it closes, so what is left of
+  // it can't spill over the rows sliding up.
+  const content = row.querySelector<HTMLElement>('.row')!;
+  const draw = closing(row, false);
   const duration = motion.closeAt + time;
+  const shown = (ms: number) => 1 - quintOut(clamp((ms - motion.closeAt) / time));
   let ended = false;
   return {
     duration,
-    css: (left) => {
-      const ms = (1 - left) * duration;
-      return close(1 - quintOut(clamp((ms - motion.closeAt) / time)));
-    },
+    css: (left) => draw(shown((1 - left) * duration)),
     tick: (left) => {
-      motion.play((1 - left) * duration);
+      const ms = (1 - left) * duration;
+      if (ms >= motion.closeAt) content.style.visibility = 'hidden';
+      motion.play(ms, shown(ms));
       if (left === 0 && !ended) {
         ended = true;
         motion.end?.();

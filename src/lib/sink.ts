@@ -4,9 +4,10 @@
 // time, and pop. Then the row closes over where it was.
 import { between, easeOut, layout, overlay, type Motion } from './dots.ts';
 
-const SINK = 460;
-const RISE = 380; // each bubble's
-const LOOSE = 150; // the last bubble comes loose this long after the first
+const SINK = 240;
+const RISE = 260; // each bubble's
+const FIRST = 60; // the first bubble comes loose once the row has started to go under
+const LOOSE = 80; // the last this long after the first
 
 // The same scatter every time, from a dot's place in the line.
 const scatter = (n: number, salt: number) => {
@@ -22,8 +23,8 @@ export function sink(item: HTMLElement): Motion | null {
   const surface = row.leaders.y;
   const bubbles = row.dots.map((x, n) => ({
     x,
-    delay: LOOSE * scatter(n, 1),
-    rise: depth * (0.55 + 0.6 * scatter(n, 2)),
+    delay: FIRST + LOOSE * scatter(n, 1),
+    rise: depth * (0.5 + 0.5 * scatter(n, 2)),
     phase: scatter(n, 3) * Math.PI * 2,
   }));
 
@@ -31,33 +32,33 @@ export function sink(item: HTMLElement): Motion | null {
   item.querySelector<HTMLElement>('.leaders')!.style.visibility = 'hidden';
   const style = row.row.style;
 
-  function play(ms: number): void {
-    const sunk = between(0, SINK, ms) ** 2; // going under, faster as it goes
-    const down = depth * 1.1 * sunk;
+  function play(ms: number, shown: number): void {
+    const t = between(0, SINK, ms);
+    const down = depth * 1.1 * t ** 1.5; // going under, faster as it goes
     style.transform = `translateY(${down}px)`;
     style.clipPath = `inset(-24px -24px ${down}px -24px)`; // the water stays put as the row goes under it
-    style.opacity = String(1 - 0.7 * sunk);
+    style.opacity = String(1 - 0.95 * Math.sqrt(t)); // dimmed at once, so the bubbles rise clear of it
 
     canvas.clear();
-    canvas.ctx.fillStyle = row!.color;
-    canvas.ctx.strokeStyle = row!.color;
-    canvas.ctx.lineWidth = 0.75;
+    const { ctx } = canvas;
+    ctx.fillStyle = ctx.strokeStyle = row!.color;
+    ctx.lineWidth = 0.75;
     for (const bubble of bubbles) {
-      const t = between(bubble.delay, bubble.delay + RISE, ms);
-      if (t >= 1) continue;
-      const y = surface - bubble.rise * easeOut(t);
-      const x = bubble.x + 1.4 * Math.sin(bubble.phase + t * 7) * t;
-      if (t < 0.82) {
-        canvas.dot(x, y, radius * (1 + 0.5 * t));
+      const age = between(bubble.delay, bubble.delay + RISE, ms);
+      if (age >= 1) continue;
+      const y = surface * shown - bubble.rise * easeOut(age); // the water closes up with the row
+      const x = bubble.x + 1.4 * Math.sin(bubble.phase + age * 7) * age;
+      if (age < 0.8) {
+        canvas.dot(x, y, radius * (1 + 0.5 * age));
         continue;
       }
-      const pop = (t - 0.82) / 0.18; // a ring for a moment, where it was
-      canvas.ctx.globalAlpha = 1 - pop;
-      canvas.ctx.beginPath();
-      canvas.ctx.arc(x, y, radius * (1.5 + 1.6 * pop), 0, Math.PI * 2);
-      canvas.ctx.stroke();
+      const pop = (age - 0.8) / 0.2; // a ring for a moment, where it was
+      ctx.globalAlpha = 1 - pop;
+      ctx.beginPath();
+      ctx.arc(x, y, radius * (1.5 + 1.6 * pop), 0, Math.PI * 2);
+      ctx.stroke();
     }
   }
 
-  return { play, closeAt: Math.max(SINK, LOOSE + RISE) - 20, end: canvas.remove };
+  return { play, closeAt: SINK, end: canvas.remove };
 }
